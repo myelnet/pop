@@ -1,14 +1,4 @@
-<h1 align="center">
-<br>
-<font size="7">🦗</font>
-<br>
-<br>
-<br>
-go-hop-exchange
-<br>
-<br>
-<br>
-</h1>
+# 🐇 go-hop-exchange
 
 > An IPFS bytes exchange to allow any IPFS node to become a Filecoin retrieval provider
 > and retrieve content from Filecoin
