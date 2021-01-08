@@ -2,11 +2,12 @@ package hop
 
 import (
 	"github.com/filecoin-project/go-address"
+	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
 )
 
-//go:generate cbor-gen-for Provision QueryResponse Query QueryParams Ask
+//go:generate cbor-gen-for Provision QueryResponse Query QueryParams Ask StorageDataTransferVoucher
 
 // Provision is a message describing new content a provider can decide to store or not
 type Provision struct {
@@ -63,4 +64,14 @@ type Ask struct {
 	PricePerByte            abi.TokenAmount
 	PaymentInterval         uint64
 	PaymentIntervalIncrease uint64
+}
+
+// StorageDataTransferVoucher is a voucher for requesting a node store your content
+type StorageDataTransferVoucher struct {
+	Proposal cid.Cid
+}
+
+// Type satisfies the transfer voucher interface
+func (dv *StorageDataTransferVoucher) Type() datatransfer.TypeIdentifier {
+	return "StorageDataTransferVoucher"
 }
