@@ -8,7 +8,7 @@ require (
 	github.com/filecoin-project/go-data-transfer v1.2.5
 	github.com/filecoin-project/go-state-types v0.0.0-20201203022337-7cab7f0d4bfb
 	github.com/filecoin-project/go-storedcounter v0.0.0-20200421200003-1c99c62e8a5b
-	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1 // indirect
+	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-datastore v0.4.5
