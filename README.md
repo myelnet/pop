@@ -65,7 +65,7 @@ var nodeAddr address.Address
 var ds datastore.Batching
 var gs graphsync.GraphExchange
 
-exch, err := NewHopExchange(
+exch, err := hop.NewExchange(
 		ctx,
 		bstore,
 		ps,
