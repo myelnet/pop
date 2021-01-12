@@ -17,7 +17,7 @@ require (
 	github.com/ipfs/go-ipfs-exchange-interface v0.0.1
 	github.com/ipld/go-ipld-prime v0.5.1-0.20201021195245-109253e8a018
 	github.com/jpillora/backoff v1.0.0
-	github.com/libp2p/go-libp2p-core v0.8.0
+	github.com/libp2p/go-libp2p-core v0.7.0
 	github.com/libp2p/go-libp2p-pubsub v0.4.0
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/whyrusleeping/cbor-gen v0.0.0-20200826160007-0b9f6c5fb163
