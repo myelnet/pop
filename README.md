@@ -37,7 +37,7 @@ $ go get github.com/myelnet/go-hop-exchange
 
 As an IPFS plugin:
 
-> Coming soon!
+[Please follow the instructions in the plugin repo](https://github.com/myelnet/go-ipfs-hop-plugin)
 
 ## Usage
 
