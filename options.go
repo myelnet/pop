@@ -15,7 +15,7 @@ import (
 // WithBlockstore sets the Exchange blockstore
 func WithBlockstore(b blockstore.Blockstore) func(*Exchange) error {
 	return func(e *Exchange) error {
-		e.blockstore = b
+		e.Blockstore = b
 		return nil
 	}
 }
@@ -23,7 +23,7 @@ func WithBlockstore(b blockstore.Blockstore) func(*Exchange) error {
 // WithDatastore sets the underlying datastore
 func WithDatastore(ds datastore.Batching) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.ds = ds
+		ex.Datastore = ds
 		return nil
 	}
 }
@@ -31,7 +31,7 @@ func WithDatastore(ds datastore.Batching) func(*Exchange) error {
 // WithHost sets the Exchange host
 func WithHost(h host.Host) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.host = h
+		ex.Host = h
 		return nil
 	}
 }
@@ -39,7 +39,7 @@ func WithHost(h host.Host) func(*Exchange) error {
 // WithPubSub sets the pubsub interface
 func WithPubSub(ps *pubsub.PubSub) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.ps = ps
+		ex.PubSub = ps
 		return nil
 	}
 }
@@ -47,7 +47,7 @@ func WithPubSub(ps *pubsub.PubSub) func(*Exchange) error {
 // WithFILAddress sets the Filecoin address of the host
 func WithFILAddress(a address.Address) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.selfAddress = a
+		ex.SelfAddress = a
 		return nil
 	}
 }
@@ -69,7 +69,7 @@ func WithRepoPath(rpath string) func(*Exchange) error {
 // WithGraphSync brings the graphsync instance
 func WithGraphSync(gs graphsync.GraphExchange) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.gs = gs
+		ex.GraphSync = gs
 		return nil
 	}
 }
