@@ -19,6 +19,7 @@ import (
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
+	pin "github.com/ipfs/go-ipfs-pinner"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -45,68 +46,68 @@ var DefaultPaymentInterval = uint64(1 << 20)
 var DefaultPaymentIntervalIncrease = uint64(1 << 20)
 
 // NewExchange creates a Hop exchange struct
-func NewExchange(
-	parent context.Context,
-	bstore blockstore.Blockstore,
-	ps *pubsub.PubSub,
-	h host.Host,
-	filAddr address.Address,
-	ds datastore.Batching,
-	gs graphsync.GraphExchange,
-	cidListsDir string,
-) (*Exchange, error) {
-	e := &Exchange{
-		blockstore:  bstore,
-		host:        h,
-		ps:          ps,
-		net:         NewFromLibp2pHost(h),
-		selfAddress: filAddr,
+func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
+
+	ex := &Exchange{}
+	// For ease of customizing all the exchange components
+	for _, option := range options {
+		err := option(ex)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	dtDs := namespace.Wrap(ds, datastore.NewKey("datatransfer"))
-	dtNet := dtnet.NewFromLibp2pHost(h)
-	tp := gstransport.NewTransport(h.ID(), gs)
+	ex.net = NewFromLibp2pHost(ex.Host)
+
+	dtDs := namespace.Wrap(ex.Datastore, datastore.NewKey("datatransfer"))
+	dtNet := dtnet.NewFromLibp2pHost(ex.Host)
+	tp := gstransport.NewTransport(ex.Host.ID(), ex.GraphSync)
 	key := datastore.NewKey("counter")
-	storedCounter := storedcounter.New(ds, key)
+	storedCounter := storedcounter.New(ex.Datastore, key)
 
-	dataTransfer, err := dtfimpl.NewDataTransfer(dtDs, cidListsDir, dtNet, tp, storedCounter)
+	dataTransfer, err := dtfimpl.NewDataTransfer(dtDs, ex.cidListDir, dtNet, tp, storedCounter)
 	if err != nil {
 		return nil, err
 	}
-	e.dataTransfer = dataTransfer
-	err = e.dataTransfer.Start(parent)
+	ex.dataTransfer = dataTransfer
+	err = ex.dataTransfer.Start(ctx)
 	if err != nil {
 		return nil, err
 	}
-	e.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
+	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
-	topic, err := ps.Join(RequestTopic)
+	topic, err := ex.PubSub.Join(RequestTopic)
 	if err != nil {
 		return nil, err
 	}
-	e.reqTopic = topic
+	ex.reqTopic = topic
 
 	sub, err := topic.Subscribe()
 	if err != nil {
 		return nil, err
 	}
-	e.reqSub = sub
-	go e.requestLoop(parent)
+	ex.reqSub = sub
+	go ex.requestLoop(ctx)
 
-	return e, nil
+	return ex, nil
 }
 
 // Exchange is a gossip based exchange for retrieving blocks from Filecoin
 type Exchange struct {
-	blockstore   blockstore.Blockstore
-	ps           *pubsub.PubSub
+	Datastore   datastore.Batching
+	Blockstore  blockstore.Blockstore
+	SelfAddress address.Address
+	Host        host.Host
+	PubSub      *pubsub.PubSub
+	GraphSync   graphsync.GraphExchange
+	Pinner      pin.Pinner
+
 	provTopic    *pubsub.Topic
 	reqSub       *pubsub.Subscription
 	reqTopic     *pubsub.Topic
-	host         host.Host
-	selfAddress  address.Address
 	net          RetrievalMarketNetwork
 	dataTransfer datatransfer.Manager
+	cidListDir   string
 }
 
 // GetBlock gets a single block from a blocks channel
@@ -137,7 +138,7 @@ func (e *Exchange) GetBlock(p context.Context, k cid.Cid) (blocks.Block, error) 
 // GetBlocks creates a new session before getting a stream of blocks
 func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
 	session := &Session{
-		blockstore:   e.blockstore,
+		blockstore:   e.Blockstore,
 		reqTopic:     e.reqTopic,
 		net:          e.net,
 		dataTransfer: e.dataTransfer,
@@ -150,7 +151,7 @@ func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 
 // HasBlock checks if we have the requested block in the store
 func (e *Exchange) HasBlock(bl blocks.Block) error {
-	_, err := e.blockstore.Has(bl.Cid())
+	_, err := e.Blockstore.Has(bl.Cid())
 	return err
 }
 
@@ -162,7 +163,7 @@ func (e *Exchange) IsOnline() bool {
 // NewSession creates a Hop session for streaming blocks
 func (e *Exchange) NewSession(ctx context.Context) exchange.Fetcher {
 	return &Session{
-		blockstore:   e.blockstore,
+		blockstore:   e.Blockstore,
 		reqTopic:     e.reqTopic,
 		net:          e.net,
 		dataTransfer: e.dataTransfer,
@@ -174,7 +175,7 @@ func (e *Exchange) NewSession(ctx context.Context) exchange.Fetcher {
 // Retrieve creates a new session and calls retrieve on specified root cid
 func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID) error {
 	session := &Session{
-		blockstore:   e.blockstore,
+		blockstore:   e.Blockstore,
 		reqTopic:     e.reqTopic,
 		net:          e.net,
 		dataTransfer: e.dataTransfer,
@@ -197,14 +198,14 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		if msg.ReceivedFrom == e.host.ID() {
+		if msg.ReceivedFrom == e.Host.ID() {
 			continue
 		}
 		m := new(Query)
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
-		size, err := e.blockstore.GetSize(m.PayloadCID)
+		size, err := e.Blockstore.GetSize(m.PayloadCID)
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && size > 0 {
@@ -227,7 +228,7 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 	answer := QueryResponse{
 		Status:                     status,
 		Size:                       size,
-		PaymentAddress:             e.selfAddress,
+		PaymentAddress:             e.SelfAddress,
 		MinPricePerByte:            ask.PricePerByte,
 		MaxPaymentInterval:         ask.PaymentInterval,
 		MaxPaymentIntervalIncrease: ask.PaymentIntervalIncrease,
@@ -241,7 +242,7 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 // StartProvisioning is optional and can be called if the node desires
 // to subscribe to new content to server retrieval deals
 func (e *Exchange) StartProvisioning(ctx context.Context) error {
-	topic, err := e.ps.Join(ProvisionTopic)
+	topic, err := e.PubSub.Join(ProvisionTopic)
 	if err != nil {
 		return err
 	}
@@ -258,7 +259,7 @@ func (e *Exchange) StartProvisioning(ctx context.Context) error {
 				return
 			}
 
-			if msg.ReceivedFrom == e.host.ID() {
+			if msg.ReceivedFrom == e.Host.ID() {
 				continue
 			}
 			m := new(Provision)
@@ -270,6 +271,11 @@ func (e *Exchange) StartProvisioning(ctx context.Context) error {
 			if err != nil {
 				// TODO: logging
 				continue
+			}
+			// If we have a Pinner we're probably running in an IPFS node so we need to
+			// tell it not to garbage collect those blocks
+			if e.Pinner != nil {
+				e.Pinner.PinWithMode(m.PayloadCID, pin.Recursive)
 			}
 		}
 	}()
@@ -283,7 +289,7 @@ func (e *Exchange) StartProvisioning(ctx context.Context) error {
 // though may not be convenient.
 // Also could require to pass the size to prevent a blockstore read
 func (e *Exchange) Distribute(ctx context.Context, payload cid.Cid) error {
-	size, err := e.blockstore.GetSize(payload)
+	size, err := e.Blockstore.GetSize(payload)
 	if err != nil {
 		return err
 	}
