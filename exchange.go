@@ -19,6 +19,7 @@ import (
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
+	pin "github.com/ipfs/go-ipfs-pinner"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -45,59 +46,55 @@ var DefaultPaymentInterval = uint64(1 << 20)
 var DefaultPaymentIntervalIncrease = uint64(1 << 20)
 
 // NewExchange creates a Hop exchange struct
-func NewExchange(
-	parent context.Context,
-	bstore blockstore.Blockstore,
-	ps *pubsub.PubSub,
-	h host.Host,
-	filAddr address.Address,
-	ds datastore.Batching,
-	gs graphsync.GraphExchange,
-	cidListsDir string,
-) (*Exchange, error) {
-	e := &Exchange{
-		blockstore:  bstore,
-		host:        h,
-		ps:          ps,
-		net:         NewFromLibp2pHost(h),
-		selfAddress: filAddr,
+func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
+
+	ex := &Exchange{}
+	// For ease of customizing all the exchange components
+	for _, option := range options {
+		err := option(ex)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	dtDs := namespace.Wrap(ds, datastore.NewKey("datatransfer"))
-	dtNet := dtnet.NewFromLibp2pHost(h)
-	tp := gstransport.NewTransport(h.ID(), gs)
+	ex.net = NewFromLibp2pHost(ex.host)
+
+	dtDs := namespace.Wrap(ex.ds, datastore.NewKey("datatransfer"))
+	dtNet := dtnet.NewFromLibp2pHost(ex.host)
+	tp := gstransport.NewTransport(ex.host.ID(), ex.gs)
 	key := datastore.NewKey("counter")
-	storedCounter := storedcounter.New(ds, key)
+	storedCounter := storedcounter.New(ex.ds, key)
 
-	dataTransfer, err := dtfimpl.NewDataTransfer(dtDs, cidListsDir, dtNet, tp, storedCounter)
+	dataTransfer, err := dtfimpl.NewDataTransfer(dtDs, ex.cidListDir, dtNet, tp, storedCounter)
 	if err != nil {
 		return nil, err
 	}
-	e.dataTransfer = dataTransfer
-	err = e.dataTransfer.Start(parent)
+	ex.dataTransfer = dataTransfer
+	err = ex.dataTransfer.Start(ctx)
 	if err != nil {
 		return nil, err
 	}
-	e.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
+	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
-	topic, err := ps.Join(RequestTopic)
+	topic, err := ex.ps.Join(RequestTopic)
 	if err != nil {
 		return nil, err
 	}
-	e.reqTopic = topic
+	ex.reqTopic = topic
 
 	sub, err := topic.Subscribe()
 	if err != nil {
 		return nil, err
 	}
-	e.reqSub = sub
-	go e.requestLoop(parent)
+	ex.reqSub = sub
+	go ex.requestLoop(ctx)
 
-	return e, nil
+	return ex, nil
 }
 
 // Exchange is a gossip based exchange for retrieving blocks from Filecoin
 type Exchange struct {
+	ds           datastore.Batching
 	blockstore   blockstore.Blockstore
 	ps           *pubsub.PubSub
 	provTopic    *pubsub.Topic
@@ -106,7 +103,10 @@ type Exchange struct {
 	host         host.Host
 	selfAddress  address.Address
 	net          RetrievalMarketNetwork
+	gs           graphsync.GraphExchange
 	dataTransfer datatransfer.Manager
+	pinner       pin.Pinner
+	cidListDir   string
 }
 
 // GetBlock gets a single block from a blocks channel
