@@ -272,6 +272,11 @@ func (e *Exchange) StartProvisioning(ctx context.Context) error {
 				// TODO: logging
 				continue
 			}
+			// If we have a Pinner we're probably running in an IPFS node so we need to
+			// tell it not to garbage collect those blocks
+			if e.Pinner != nil {
+				e.Pinner.PinWithMode(m.PayloadCID, pin.Recursive)
+			}
 		}
 	}()
 	e.provTopic = topic
