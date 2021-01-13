@@ -66,13 +66,13 @@ var gs graphsync.GraphExchange
 
 exch, err := hop.NewExchange(
 		ctx,
-		bstore,
-		ps,
-		host,
-		nodeAddr,
-		ds,
-		gs,
-		"ipfs-repo-path/cid-store",
+		hop.WithBlockstore(bstore),
+		hop.WithPubSub(ps),
+		hop.WithHost(host),
+		hop.WithFILAddress(nodeAddr),
+		hop.WithDatastore(ds),
+		hop.WithGraphSync(gs),
+		hop.WithRepoPath("ipfs-repo-path"),
 	)
 
 blocks := bserv.New(bstore, exch)
