@@ -8,6 +8,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	pin "github.com/ipfs/go-ipfs-pinner"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -70,6 +71,14 @@ func WithRepoPath(rpath string) func(*Exchange) error {
 func WithGraphSync(gs graphsync.GraphExchange) func(*Exchange) error {
 	return func(ex *Exchange) error {
 		ex.GraphSync = gs
+		return nil
+	}
+}
+
+// WithPinner brings a custom Pinner interface
+func WithPinner(pinner pin.Pinner) func(*Exchange) error {
+	return func(ex *Exchange) error {
+		ex.Pinner = pinner
 		return nil
 	}
 }
