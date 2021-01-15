@@ -149,10 +149,9 @@ func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 	return session.GetBlocks(ctx, keys)
 }
 
-// HasBlock checks if we have the requested block in the store
+// HasBlock to stay consistent with Bitswap anounces a new block to our peers
 func (e *Exchange) HasBlock(bl blocks.Block) error {
-	_, err := e.Blockstore.Has(bl.Cid())
-	return err
+	return e.Announce(context.Background(), bl.Cid())
 }
 
 // IsOnline just to respect the exchange interface
@@ -205,6 +204,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
+		// GetSize is both a way of checking if we have the block and returning its size
 		size, err := e.Blockstore.GetSize(m.PayloadCID)
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
@@ -284,11 +284,9 @@ func (e *Exchange) StartProvisioning(ctx context.Context) error {
 	return nil
 }
 
-// Distribute content to the network to try and retrieve it later faster
-// TODO: could use a block instead of cid to stay consistent
-// though may not be convenient.
-// Also could require to pass the size to prevent a blockstore read
-func (e *Exchange) Distribute(ctx context.Context, payload cid.Cid) error {
+// Announce content to the network to try and retrieve it later faster
+// TODO: could require to pass the size to prevent a blockstore read
+func (e *Exchange) Announce(ctx context.Context, payload cid.Cid) error {
 	size, err := e.Blockstore.GetSize(payload)
 	if err != nil {
 		return err
