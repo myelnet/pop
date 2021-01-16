@@ -14,6 +14,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 )
 
+//go:generate cbor-gen-for AddRequest
+
 // AddRequestProtocolID labels our network for announcing new content to the network
 const AddRequestProtocolID = protocol.ID("/myel/hop/supply/add/1.0")
 
@@ -89,9 +91,9 @@ type addRequestStream struct {
 
 func (a *addRequestStream) ReadAddRequest() (AddRequest, error) {
 	var m AddRequest
-	// if err := m.UnmarshalCBOR(a.buffered); err != nil {
-	// 	return AddRequest{}, err
-	// }
+	if err := m.UnmarshalCBOR(a.buffered); err != nil {
+		return AddRequest{}, err
+	}
 	return m, nil
 }
 
