@@ -17,6 +17,10 @@ type Supply struct {
 	dt  datatransfer.Manager
 	net *Network
 	man *Manifest
+
+	// Keep track of which of our peers may have a block
+	// Not use for anything else than debugging currently but may be useful eventualy
+	providerPeers map[cid.Cid]*peer.Set
 }
 
 // NewSupply creates a new instance of the SupplyManager
@@ -32,10 +36,11 @@ func NewSupply(
 	net.SetDelegate(manifest)
 	// We wrap it all in our Supply object
 	m := &Supply{
-		h:   h,
-		dt:  dt,
-		net: net,
-		man: manifest,
+		h:             h,
+		dt:            dt,
+		net:           net,
+		man:           manifest,
+		providerPeers: make(map[cid.Cid]*peer.Set),
 	}
 	return m
 }
@@ -64,8 +69,14 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 	defer unsubscribe()
 
 	for i := 0; i < max; i++ {
+		// If we find our own peer id we add an extra peer
+		if peers[i] == s.h.ID() {
+			max++
+			continue
+		}
 		stream, err := s.net.NewAddRequestStream(peers[i])
 		if err != nil {
+			fmt.Println("Unable to create new request stream", err)
 			continue
 		}
 		m := AddRequest{
@@ -79,13 +90,13 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 		}
 		messaged[peers[i]] = true
 	}
+	s.providerPeers[payload] = peer.NewSet()
 	// For for a defined amount of successful transfers
-	var received []peer.ID
 	for i := 0; i < max; i++ {
+		// TODO: add a timeout but not sure how long we can tolerate waiting for peers to pull
 		p := <-c
-		received = append(received, p)
+		s.providerPeers[payload].Add(p)
 	}
-	// TODO: save the peers somewhere?
 
 	return nil
 
