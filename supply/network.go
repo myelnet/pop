@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
+	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/mux"
@@ -26,6 +27,11 @@ const QueryProtocolID = protocol.ID("/myel/hop/supply/query/1.0")
 type AddRequest struct {
 	PayloadCID cid.Cid
 	Size       uint64
+}
+
+// Type defines AddRequest as a datatransfer voucher for pulling the data from the request
+func (a *AddRequest) Type() datatransfer.TypeIdentifier {
+	return "AddRequestVoucher"
 }
 
 // Network handles all the different messaging protocols
@@ -49,7 +55,7 @@ func NewNetwork(h host.Host) *Network {
 }
 
 // NewAddRequestStream to send AddRequest messages to
-func (sn *Network) NewAddRequestStream(dest peer.ID) (*addRequestStream, error) {
+func (sn *Network) NewAddRequestStream(dest peer.ID) (AddRequestStreamer, error) {
 	s, err := sn.host.NewStream(context.Background(), dest, sn.protocols...)
 	if err != nil {
 		return nil, err
@@ -80,7 +86,15 @@ func (sn *Network) handleStream(s network.Stream) {
 
 // StreamReceiver will read the stream and do something in response
 type StreamReceiver interface {
-	HandleAddRequest(*addRequestStream)
+	HandleAddRequest(AddRequestStreamer)
+}
+
+// AddRequestStreamer reads AddRequest structs from a muxed stream
+type AddRequestStreamer interface {
+	ReadAddRequest() (AddRequest, error)
+	WriteAddRequest(AddRequest) error
+	OtherPeer() peer.ID
+	Close() error
 }
 
 type addRequestStream struct {
@@ -103,4 +117,8 @@ func (a *addRequestStream) WriteAddRequest(m AddRequest) error {
 
 func (a *addRequestStream) Close() error {
 	return a.rw.Close()
+}
+
+func (a *addRequestStream) OtherPeer() peer.ID {
+	return a.p
 }
