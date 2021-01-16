@@ -55,8 +55,6 @@ func (ft FakeDTType) Type() datatransfer.TypeIdentifier {
 	return "FakeDTType"
 }
 
-var n int
-
 type TestNode struct {
 	Ds              datastore.Batching
 	Bs              blockstore.Blockstore
@@ -125,11 +123,10 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
 	var err error
-	n++
 	tn.DTStoredCounter = storedcounter.New(tn.Ds, datastore.NewKey("nextDTID"))
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
 	tn.DTStore = namespace.Wrap(tn.Ds, datastore.NewKey("DataTransfer"))
-	tn.DTTmpDir, err = ioutil.TempDir("", fmt.Sprintf("dt-tmp-%v", n))
+	tn.DTTmpDir, err = ioutil.TempDir("", "dt-tmp")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = os.RemoveAll(tn.DTTmpDir)

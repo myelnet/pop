@@ -53,7 +53,7 @@ func TestSendAddRequest(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func(ctx context.Context, c cid.Cid, b []byte) {
-		err := supply.SendAddRequest(ctx, rootCid, uint64(len(b)))
+		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
 		require.NoError(t, err)
 
 		done <- true

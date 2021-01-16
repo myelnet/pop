@@ -61,14 +61,11 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 		max = len(peers)
 	}
 
-	fmt.Println("Connected with peers:", max)
 	// wait for all the peers who pull the data from us
 	c := make(chan peer.ID, max)
-	// save all the peers we messaged
-	messaged := make(map[peer.ID]bool)
 	// listen for datatransfer events to identify the peers who pulled the content
 	unsubscribe := s.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		if channelState.Status() == datatransfer.Completed && messaged[channelState.OtherPeer()] {
+		if channelState.Status() == datatransfer.Completed {
 			c <- channelState.OtherPeer()
 		}
 	})
@@ -95,7 +92,6 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 			fmt.Println("Unable to send addRequest:", err)
 			continue
 		}
-		messaged[peers[i]] = true
 	}
 	s.providerPeers[payload] = peer.NewSet()
 	// For for a defined amount of successful transfers
