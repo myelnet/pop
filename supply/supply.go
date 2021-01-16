@@ -95,7 +95,7 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 	}
 	s.providerPeers[payload] = peer.NewSet()
 	// For for a defined amount of successful transfers
-	for i := 0; i < max; i++ {
+	for i := 0; i < cap(c); i++ {
 		// TODO: add a timeout but not sure how long we can tolerate waiting for peers to pull
 		p := <-c
 		s.providerPeers[payload].Add(p)
