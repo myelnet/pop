@@ -16,10 +16,10 @@ var blockGenerator = blocksutil.NewBlockGenerator()
 
 type testReceiver struct {
 	t             *testing.T
-	streamHandler func(*addRequestStream)
+	streamHandler func(AddRequestStreamer)
 }
 
-func (tr *testReceiver) HandleAddRequest(s *addRequestStream) {
+func (tr *testReceiver) HandleAddRequest(s AddRequestStreamer) {
 	defer s.Close()
 	if tr.streamHandler != nil {
 		tr.streamHandler(s)
@@ -43,7 +43,7 @@ func TestAddRequestStream(t *testing.T) {
 
 	payload := blockGenerator.Next().Cid()
 	done := make(chan bool)
-	tr2 := &testReceiver{t: t, streamHandler: func(s *addRequestStream) {
+	tr2 := &testReceiver{t: t, streamHandler: func(s AddRequestStreamer) {
 		r, err := s.ReadAddRequest()
 		require.NoError(t, err)
 

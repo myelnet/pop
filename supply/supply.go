@@ -6,7 +6,6 @@ import (
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-graphsync"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
@@ -24,10 +23,9 @@ type Supply struct {
 func NewSupply(
 	ctx context.Context,
 	h host.Host,
-	gs graphsync.GraphExchange,
 	dt datatransfer.Manager,
 ) *Supply {
-	manifest := NewManifest(h, dt, gs)
+	manifest := NewManifest(h, dt)
 	// Connect to incoming supply messages form peers
 	net := NewNetwork(h)
 	// Set the manifest to handle our messages
