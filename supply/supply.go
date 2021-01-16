@@ -10,6 +10,11 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
 
+// Manager exposes methods to manage the blocks we can serve as a provider
+type Manager interface {
+	SendAddRequest(context.Context, cid.Cid, uint64) error
+}
+
 // Supply keeps track of the content we store and provide on the network
 // its role is to always seek and supply new and more efficient content to store
 type Supply struct {
@@ -23,8 +28,8 @@ type Supply struct {
 	providerPeers map[cid.Cid]*peer.Set
 }
 
-// NewSupply creates a new instance of the SupplyManager
-func NewSupply(
+// New instance of the SupplyManager
+func New(
 	ctx context.Context,
 	h host.Host,
 	dt datatransfer.Manager,
@@ -45,7 +50,7 @@ func NewSupply(
 	return m
 }
 
-// SendAddRequest to the network until we have a propagated the content to a satisfying amount of peers
+// SendAddRequest to the network until we have propagated the content to enough peers
 func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint64) error {
 	// Get the current connected peers
 	peers := s.h.Peerstore().Peers()

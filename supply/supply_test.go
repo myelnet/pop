@@ -29,7 +29,7 @@ func TestSendAddRequest(t *testing.T) {
 	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
 
-	supply := NewSupply(ctx, n1.Host, n1.Dt)
+	supply := New(ctx, n1.Host, n1.Dt)
 
 	providers := make(map[peer.ID]*testutil.TestNode)
 	var supplies []*Supply
@@ -39,7 +39,7 @@ func TestSendAddRequest(t *testing.T) {
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := NewSupply(ctx, n.Host, n.Dt)
+		s := New(ctx, n.Host, n.Dt)
 
 		providers[n.Host.ID()] = n
 		supplies = append(supplies, s)
