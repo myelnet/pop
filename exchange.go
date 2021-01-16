@@ -10,6 +10,7 @@ import (
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
@@ -23,15 +24,13 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-hop-exchange/supply"
 )
 
 var _ exchange.SessionExchange = (*Exchange)(nil)
 
 // RequestTopic listens for peers looking for content blocks
 const RequestTopic = "/myel/hop/request/1.0"
-
-// ProvisionTopic listens for new content added to the network
-const ProvisionTopic = "/myel/hop/provision/1.0"
 
 // DefaultPricePerByte is the charge per byte retrieved if the miner does
 // not specifically set it
@@ -56,13 +55,14 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 			return nil, err
 		}
 	}
-
+	// Setup the messaging protocol for communicating retrieval deals
 	ex.net = NewFromLibp2pHost(ex.Host)
 
-	dtDs := namespace.Wrap(ex.Datastore, datastore.NewKey("datatransfer"))
+	// Retrieval data transfer setup
+	dtDs := namespace.Wrap(ex.Datastore, datastore.NewKey("retrieval-datatransfer"))
 	dtNet := dtnet.NewFromLibp2pHost(ex.Host)
 	tp := gstransport.NewTransport(ex.Host.ID(), ex.GraphSync)
-	key := datastore.NewKey("counter")
+	key := datastore.NewKey("retrieval-counter")
 	storedCounter := storedcounter.New(ex.Datastore, key)
 
 	dataTransfer, err := dtfimpl.NewDataTransfer(dtDs, ex.cidListDir, dtNet, tp, storedCounter)
@@ -76,6 +76,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	}
 	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
+	// Gossip sub subscription for incoming content queries
 	topic, err := ex.PubSub.Join(RequestTopic)
 	if err != nil {
 		return nil, err
@@ -88,6 +89,26 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	}
 	ex.reqSub = sub
 	go ex.requestLoop(ctx)
+
+	// Setup a separate data transfer instance for supplying new blocks to serve
+	// TODO: not sure if it would be better to reuse the same data transfer manager but it seems
+	// safer to separate the instances in case our supply breaks we can still serve blocks or the other
+	// way around. It is probably better to create isolated store instances for supply and retrieval
+	// transactions. Will improve when I have more evidence.
+	sdtDs := namespace.Wrap(ex.Datastore, datastore.NewKey("supply-datatransfer"))
+	sdtNet := dtnet.NewFromLibp2pHost(ex.Host)
+	stp := gstransport.NewTransport(ex.Host.ID(), ex.GraphSync)
+	skey := datastore.NewKey("supply-counter")
+	sstoredCounter := storedcounter.New(ex.Datastore, skey)
+
+	sdataTransfer, err := dtfimpl.NewDataTransfer(sdtDs, ex.cidListDir, sdtNet, stp, sstoredCounter)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: validate AddRequest
+	sdataTransfer.RegisterVoucherType(&supply.AddRequest{}, &UnifiedRequestValidator{})
+
+	ex.supply = supply.New(ctx, ex.Host, sdataTransfer)
 
 	return ex, nil
 }
@@ -102,6 +123,8 @@ type Exchange struct {
 	GraphSync   graphsync.GraphExchange
 	Pinner      pin.Pinner
 
+	multiStore   *multistore.MultiStore
+	supply       supply.Manager
 	provTopic    *pubsub.Topic
 	reqSub       *pubsub.Subscription
 	reqTopic     *pubsub.Topic
@@ -150,8 +173,13 @@ func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 }
 
 // HasBlock to stay consistent with Bitswap anounces a new block to our peers
+// the name is a bit ambiguous, not to be confused with checking if a block is cached locally
 func (e *Exchange) HasBlock(bl blocks.Block) error {
-	return e.Announce(context.Background(), bl.Cid())
+	size, err := e.Blockstore.GetSize(bl.Cid())
+	if err != nil {
+		return err
+	}
+	return e.supply.SendAddRequest(context.Background(), bl.Cid(), uint64(size))
 }
 
 // IsOnline just to respect the exchange interface
@@ -190,6 +218,7 @@ func (e *Exchange) Close() error {
 }
 
 // requestLoop runs by default in the background when the Hop client is initialized
+// it iterates over new gossip messages and sends a response if we have the block in store
 func (e *Exchange) requestLoop(ctx context.Context) {
 	fmt.Println("waiting for requests")
 	for {
@@ -237,67 +266,4 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 		fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
 		return
 	}
-}
-
-// StartProvisioning is optional and can be called if the node desires
-// to subscribe to new content to server retrieval deals
-func (e *Exchange) StartProvisioning(ctx context.Context) error {
-	topic, err := e.PubSub.Join(ProvisionTopic)
-	if err != nil {
-		return err
-	}
-
-	sub, err := topic.Subscribe()
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for {
-			msg, err := sub.Next(ctx)
-			if err != nil {
-				return
-			}
-
-			if msg.ReceivedFrom == e.Host.ID() {
-				continue
-			}
-			m := new(Provision)
-			if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
-				continue
-			}
-			// TODO: run custom logic to determine if we want to store this content or not
-			err = e.Retrieve(ctx, m.PayloadCID, msg.ReceivedFrom)
-			if err != nil {
-				// TODO: logging
-				continue
-			}
-			// If we have a Pinner we're probably running in an IPFS node so we need to
-			// tell it not to garbage collect those blocks
-			if e.Pinner != nil {
-				e.Pinner.PinWithMode(m.PayloadCID, pin.Recursive)
-			}
-		}
-	}()
-	e.provTopic = topic
-
-	return nil
-}
-
-// Announce content to the network to try and retrieve it later faster
-// TODO: could require to pass the size to prevent a blockstore read
-func (e *Exchange) Announce(ctx context.Context, payload cid.Cid) error {
-	size, err := e.Blockstore.GetSize(payload)
-	if err != nil {
-		return err
-	}
-	m := Provision{
-		PayloadCID: payload,
-		Size:       uint64(size),
-	}
-	buf := new(bytes.Buffer)
-	if err := m.MarshalCBOR(buf); err != nil {
-		return err
-	}
-	return e.provTopic.Publish(ctx, buf.Bytes())
 }
