@@ -218,7 +218,7 @@ func (impl *libp2pRetrievalMarketNetwork) StopHandlingRequests() error {
 func (impl *libp2pRetrievalMarketNetwork) handleNewQueryStream(s network.Stream) {
 	if impl.receiver == nil {
 		fmt.Printf("no receiver set")
-		s.Reset() // nolint: errcheck,gosec
+		s.Reset()
 		return
 	}
 	remotePID := s.Conn().RemotePeer()

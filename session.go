@@ -112,16 +112,14 @@ func AllSelector() iprime.Node {
 // Retrieve an entire dag from the root. TODO: add FIL payment channel
 func (s *Session) Retrieve(ctx context.Context, root cid.Cid, sender peer.ID) error {
 
-	finished := make(chan struct{}, 1)
-	errChan := make(chan datatransfer.Event, 1)
-
+	done := make(chan datatransfer.Event, 1)
 	unsubscribe := s.dataTransfer.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
 		if channelState.Status() == datatransfer.Completed {
-			finished <- struct{}{}
+			done <- event
 
 		}
 		if event.Code == datatransfer.Error {
-			errChan <- event
+			done <- event
 		}
 	})
 	defer unsubscribe()
@@ -132,12 +130,11 @@ func (s *Session) Retrieve(ctx context.Context, root cid.Cid, sender peer.ID) er
 		return err
 	}
 
-	for {
-		select {
-		case <-finished:
-			return nil
-		case event := <-errChan:
+	select {
+	case event := <-done:
+		if event.Code == datatransfer.Error {
 			return fmt.Errorf("Retrieval error: %v", event.Message)
 		}
+		return nil
 	}
 }
