@@ -100,6 +100,6 @@ err := exch.Announce(ctx, root)
 ## Design principles
 
 - Composable: Hop is highly modular and can be combined with any ipfs, data transfer, Filecoin or other exchange systems.
-- Lightweight: we try to limit the size of the build as we are aiming to bring this exchang to mobile devices.
+- Lightweight: we try to limit the size of the build as we are aiming to bring this exchange to mobile devices. We do not import core implementations such as go-ipfs or lotus directly but rely on shared packages.
 - Do one thing well: there are many problems to solve in the decentralized storage space. This package only focuses on
   routing and retrieving content from peers in the most optimal way possible.
