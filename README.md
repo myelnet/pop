@@ -39,21 +39,20 @@ As an IPFS plugin:
 
 [Please follow the instructions in the plugin repo](https://github.com/myelnet/go-ipfs-hop-plugin)
 
-## Usage
+## Library Usage
 
-1. Import the package. You will need to import a few ipfs packages:
+1. Import the package.
 
 ```go
 package main
 
 import (
-	"context"
 	hop "github.com/myelnet/go-hop-exchange"
 )
 
 ```
 
-2. Initialize a blockstore, graphsync, libp2p host and gossipsub subscription
+2. Initialize a blockstore, graphsync, libp2p host and gossipsub subscription.
 
 ```go
 var ctx context.Context
@@ -69,7 +68,6 @@ exch, err := hop.NewExchange(
 		hop.WithBlockstore(bstore),
 		hop.WithPubSub(ps),
 		hop.WithHost(host),
-		hop.WithFILAddress(nodeAddr),
 		hop.WithDatastore(ds),
 		hop.WithGraphSync(gs),
 		hop.WithRepoPath("ipfs-repo-path"),
@@ -80,19 +78,28 @@ dag := dag.NewDAGService(n.blocks)
 
 ```
 
-3. If you want your node to provide blocks for Filecoin you can run the provisioning routine
+3. When getting from the DAG it will automatically query the network
 
 ```go
-var ctx context.Context
-
-exch.StartProvisioning(ctx)
-```
-
-4. When getting from the DAG it will automatically query the network
-
-```go
+var dag ipld.DAGService
 var ctx context.Context
 var root cid.Cid
 
 node, err := dag.Get(ctx, root)
 ```
+
+4. Clients can anounce a new deal they made so the content is propagated to providers
+
+```go
+var ctx context.Context
+var root cid.Cid
+
+err := exch.Announce(ctx, root)
+```
+
+## Design principles
+
+- Composable: Hop is highly modular and can be combined with any ipfs, data transfer, Filecoin or other exchange systems.
+- Lightweight: we try to limit the size of the build as we are aiming to bring this exchang to mobile devices.
+- Do one thing well: there are many problems to solve in the decentralized storage space. This package only focuses on
+  routing and retrieving content from peers in the most optimal way possible.
