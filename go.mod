@@ -5,6 +5,7 @@ go 1.14
 require (
 	github.com/filecoin-project/go-address v0.0.4
 	github.com/filecoin-project/go-cbor-util v0.0.0-20201016124514-d0bbec7bfcc4
+	github.com/filecoin-project/go-crypto v0.0.0-20191218222705-effae4ea9f03
 	github.com/filecoin-project/go-data-transfer v1.2.5
 	github.com/filecoin-project/go-fil-markets v1.1.1
 	github.com/filecoin-project/go-jsonrpc v0.1.2
@@ -20,6 +21,7 @@ require (
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-datastore v0.4.5
 	github.com/ipfs/go-graphsync v0.5.2
+	github.com/ipfs/go-ipfs v0.7.0
 	github.com/ipfs/go-ipfs-blockstore v1.0.3
 	github.com/ipfs/go-ipfs-blocksutil v0.0.1
 	github.com/ipfs/go-ipfs-chunker v0.0.5
@@ -38,7 +40,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
 	github.com/multiformats/go-multiaddr v0.3.1
-	github.com/prometheus/common v0.0.0-20180801064454-c7de2306084e
+	github.com/prometheus/common v0.10.0
 	github.com/stretchr/testify v1.6.1
 	github.com/whyrusleeping/cbor-gen v0.0.0-20200826160007-0b9f6c5fb163
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
