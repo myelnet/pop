@@ -71,3 +71,39 @@ func TestSendAddRequest(t *testing.T) {
 
 	}
 }
+
+// In some rare cases where our node isn't connected to any peer we should still
+// be able to fail gracefully
+func TestSendAddRequestNoPeers(t *testing.T) {
+	bgCtx := context.Background()
+
+	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+	defer cancel()
+
+	mn := mocknet.New(bgCtx)
+
+	n1 := testutil.NewTestNode(mn, t)
+	n1.SetupDataTransfer(bgCtx, t)
+	require.NoError(t, n1.Dt.RegisterVoucherType(&AddRequest{}, &testutil.FakeDTValidator{}))
+
+	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
+	rootCid := link.(cidlink.Link).Cid
+
+	supply := New(ctx, n1.Host, n1.Dt)
+
+	done := make(chan bool, 1)
+	go func(ctx context.Context, c cid.Cid, b []byte) {
+		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
+		require.Equal(t, err, ErrNoPeers)
+
+		done <- true
+
+	}(ctx, rootCid, origBytes)
+
+	select {
+	case <-ctx.Done():
+		t.Error("requests incomplete")
+	case <-done:
+	}
+
+}
