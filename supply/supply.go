@@ -10,6 +10,9 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
 
+// ErrNoPeers when no peers are available to get or send supply to
+var ErrNoPeers = fmt.Errorf("no peers available for supply")
+
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
 	SendAddRequest(context.Context, cid.Cid, uint64) error
@@ -54,6 +57,10 @@ func New(
 func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint64) error {
 	// Get the current connected peers
 	peers := s.h.Peerstore().Peers()
+
+	if len(peers) == 1 && peers[0] == s.h.ID() {
+		return ErrNoPeers
+	}
 	// Set the amount of peers we want to notify
 	max := 6
 	// If we have less peers we adjust accordingly
