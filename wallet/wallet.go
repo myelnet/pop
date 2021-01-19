@@ -90,6 +90,7 @@ func (k *Key) Verify(data []byte, sig []byte) (bool, error) {
 	return true, nil
 }
 
+// NewKeyFromKeyInfo adds public key and address to private key
 func NewKeyFromKeyInfo(ki KeyInfo) (*Key, error) {
 	var err error
 	k := &Key{
@@ -112,6 +113,7 @@ func NewKeyFromKeyInfo(ki KeyInfo) (*Key, error) {
 	return k, nil
 }
 
+// NewKeyFromLibp2p converts a libp2p crypto private key interface into a Key
 func NewKeyFromLibp2p(pk ci.PrivKey) (*Key, error) {
 	var tp KeyType
 	switch pk.Type() {
@@ -144,6 +146,7 @@ type Signer interface {
 type Driver interface {
 	NewKey(context.Context, KeyType) (address.Address, error)
 	Sign(context.Context, address.Address, []byte) (*crypto.Signature, error)
+	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
 }
 
 // IPFS wallet wraps an IPFS keystore
@@ -154,16 +157,22 @@ type IPFS struct {
 	lk sync.Mutex
 }
 
+// NewIPFS creates a new IPFS keystore based wallet implementing the Driver methods
+func NewIPFS(ks keystore.Keystore) Driver {
+	return &IPFS{
+		keystore: ks,
+		keys:     make(map[address.Address]*Key),
+	}
+}
+
+// NewKey generates a brand new key for the given type in our wallet and returns the address
 func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) {
 	i.lk.Lock()
 	defer i.lk.Unlock()
 
-	var sig Signer
-	switch kt {
-	case KTSecp256k1:
-		sig = secpSigner{}
-	default:
-		return address.Undef, fmt.Errorf("key type not supported")
+	sig, err := KeyTypeSig(kt)
+	if err != nil {
+		return address.Undef, err
 	}
 	pk, err := sig.GenPrivate()
 	if err != nil {
@@ -197,6 +206,7 @@ func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) 
 	return k.Address, nil
 }
 
+// Sign a message with the key associated with the given address. Generates a valid Filecoin signature
 func (i *IPFS) Sign(ctx context.Context, addr address.Address, msg []byte) (*crypto.Signature, error) {
 	k, err := i.getKey(addr)
 	if err != nil {
@@ -211,6 +221,18 @@ func (i *IPFS) Sign(ctx context.Context, addr address.Address, msg []byte) (*cry
 		Type: sigType,
 		Data: s,
 	}, nil
+}
+
+func (i *IPFS) Verify(ctx context.Context, k address.Address, msg []byte, sig *crypto.Signature) (bool, error) {
+	signer, err := SigTypeSig(sig.Type)
+	if err != nil {
+		return false, err
+	}
+	err = signer.Verify(sig.Data, k, msg)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (i *IPFS) getKey(addr address.Address) (*Key, error) {
@@ -235,6 +257,27 @@ func (i *IPFS) getKey(addr address.Address) (*Key, error) {
 	return k, nil
 }
 
+// KeyTypeSig selects the signer based on key type
+func KeyTypeSig(typ KeyType) (Signer, error) {
+	switch typ {
+	case KTSecp256k1:
+		return secp{}, nil
+	default:
+		return nil, fmt.Errorf("key type not supported")
+	}
+}
+
+// SigTypeSig selects the signer based on sig type
+func SigTypeSig(st crypto.SigType) (Signer, error) {
+	switch st {
+	case crypto.SigTypeSecp256k1:
+		return secp{}, nil
+	default:
+		return nil, fmt.Errorf("sig type not supported")
+	}
+}
+
+// ActSigType converts a key type to a Filecoin signature type
 func ActSigType(typ KeyType) crypto.SigType {
 	switch typ {
 	case KTBLS:
