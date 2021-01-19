@@ -56,9 +56,14 @@ func New(
 // SendAddRequest to the network until we have propagated the content to enough peers
 func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint64) error {
 	// Get the current connected peers
-	peers := s.h.Peerstore().Peers()
+	var peers []peer.ID
+	for _, pid := range s.h.Peerstore().Peers() {
+		if pid != s.h.ID() {
+			peers = append(peers, pid)
+		}
+	}
 
-	if len(peers) == 1 && peers[0] == s.h.ID() {
+	if len(peers) == 0 {
 		return ErrNoPeers
 	}
 	// Set the amount of peers we want to notify
@@ -80,11 +85,6 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 	defer unsubscribe()
 
 	for i := 0; i < max; i++ {
-		// If we find our own peer id we add an extra peer
-		if peers[i] == s.h.ID() {
-			max++
-			continue
-		}
 		stream, err := s.net.NewAddRequestStream(peers[i])
 		if err != nil {
 			fmt.Println("Unable to create new request stream", err)
