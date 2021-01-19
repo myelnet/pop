@@ -25,6 +25,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange/supply"
+	"github.com/myelnet/go-hop-exchange/wallet"
 )
 
 var _ exchange.SessionExchange = (*Exchange)(nil)
@@ -46,7 +47,7 @@ var DefaultPaymentIntervalIncrease = uint64(1 << 20)
 
 // NewExchange creates a Hop exchange struct
 func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
-
+	var err error
 	ex := &Exchange{}
 	// For ease of customizing all the exchange components
 	for _, option := range options {
@@ -59,17 +60,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	ex.net = NewFromLibp2pHost(ex.Host)
 
 	// Retrieval data transfer setup
-	dtDs := namespace.Wrap(ex.Datastore, datastore.NewKey("retrieval-datatransfer"))
-	dtNet := dtnet.NewFromLibp2pHost(ex.Host)
-	tp := gstransport.NewTransport(ex.Host.ID(), ex.GraphSync)
-	key := datastore.NewKey("retrieval-counter")
-	storedCounter := storedcounter.New(ex.Datastore, key)
-
-	dataTransfer, err := dtfimpl.NewDataTransfer(dtDs, ex.cidListDir, dtNet, tp, storedCounter)
-	if err != nil {
-		return nil, err
-	}
-	ex.dataTransfer = dataTransfer
+	ex.dataTransfer, err = NewDataTransfer(ex.Host, ex.GraphSync, ex.Datastore, "retrieval", ex.cidListDir)
 	err = ex.dataTransfer.Start(ctx)
 	if err != nil {
 		return nil, err
@@ -95,13 +86,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	// safer to separate the instances in case our supply breaks we can still serve blocks or the other
 	// way around. It is probably better to create isolated store instances for supply and retrieval
 	// transactions. Will improve when I have more evidence.
-	sdtDs := namespace.Wrap(ex.Datastore, datastore.NewKey("supply-datatransfer"))
-	sdtNet := dtnet.NewFromLibp2pHost(ex.Host)
-	stp := gstransport.NewTransport(ex.Host.ID(), ex.GraphSync)
-	skey := datastore.NewKey("supply-counter")
-	sstoredCounter := storedcounter.New(ex.Datastore, skey)
-
-	sdataTransfer, err := dtfimpl.NewDataTransfer(sdtDs, ex.cidListDir, sdtNet, stp, sstoredCounter)
+	sdataTransfer, err := NewDataTransfer(ex.Host, ex.GraphSync, ex.Datastore, "supply", ex.cidListDir)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +115,7 @@ type Exchange struct {
 	reqTopic     *pubsub.Topic
 	net          RetrievalMarketNetwork
 	dataTransfer datatransfer.Manager
+	wallet       wallet.Driver
 	cidListDir   string
 }
 
@@ -271,4 +257,20 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 		fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
 		return
 	}
+}
+
+// NewDataTransfer packages together all the things needed for a new manager to work
+func NewDataTransfer(h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
+	// Create a special key for persisting the datatransfer manager state
+	dtDs := namespace.Wrap(ds, datastore.NewKey(dsprefix+"-datatransfer"))
+	// Setup datatransfer network
+	dtNet := dtnet.NewFromLibp2pHost(h)
+	// Setup graphsync transport
+	tp := gstransport.NewTransport(h.ID(), gs)
+	// Make a special key for stored counter
+	key := datastore.NewKey(dsprefix + "-counter")
+	// persist ids for new transfers
+	storedCounter := storedcounter.New(ds, key)
+	// Build the manager
+	return dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
 }

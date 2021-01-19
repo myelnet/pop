@@ -103,3 +103,4 @@ err := exch.Announce(ctx, root)
 - Lightweight: we try to limit the size of the build as we are aiming to bring this exchange to mobile devices. We do not import core implementations such as go-ipfs or lotus directly but rely on shared packages.
 - Do one thing well: there are many problems to solve in the decentralized storage space. This package only focuses on
   routing and retrieving content from peers in the most optimal way possible.
+- KISS: Keep it simple, stupid. We take a naive approach to everything and try not to reinvent the wheel. Filecoin is already complex enough as it is.
