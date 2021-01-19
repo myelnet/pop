@@ -8,9 +8,9 @@ import (
 	"github.com/minio/blake2b-simd"
 )
 
-type secpSigner struct{}
+type secp struct{}
 
-func (secpSigner) GenPrivate() ([]byte, error) {
+func (secp) GenPrivate() ([]byte, error) {
 	priv, err := crypto.GenerateKey()
 	if err != nil {
 		return nil, err
@@ -18,11 +18,11 @@ func (secpSigner) GenPrivate() ([]byte, error) {
 	return priv, nil
 }
 
-func (secpSigner) ToPublic(pk []byte) ([]byte, error) {
+func (secp) ToPublic(pk []byte) ([]byte, error) {
 	return crypto.PublicKey(pk), nil
 }
 
-func (secpSigner) Sign(pk []byte, msg []byte) ([]byte, error) {
+func (secp) Sign(pk []byte, msg []byte) ([]byte, error) {
 	b2sum := blake2b.Sum256(msg)
 	sig, err := crypto.Sign(pk, b2sum[:])
 	if err != nil {
@@ -32,7 +32,7 @@ func (secpSigner) Sign(pk []byte, msg []byte) ([]byte, error) {
 	return sig, nil
 }
 
-func (secpSigner) Verify(sig []byte, a address.Address, msg []byte) error {
+func (secp) Verify(sig []byte, a address.Address, msg []byte) error {
 	b2sum := blake2b.Sum256(msg)
 	pubk, err := crypto.EcRecover(b2sum[:], sig)
 	if err != nil {
