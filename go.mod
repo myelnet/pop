@@ -42,6 +42,8 @@ require (
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/prometheus/common v0.10.0
 	github.com/stretchr/testify v1.6.1
+	github.com/supranational/blst v0.3.2
 	github.com/whyrusleeping/cbor-gen v0.0.0-20200826160007-0b9f6c5fb163
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
+	gotest.tools v2.2.0+incompatible
 )
