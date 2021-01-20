@@ -61,6 +61,7 @@ var ps *pubsub.PubSub
 var host libp2p.Host
 var ds datastore.Batching
 var gs graphsync.GraphExchange
+var ks keystore.Keystore
 
 exch, err := hop.NewExchange(
 		ctx,
@@ -70,6 +71,13 @@ exch, err := hop.NewExchange(
 		hop.WithDatastore(ds),
 		hop.WithGraphSync(gs),
 		hop.WithRepoPath("ipfs-repo-path"),
+		hop.WithKeystore(ks),
+		hop.WithFilecoinAPI(
+			"wss://filecoin.infura.io",
+			http.Header{
+				"Authorisation": []string{"Basic <mytoken>"},
+			},
+		)
 	)
 
 blocks := bserv.New(bstore, exch)
