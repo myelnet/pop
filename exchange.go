@@ -57,6 +57,9 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 			return nil, err
 		}
 	}
+	// Start our lotus api.
+	// TODO: add a Type to fEndpoint so we can config what type of implementation we want
+	// to connect to. Should be fine for now.
 	ex.fAPI, err = filecoin.NewLotusRPC(ctx, ex.fEndpoint.Address, ex.fEndpoint.Header)
 	if err != nil {
 		return nil, err
