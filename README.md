@@ -59,7 +59,6 @@ var ctx context.Context
 var bstore blockstore.Blockstore
 var ps *pubsub.PubSub
 var host libp2p.Host
-var nodeAddr address.Address
 var ds datastore.Batching
 var gs graphsync.GraphExchange
 
