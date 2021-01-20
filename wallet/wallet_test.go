@@ -9,7 +9,7 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-ipfs/keystore"
-	fil "github.com/myelnet/go-hop-exchange/lotus"
+	fil "github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/stretchr/testify/require"
 )
 

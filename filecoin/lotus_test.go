@@ -1,4 +1,4 @@
-package lotus
+package filecoin
 
 import (
 	"context"
@@ -66,11 +66,11 @@ func TestRPC(t *testing.T) {
 	ctx, cancel := context.WithCancel(bgCtx)
 	defer cancel()
 
-	api, closer, err := NewRPC(ctx, listenAddr, http.Header{})
+	api, err := NewLotusRPC(ctx, listenAddr, http.Header{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer closer()
+	defer api.Close()
 
 	head, err := api.ChainHead(ctx)
 	if err != nil {

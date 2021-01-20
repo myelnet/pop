@@ -1,4 +1,4 @@
-package lotus
+package filecoin
 
 import (
 	"bytes"
