@@ -1,6 +1,7 @@
 package hop
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
 
@@ -89,6 +91,17 @@ func WithGraphSync(gs graphsync.GraphExchange) func(*Exchange) error {
 func WithPinner(pinner pin.Pinner) func(*Exchange) error {
 	return func(ex *Exchange) error {
 		ex.Pinner = pinner
+		return nil
+	}
+}
+
+// WithFilecoinAPI sets the api endpoint and auth token for a remote filecoin node
+func WithFilecoinAPI(addr string, header http.Header) func(*Exchange) error {
+	return func(ex *Exchange) error {
+		ex.fEndpoint = filecoin.APIEndpoint{
+			Address: addr,
+			Header:  header,
+		}
 		return nil
 	}
 }
