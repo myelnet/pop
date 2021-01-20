@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
@@ -55,6 +56,13 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 		if err != nil {
 			return nil, err
 		}
+	}
+	// Start our lotus api.
+	// TODO: add a Type to fEndpoint so we can config what type of implementation we want
+	// to connect to. Should be fine for now.
+	ex.fAPI, err = filecoin.NewLotusRPC(ctx, ex.fEndpoint.Address, ex.fEndpoint.Header)
+	if err != nil {
+		return nil, err
 	}
 	// Setup the messaging protocol for communicating retrieval deals
 	ex.net = NewFromLibp2pHost(ex.Host)
@@ -117,6 +125,9 @@ type Exchange struct {
 	dataTransfer datatransfer.Manager
 	wallet       wallet.Driver
 	cidListDir   string
+	// filecoin api
+	fAPI      filecoin.API
+	fEndpoint filecoin.APIEndpoint
 }
 
 // GetBlock gets a single block from a blocks channel
@@ -205,6 +216,7 @@ func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID) e
 
 // Close the Hop exchange
 func (e *Exchange) Close() error {
+	e.fAPI.Close()
 	return nil
 }
 
