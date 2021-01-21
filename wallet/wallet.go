@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/filecoin-project/go-address"
@@ -166,6 +168,7 @@ type Driver interface {
 	NewKey(context.Context, KeyType) (address.Address, error)
 	DefaultAddress() (address.Address, error)
 	SetDefaultAddress(address.Address) error
+	List() ([]address.Address, error)
 	ImportKey(context.Context, *KeyInfo) (address.Address, error)
 	Sign(context.Context, address.Address, []byte) (*crypto.Signature, error)
 	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
@@ -268,6 +271,35 @@ func (i *IPFS) SetDefaultAddress(addr address.Address) error {
 	}
 
 	return nil
+}
+
+// List all the addresses in the wallet
+func (i *IPFS) List() ([]address.Address, error) {
+	all, err := i.keystore.List()
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Strings(all)
+
+	added := make(map[address.Address]bool)
+	var list []address.Address
+	for _, a := range all {
+		if strings.HasPrefix(a, KNamePrefix) {
+			name := strings.TrimPrefix(a, KNamePrefix)
+			addr, err := address.NewFromString(name)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := added[addr]; ok {
+				continue
+			}
+			added[addr] = true
+			list = append(list, addr)
+		}
+	}
+
+	return list, nil
 }
 
 // ImportKey in the wallet from a private key and key type
