@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 
 	"github.com/filecoin-project/go-address"
@@ -95,6 +96,14 @@ func TestDefaultAddress(t *testing.T) {
 	def, err = w.DefaultAddress()
 	require.NoError(t, err)
 	require.Equal(t, addr2, def)
+
+	expected := []address.Address{addr1, addr2}
+	sort.Slice(expected, func(i, j int) bool {
+		return expected[i].String() < expected[j].String()
+	})
+	list, err := w.List()
+	require.NoError(t, err)
+	require.Equal(t, expected, list)
 }
 
 func TestImportKey(t *testing.T) {
