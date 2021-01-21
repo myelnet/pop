@@ -140,10 +140,15 @@ func NewKeyFromLibp2p(pk ci.PrivKey) (*Key, error) {
 	if err != nil {
 		return nil, err
 	}
+	sig, err := KeyTypeSig(tp)
+	if err != nil {
+		return nil, err
+	}
 	// Hopefully we don't get an error?
 	ki := KeyInfo{
 		KType:      tp,
 		PrivateKey: raw,
+		sig:        sig,
 	}
 	return NewKeyFromKeyInfo(ki)
 }
@@ -159,10 +164,12 @@ type Signer interface {
 //Driver is a lightweight interface to control any available keychain and interact with blockchains
 type Driver interface {
 	NewKey(context.Context, KeyType) (address.Address, error)
+	DefaultAddress() (address.Address, error)
+	SetDefaultAddress(address.Address) error
 	ImportKey(context.Context, *KeyInfo) (address.Address, error)
 	Sign(context.Context, address.Address, []byte) (*crypto.Signature, error)
 	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
-	GetBalance(context.Context, address.Address) (fil.BigInt, error)
+	Balance(context.Context, address.Address) (fil.BigInt, error)
 	Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error
 }
 
@@ -226,6 +233,43 @@ func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) 
 	return k.Address, nil
 }
 
+// DefaultAddress of the wallet used for receiving payments as provider and paying when retrieving
+func (i *IPFS) DefaultAddress() (address.Address, error) {
+	i.lk.Lock()
+	defer i.lk.Unlock()
+
+	k, err := i.keystore.Get(KDefault)
+	if err != nil {
+		return address.Undef, err
+	}
+
+	key, err := NewKeyFromLibp2p(k)
+	if err != nil {
+		return address.Undef, err
+	}
+
+	return key.Address, nil
+}
+
+// SetDefaultAddress for receiving and sending payments as provider or client
+func (i *IPFS) SetDefaultAddress(addr address.Address) error {
+	i.lk.Lock()
+	defer i.lk.Unlock()
+
+	k, err := i.keystore.Get(KNamePrefix + addr.String())
+	if err != nil {
+		return err
+	}
+
+	_ = i.keystore.Delete(KDefault)
+
+	if err := i.keystore.Put(KDefault, k); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // ImportKey in the wallet from a private key and key type
 func (i *IPFS) ImportKey(ctx context.Context, k *KeyInfo) (address.Address, error) {
 	i.lk.Lock()
@@ -264,6 +308,7 @@ func (i *IPFS) Sign(ctx context.Context, addr address.Address, msg []byte) (*cry
 	}, nil
 }
 
+// Verify a signature for the given bytes
 func (i *IPFS) Verify(ctx context.Context, k address.Address, msg []byte, sig *crypto.Signature) (bool, error) {
 	signer, err := SigTypeSig(sig.Type)
 	if err != nil {
@@ -336,8 +381,8 @@ func ActSigType(typ KeyType) crypto.SigType {
 
 // ------------------ Filecoin Methods -------------------------
 
-// GetBalance for a given address
-func (i *IPFS) GetBalance(ctx context.Context, addr address.Address) (fil.BigInt, error) {
+// Balance for a given address
+func (i *IPFS) Balance(ctx context.Context, addr address.Address) (fil.BigInt, error) {
 	if i.fAPI == nil {
 		return big.Zero(), ErrNoAPI
 	}
