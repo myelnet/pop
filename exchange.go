@@ -21,6 +21,7 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	pin "github.com/ipfs/go-ipfs-pinner"
+	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -64,6 +65,8 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	if err != nil {
 		return nil, err
 	}
+	// Set wallet from IPFS Keystore, we should make this more generic eventually
+	ex.wallet = wallet.NewIPFS(ex.Keystore, ex.fAPI)
 	// Setup the messaging protocol for communicating retrieval deals
 	ex.net = NewFromLibp2pHost(ex.Host)
 
@@ -108,6 +111,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 
 // Exchange is a gossip based exchange for retrieving blocks from Filecoin
 type Exchange struct {
+	// TODO: prob should move these to an Option struct and select what we need
 	Datastore   datastore.Batching
 	Blockstore  blockstore.Blockstore
 	SelfAddress address.Address
@@ -115,6 +119,7 @@ type Exchange struct {
 	PubSub      *pubsub.PubSub
 	GraphSync   graphsync.GraphExchange
 	Pinner      pin.Pinner
+	Keystore    keystore.Keystore
 
 	multiStore   *multistore.MultiStore
 	supply       supply.Manager

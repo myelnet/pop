@@ -14,7 +14,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
 )
 
 // WithBlockstore sets the Exchange blockstore
@@ -36,7 +35,7 @@ func WithDatastore(ds datastore.Batching) func(*Exchange) error {
 // WithKeystore sets an IPFS keystore as the underlying key storage solution
 func WithKeystore(ks keystore.Keystore) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.wallet = wallet.NewIPFS(ks)
+		ex.Keystore = ks
 		return nil
 	}
 }

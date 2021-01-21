@@ -11,7 +11,6 @@ import (
 
 // API declares minimum required methods for interacting with the Filecoin Blockchain
 // We can support different filecoin implementations such as lotus or venus
-// TODO: rename this Client?
 type API interface {
 	ChainHead(context.Context) (*TipSet, error)
 	GasEstimateMessageGas(context.Context, *Message, *MessageSendSpec, TipSetKey) (*Message, error)
