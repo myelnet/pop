@@ -11,7 +11,6 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
@@ -21,6 +20,7 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	pin "github.com/ipfs/go-ipfs-pinner"
+	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -33,18 +33,6 @@ var _ exchange.SessionExchange = (*Exchange)(nil)
 
 // RequestTopic listens for peers looking for content blocks
 const RequestTopic = "/myel/hop/request/1.0"
-
-// DefaultPricePerByte is the charge per byte retrieved if the miner does
-// not specifically set it
-var DefaultPricePerByte = abi.NewTokenAmount(2)
-
-// DefaultPaymentInterval is the baseline interval, set to 1Mb
-// if the miner does not explicitly set it otherwise
-var DefaultPaymentInterval = uint64(1 << 20)
-
-// DefaultPaymentIntervalIncrease is the amount interval increases on each payment,
-// set to to 1Mb if the miner does not explicitly set it otherwise
-var DefaultPaymentIntervalIncrease = uint64(1 << 20)
 
 // NewExchange creates a Hop exchange struct
 func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
@@ -64,6 +52,8 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	if err != nil {
 		return nil, err
 	}
+	// Set wallet from IPFS Keystore, we should make this more generic eventually
+	ex.wallet = wallet.NewIPFS(ex.Keystore, ex.fAPI)
 	// Setup the messaging protocol for communicating retrieval deals
 	ex.net = NewFromLibp2pHost(ex.Host)
 
@@ -108,6 +98,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 
 // Exchange is a gossip based exchange for retrieving blocks from Filecoin
 type Exchange struct {
+	// TODO: prob should move these to an Option struct and select what we need
 	Datastore   datastore.Batching
 	Blockstore  blockstore.Blockstore
 	SelfAddress address.Address
@@ -115,6 +106,7 @@ type Exchange struct {
 	PubSub      *pubsub.PubSub
 	GraphSync   graphsync.GraphExchange
 	Pinner      pin.Pinner
+	Keystore    keystore.Keystore
 
 	multiStore   *multistore.MultiStore
 	supply       supply.Manager
@@ -269,6 +261,11 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 		fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
 		return
 	}
+}
+
+// Wallet returns the wallet instance funding the exchange
+func (e *Exchange) Wallet() wallet.Driver {
+	return e.wallet
 }
 
 // NewDataTransfer packages together all the things needed for a new manager to work
