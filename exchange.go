@@ -11,7 +11,6 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
@@ -34,18 +33,6 @@ var _ exchange.SessionExchange = (*Exchange)(nil)
 
 // RequestTopic listens for peers looking for content blocks
 const RequestTopic = "/myel/hop/request/1.0"
-
-// DefaultPricePerByte is the charge per byte retrieved if the miner does
-// not specifically set it
-var DefaultPricePerByte = abi.NewTokenAmount(2)
-
-// DefaultPaymentInterval is the baseline interval, set to 1Mb
-// if the miner does not explicitly set it otherwise
-var DefaultPaymentInterval = uint64(1 << 20)
-
-// DefaultPaymentIntervalIncrease is the amount interval increases on each payment,
-// set to to 1Mb if the miner does not explicitly set it otherwise
-var DefaultPaymentIntervalIncrease = uint64(1 << 20)
 
 // NewExchange creates a Hop exchange struct
 func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
@@ -276,7 +263,7 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 	}
 }
 
-// Wallet returns the wallet instance powering the exchange
+// Wallet returns the wallet instance funding the exchange
 func (e *Exchange) Wallet() wallet.Driver {
 	return e.wallet
 }
