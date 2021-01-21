@@ -96,12 +96,24 @@ node, err := dag.Get(ctx, root)
 ```
 
 4. Clients can anounce a new deal they made so the content is propagated to providers
+this is also called when adding a block with `dag.Add`.
 
 ```go
 var ctx context.Context
 var root cid.Cid
 
 err := exch.Announce(ctx, root)
+```
+
+5. We're also exposing convenience methods to transfer funds or import keys to the underlying wallet
+
+```go
+var ctx context.Context
+var to address.Address
+
+from, err := exch.Wallet().DefaultAddress() 
+
+err = exch.Wallet().Transfer(ctx, from, to, "12.5")
 ```
 
 ## Design principles

@@ -276,6 +276,11 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 	}
 }
 
+// Wallet returns the wallet instance powering the exchange
+func (e *Exchange) Wallet() wallet.Driver {
+	return e.wallet
+}
+
 // NewDataTransfer packages together all the things needed for a new manager to work
 func NewDataTransfer(h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
 	// Create a special key for persisting the datatransfer manager state
