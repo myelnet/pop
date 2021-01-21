@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/filecoin-project/go-state-types/big"
+	"github.com/ipfs/go-cid"
+	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	"github.com/ipfs/go-ipfs/keystore"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/stretchr/testify/require"
 )
+
+var blockGenerator = blocksutil.NewBlockGenerator()
 
 func TestSecpSignature(t *testing.T) {
 	ctx := context.Background()
@@ -82,4 +89,72 @@ func TestImportKey(t *testing.T) {
 	}
 	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
 	require.Equal(t, expected, addr)
+}
+
+type testLotusNode struct{}
+
+func (tln *testLotusNode) GasEstimateMessageGas(ctx context.Context, msg *fil.Message, spec *fil.MessageSendSpec, tsk fil.TipSetKey) (*fil.Message, error) {
+	msg.GasLimit = int64(123)
+	msg.GasPremium = fil.NewInt(234)
+	msg.GasFeeCap = fil.NewInt(345)
+	return msg, nil
+}
+
+func (tln *testLotusNode) StateGetActor(ctx context.Context, addr address.Address, tsk fil.TipSetKey) (*fil.Actor, error) {
+	return &fil.Actor{
+		Code:    blockGenerator.Next().Cid(),
+		Head:    blockGenerator.Next().Cid(),
+		Nonce:   uint64(7),
+		Balance: fil.NewInt(30),
+	}, nil
+}
+
+func (tln *testLotusNode) MpoolPush(ctx context.Context, msg *fil.SignedMessage) (cid.Cid, error) {
+	return blockGenerator.Next().Cid(), nil
+}
+
+func (tln *testLotusNode) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64) (*fil.MsgLookup, error) {
+	return &fil.MsgLookup{
+		Message: c,
+		Receipt: fil.MessageReceipt{
+			ExitCode: 0,
+		},
+	}, nil
+}
+
+func TestTransfer(t *testing.T) {
+	rpcServer := jsonrpc.NewServer()
+	handler := &testLotusNode{}
+	rpcServer.Register("Filecoin", handler)
+	testServ := httptest.NewServer(rpcServer)
+
+	addr := testServ.Listener.Addr()
+	listenAddr := "ws://" + addr.String()
+
+	bgCtx := context.Background()
+
+	ctx, cancel := context.WithCancel(bgCtx)
+	defer cancel()
+
+	api, err := fil.NewLotusRPC(ctx, listenAddr, http.Header{})
+	if err != nil {
+		t.Fatal(ctx)
+	}
+	defer api.Close()
+	ks := keystore.NewMemKeystore()
+
+	w := NewIPFS(ks, api)
+
+	addr1, err := w.NewKey(ctx, KTSecp256k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr2, err := w.NewKey(ctx, KTSecp256k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = w.Transfer(ctx, addr1, addr2, "12")
+	require.NoError(t, err)
 }
