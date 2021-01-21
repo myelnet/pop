@@ -7,11 +7,16 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/crypto"
 	"github.com/ipfs/go-ipfs/keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
+	fil "github.com/myelnet/go-hop-exchange/filecoin"
 )
+
+var ErrNoAPI = fmt.Errorf("no filecoin api connected")
 
 const (
 	KNamePrefix = "wallet-"
@@ -157,21 +162,26 @@ type Driver interface {
 	ImportKey(context.Context, *KeyInfo) (address.Address, error)
 	Sign(context.Context, address.Address, []byte) (*crypto.Signature, error)
 	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
+	GetBalance(context.Context, address.Address) (fil.BigInt, error)
+	Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error
 }
 
 // IPFS wallet wraps an IPFS keystore
 type IPFS struct {
 	keystore keystore.Keystore
 	keys     map[address.Address]*Key // cache so we don't read from the Keystore too much
+	// API to interact with Filecoin chain
+	fAPI fil.API
 
 	lk sync.Mutex
 }
 
 // NewIPFS creates a new IPFS keystore based wallet implementing the Driver methods
-func NewIPFS(ks keystore.Keystore) Driver {
+func NewIPFS(ks keystore.Keystore, f fil.API) Driver {
 	return &IPFS{
 		keystore: ks,
 		keys:     make(map[address.Address]*Key),
+		fAPI:     f,
 	}
 }
 
@@ -218,6 +228,9 @@ func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) 
 
 // ImportKey in the wallet from a private key and key type
 func (i *IPFS) ImportKey(ctx context.Context, k *KeyInfo) (address.Address, error) {
+	i.lk.Lock()
+	defer i.lk.Unlock()
+
 	sig, err := KeyTypeSig(k.KType)
 	if err != nil {
 		return address.Undef, err
@@ -319,4 +332,85 @@ func ActSigType(typ KeyType) crypto.SigType {
 	default:
 		return crypto.SigTypeUnknown
 	}
+}
+
+// ------------------ Filecoin Methods -------------------------
+
+// GetBalance for a given address
+func (i *IPFS) GetBalance(ctx context.Context, addr address.Address) (fil.BigInt, error) {
+	if i.fAPI == nil {
+		return big.Zero(), ErrNoAPI
+	}
+	state, err := i.fAPI.StateReadState(ctx, addr, fil.EmptyTSK)
+	if err != nil {
+		return big.Zero(), err
+	}
+	return state.Balance, nil
+}
+
+// Transfer from an address in our wallet to any given address
+// FIL amount is passed as a human readable string
+// this methods blocks execution until the transaction was seen on chain
+func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error {
+	if i.fAPI == nil {
+		return ErrNoAPI
+	}
+	// Immediately fail if we don't have the address to avoid unnecessary requests
+	if _, err := i.getKey(from); err != nil {
+		return err
+	}
+
+	val, err := fil.ParseFIL(amount)
+	if err != nil {
+		return err
+	}
+
+	method := abi.MethodNum(uint64(0))
+	msg := &fil.Message{
+		From:   from,
+		To:     to,
+		Value:  fil.BigInt(val),
+		Method: method,
+	}
+
+	msg, err = i.fAPI.GasEstimateMessageGas(ctx, msg, nil, fil.EmptyTSK)
+	if err != nil {
+		return err
+	}
+
+	act, err := i.fAPI.StateGetActor(ctx, msg.From, fil.EmptyTSK)
+	if err != nil {
+		return err
+	}
+	msg.Nonce = act.Nonce
+
+	mbl, err := msg.ToStorageBlock()
+	if err != nil {
+		return err
+	}
+
+	sig, err := i.Sign(ctx, msg.From, mbl.Cid().Bytes())
+	if err != nil {
+		return err
+	}
+
+	smsg := &fil.SignedMessage{
+		Message:   *msg,
+		Signature: *sig,
+	}
+
+	if _, err := i.fAPI.MpoolPush(ctx, smsg); err != nil {
+		return fmt.Errorf("MpoolPush failed with error: %v", err)
+	}
+
+	mwait, err := i.fAPI.StateWaitMsg(ctx, smsg.Cid(), uint64(5))
+	if err != nil {
+		return fmt.Errorf("Failed to wait for msg: %s", err)
+	}
+
+	if mwait.Receipt.ExitCode != 0 {
+		return fmt.Errorf("Tx failed (exit code %d)", mwait.Receipt.ExitCode)
+	}
+
+	return nil
 }
