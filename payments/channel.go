@@ -3,12 +3,19 @@ package payments
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
+	cbortypes "github.com/filecoin-project/go-state-types/cbor"
+	"github.com/filecoin-project/specs-actors/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/actors/util/adt"
 	init2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/init"
 	"github.com/hannahhoward/go-pubsub"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/go-hop-exchange/filecoin"
@@ -22,7 +29,7 @@ type channel struct {
 	ctx           context.Context
 	api           filecoin.API
 	wal           wallet.Driver
-	actStore      cbor.IpldStore
+	actStore      *cbor.BasicIpldStore
 	store         *Store
 	lk            *multiLock
 	fundsReqQueue []*fundsReq
@@ -269,6 +276,147 @@ func (ch *channel) waitAddFundsMsg(channelID string, mcid cid.Cid) error {
 	})
 
 	return nil
+}
+
+// load the actor state from the lotus chain when we don't have a record of it locally
+func (ch *channel) loadActorState(chAddr address.Address) (ChannelState, error) {
+	actorState, err := ch.api.StateReadState(ch.ctx, chAddr, filecoin.EmptyTSK)
+
+	// TODO: this is a hack to cast the types into the proper data model
+	// there's probably a nicer way to do it
+	stateEncod, err := json.Marshal(actorState.State)
+
+	adtStore := adt.WrapStore(ch.ctx, ch.actStore)
+	state := channelState{store: adtStore}
+	err = json.Unmarshal(stateEncod, &state)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing actor state: %v", err)
+	}
+
+	raw, err := ch.api.ChainReadObj(ch.ctx, state.LaneStates)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to read lane states from chain: %v", err)
+	}
+
+	block, err := blocks.NewBlockWithCid(raw, state.LaneStates)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to make a block with obj: %v", err)
+	}
+
+	if err := ch.actStore.Blocks.Put(block); err != nil {
+		return nil, fmt.Errorf("Unable to set block in store: %v", err)
+	}
+
+	return &state, nil
+}
+
+// ChannelState is an abstract version of payment channel state that works across
+// versions. TODO: we need to handle future actor version upgrades
+type ChannelState interface {
+	cbortypes.Marshaler
+	// Channel owner, who has funded the actor
+	From() (address.Address, error)
+	// Recipient of payouts from channel
+	To() (address.Address, error)
+
+	// Height at which the channel can be `Collected`
+	SettlingAt() (abi.ChainEpoch, error)
+
+	// Amount successfully redeemed through the payment channel, paid out on `Collect()`
+	ToSend() (abi.TokenAmount, error)
+
+	// Get total number of lanes
+	LaneCount() (uint64, error)
+
+	// Iterate lane states
+	ForEachLaneState(cb func(idx uint64, dl LaneState) error) error
+}
+
+// channelState struct is a model for interacting with the payment channel actor state
+type channelState struct {
+	paych.State
+	store adt.Store
+	lsAmt *adt.Array
+}
+
+// Channel owner, who has funded the actor
+func (s *channelState) From() (address.Address, error) {
+	return s.State.From, nil
+}
+
+// Recipient of payouts from channel
+func (s *channelState) To() (address.Address, error) {
+	return s.State.To, nil
+}
+
+// Height at which the channel can be `Collected`
+func (s *channelState) SettlingAt() (abi.ChainEpoch, error) {
+	return s.State.SettlingAt, nil
+}
+
+// Amount successfully redeemed through the payment channel, paid out on `Collect()`
+func (s *channelState) ToSend() (abi.TokenAmount, error) {
+	return s.State.ToSend, nil
+}
+
+func (s *channelState) getOrLoadLsAmt() (*adt.Array, error) {
+	if s.lsAmt != nil {
+		return s.lsAmt, nil
+	}
+
+	// Get the lane state from the chain
+	lsamt, err := adt.AsArray(s.store, s.State.LaneStates)
+	if err != nil {
+		return nil, err
+	}
+
+	s.lsAmt = lsamt
+	return lsamt, nil
+}
+
+// Get total number of lanes
+func (s *channelState) LaneCount() (uint64, error) {
+	lsamt, err := s.getOrLoadLsAmt()
+	if err != nil {
+		return 0, err
+	}
+	return lsamt.Length(), nil
+}
+
+// Iterate lane states
+func (s *channelState) ForEachLaneState(cb func(idx uint64, dl LaneState) error) error {
+	// Get the lane state from the chain
+	lsamt, err := s.getOrLoadLsAmt()
+	if err != nil {
+		return err
+	}
+
+	// Note: we use a map instead of an array to store laneStates because the
+	// client sets the lane ID (the index) and potentially they could use a
+	// very large index.
+	var ls paych.LaneState
+	return lsamt.ForEach(&ls, func(i int64) error {
+		return cb(uint64(i), &laneState{ls})
+	})
+}
+
+// LaneState is an abstract copy of the state of a single lane
+// not to be mixed up with the original paych.LaneState struct
+type LaneState interface {
+	Redeemed() (big.Int, error)
+	Nonce() (uint64, error)
+}
+
+type laneState struct {
+	paych.LaneState
+}
+
+func (ls *laneState) Redeemed() (big.Int, error) {
+	return ls.LaneState.Redeemed, nil
+}
+
+func (ls *laneState) Nonce() (uint64, error) {
+	return ls.LaneState.Nonce, nil
 }
 
 // paychFundsRes is the response to a create channel or add funds request

@@ -2,14 +2,21 @@ package payments
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
+	"github.com/filecoin-project/go-state-types/abi"
 	tutils "github.com/filecoin-project/specs-actors/support/testing"
 	init2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/init"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v3/support/mock"
+	block "github.com/ipfs/go-block-format"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
@@ -25,6 +32,23 @@ var blockGen = blocksutil.NewBlockGenerator()
 
 type testMgr struct {
 	lk sync.RWMutex
+}
+
+type mockBlocks struct {
+	data map[cid.Cid]block.Block
+}
+
+func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+	d, ok := mb.data[c]
+	if ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("Not Found")
+}
+
+func (mb *mockBlocks) Put(b block.Block) error {
+	mb.data[b.Cid()] = b
+	return nil
 }
 
 func TestCreateAndAddChannel(t *testing.T) {
@@ -54,7 +78,7 @@ func TestCreateAndAddChannel(t *testing.T) {
 	require.NoError(t, err)
 
 	store := NewStore(dssync.MutexWrap(ds.NewMapDatastore()))
-	cborstore := cbor.NewMemCborStore()
+	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
 
 	mgr := testMgr{}
 
@@ -98,7 +122,7 @@ func TestCreateAndAddChannel(t *testing.T) {
 
 	select {
 	case <-ctx.Done():
-		t.Error("onMsgComplete never called")
+		t.Error("onMsgComplete never called for create")
 	case <-confirmed:
 	}
 
@@ -129,6 +153,12 @@ func TestCreateAndAddChannel(t *testing.T) {
 
 	// Lookup is the same as before
 	api.SetMsgLookup(lookup)
+
+	select {
+	case <-ctx.Done():
+		t.Error("onMsgComplete never called for add funds")
+	case <-confirmed:
+	}
 }
 
 func formatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {
@@ -148,4 +178,77 @@ func formatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {
 	}
 
 	return lookup
+}
+
+func TestLoadActorState(t *testing.T) {
+	bgCtx := context.Background()
+
+	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+	defer cancel()
+
+	ks := keystore.NewMemKeystore()
+
+	api := fil.NewMockLotusAPI()
+
+	initActorAddr := tutils.NewIDAddr(t, 100)
+	chAddr := tutils.NewIDAddr(t, 101)
+	payerAddr := tutils.NewIDAddr(t, 102)
+	payeeAddr := tutils.NewIDAddr(t, 103)
+	payChBalance := abi.NewTokenAmount(9)
+
+	hasher := func(data []byte) [32]byte { return [32]byte{} }
+
+	// Build a payment channel actor straight from the fil actors package
+	builder := mock.NewBuilder(ctx, chAddr).
+		WithBalance(payChBalance, abi.NewTokenAmount(0)).
+		WithEpoch(abi.ChainEpoch(1)).
+		WithCaller(initActorAddr, builtin.InitActorCodeID).
+		WithActorType(payeeAddr, builtin.AccountActorCodeID).
+		WithActorType(payerAddr, builtin.AccountActorCodeID).
+		WithHasher(hasher)
+
+	rt := builder.Build(t)
+	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
+	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
+	actor := paych.Actor{}
+	rt.Call(actor.Constructor, params)
+
+	var st paych.State
+	rt.GetState(&st)
+
+	actState := fil.ActorState{
+		Balance: filecoin.NewInt(9),
+		State:   st,
+	}
+
+	api.SetActorState(&actState)
+
+	api.SetObject([]byte("testing"))
+
+	w := wallet.NewIPFS(ks, api)
+
+	store := NewStore(dssync.MutexWrap(ds.NewMapDatastore()))
+	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
+
+	mgr := testMgr{}
+
+	ch := &channel{
+		from:         payerAddr,
+		to:           payeeAddr,
+		ctx:          bgCtx,
+		api:          api,
+		wal:          w,
+		actStore:     cborstore,
+		store:        store,
+		lk:           &multiLock{globalLock: &mgr.lk},
+		msgListeners: newMsgListeners(),
+	}
+
+	state, err := ch.loadActorState(chAddr)
+	require.NoError(t, err)
+
+	from, err := state.From()
+	require.NoError(t, err)
+
+	require.Equal(t, ch.from, from)
 }
