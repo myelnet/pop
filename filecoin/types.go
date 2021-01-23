@@ -161,6 +161,10 @@ func NewInt(i uint64) BigInt {
 	return BigInt{Int: big.NewInt(0).SetUint64(i)}
 }
 
+func BigAdd(a, b BigInt) BigInt {
+	return BigInt{Int: big.NewInt(0).Add(a.Int, b.Int)}
+}
+
 type BlockHeader struct {
 	Miner address.Address // 0
 
