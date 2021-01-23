@@ -2,6 +2,7 @@ package filecoin
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/network"
@@ -10,8 +11,14 @@ import (
 
 // MockLotusAPI is for testing purposes only
 type MockLotusAPI struct {
-	act       *Actor     // actor to return when calling StateGetActor
-	msgLookup *MsgLookup // msgLookup to return when calling StateWaitMsg
+	act       *Actor          // actor to return when calling StateGetActor
+	msgLookup chan *MsgLookup // msgLookup to return when calling StateWaitMsg
+}
+
+func NewMockLotusAPI() *MockLotusAPI {
+	return &MockLotusAPI{
+		msgLookup: make(chan *MsgLookup),
+	}
 }
 
 func (m *MockLotusAPI) ChainHead(context.Context) (*TipSet, error) {
@@ -31,7 +38,12 @@ func (m *MockLotusAPI) MpoolPush(ctx context.Context, smsg *SignedMessage) (cid.
 }
 
 func (m *MockLotusAPI) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64) (*MsgLookup, error) {
-	return m.msgLookup, nil
+	select {
+	case lkp := <-m.msgLookup:
+		return lkp, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context timeout")
+	}
 }
 
 func (m *MockLotusAPI) StateAccountKey(ctx context.Context, addr address.Address, tsk TipSetKey) (address.Address, error) {
@@ -58,6 +70,7 @@ func (m *MockLotusAPI) SetActor(act *Actor) {
 	m.act = act
 }
 
+// SetMsgLookup to release the StateWaitMsg request
 func (m *MockLotusAPI) SetMsgLookup(lkp *MsgLookup) {
-	m.msgLookup = lkp
+	m.msgLookup <- lkp
 }
