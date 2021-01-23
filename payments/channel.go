@@ -197,6 +197,80 @@ func (ch *channel) msgWaitComplete(mcid cid.Cid, err error) {
 	// }
 }
 
+// addFunds sends a message to add funds to the channel and returns the message cid
+func (ch *channel) addFunds(ctx context.Context, channelInfo *ChannelInfo, amt filecoin.BigInt) (*cid.Cid, error) {
+	msg := &filecoin.Message{
+		To:     *channelInfo.Channel,
+		From:   channelInfo.Control,
+		Value:  amt,
+		Method: 0,
+	}
+
+	smsg, err := ch.mpoolPush(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	mcid := smsg.Cid()
+
+	// Store the add funds message CID on the channel
+	ch.mutateChannelInfo(channelInfo.ChannelID, func(ci *ChannelInfo) {
+		ci.PendingAmount = amt
+		ci.AddFundsMsg = &mcid
+	})
+
+	// Store a reference from the message CID to the channel, so that we can
+	// look up the channel from the message CID
+	err = ch.store.SaveNewMessage(channelInfo.ChannelID, mcid)
+	if err != nil {
+		fmt.Printf("saving add funds message CID %s: %s", mcid, err)
+	}
+
+	go ch.waitForAddFundsMsg(channelInfo.ChannelID, mcid)
+
+	return &mcid, nil
+}
+
+// waitForAddFundsMsg waits for mcid to appear on chain and returns error, if any
+func (ch *channel) waitForAddFundsMsg(channelID string, mcid cid.Cid) {
+	err := ch.waitAddFundsMsg(channelID, mcid)
+	ch.msgWaitComplete(mcid, err)
+}
+
+func (ch *channel) waitAddFundsMsg(channelID string, mcid cid.Cid) error {
+	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(5))
+	if err != nil {
+		fmt.Printf("Error waiting for chain message: %v", err)
+		return err
+	}
+
+	if mwait.Receipt.ExitCode != 0 {
+		err := fmt.Errorf("voucher channel creation failed: adding funds (exit code %d)", mwait.Receipt.ExitCode)
+		fmt.Printf("Error: %v", err)
+
+		ch.lk.Lock()
+		defer ch.lk.Unlock()
+
+		ch.mutateChannelInfo(channelID, func(channelInfo *ChannelInfo) {
+			channelInfo.PendingAmount = filecoin.NewInt(0)
+			channelInfo.AddFundsMsg = nil
+		})
+
+		return err
+	}
+
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	// Store updated amount
+	ch.mutateChannelInfo(channelID, func(channelInfo *ChannelInfo) {
+		channelInfo.Amount = filecoin.BigAdd(channelInfo.Amount, channelInfo.PendingAmount)
+		channelInfo.PendingAmount = filecoin.NewInt(0)
+		channelInfo.AddFundsMsg = nil
+	})
+
+	return nil
+}
+
 // paychFundsRes is the response to a create channel or add funds request
 type paychFundsRes struct {
 	channel address.Address

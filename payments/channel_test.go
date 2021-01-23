@@ -2,10 +2,11 @@ package payments
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	tutils "github.com/filecoin-project/specs-actors/support/testing"
 	init2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/init"
@@ -26,10 +27,13 @@ type testMgr struct {
 	lk sync.RWMutex
 }
 
-func TestCreateChannel(t *testing.T) {
-	ctx := context.Background()
+func TestCreateAndAddChannel(t *testing.T) {
+	bgCtx := context.Background()
 
-	api := &fil.MockLotusAPI{}
+	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+	defer cancel()
+
+	api := fil.NewMockLotusAPI()
 
 	act := &fil.Actor{
 		Code:    blockGen.Next().Cid(),
@@ -38,23 +42,6 @@ func TestCreateChannel(t *testing.T) {
 		Balance: fil.NewInt(1000),
 	}
 	api.SetActor(act)
-
-	chAddr := tutils.NewIDAddr(t, 100)
-	createChannelRet := init2.ExecReturn{
-		IDAddress:     chAddr,
-		RobustAddress: chAddr,
-	}
-	createChannelRetBytes, err := cborutil.Dump(&createChannelRet)
-	require.NoError(t, err)
-	lookup := &fil.MsgLookup{
-		Message: blockGen.Next().Cid(),
-		Receipt: fil.MessageReceipt{
-			ExitCode: 0,
-			Return:   createChannelRetBytes,
-			GasUsed:  10,
-		},
-	}
-	api.SetMsgLookup(lookup)
 
 	ks := keystore.NewMemKeystore()
 
@@ -74,7 +61,7 @@ func TestCreateChannel(t *testing.T) {
 	ch := &channel{
 		from:         addr1,
 		to:           addr2,
-		ctx:          ctx,
+		ctx:          bgCtx,
 		api:          api,
 		wal:          w,
 		actStore:     cborstore,
@@ -86,5 +73,79 @@ func TestCreateChannel(t *testing.T) {
 	c, err := ch.create(ctx, filecoin.NewInt(123))
 	require.NoError(t, err)
 
-	fmt.Println(c.String())
+	chInfo, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
+	require.NoError(t, err)
+
+	// We should be storing a pending message if the channel is pending confirmation
+	require.Equal(t, c, *chInfo.CreateMsg)
+
+	chAddr := tutils.NewIDAddr(t, 100)
+	lookup := formatMsgLookup(t, chAddr)
+
+	confirmed := make(chan bool, 2)
+	ch.msgListeners.onMsgComplete(c, func(e error) {
+		require.NoError(t, e)
+		// Now we should have confirmation
+		confChInfo, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
+		require.NoError(t, err)
+
+		// Channel address should be set
+		require.Equal(t, *confChInfo.Channel, chAddr)
+		confirmed <- true
+	})
+
+	api.SetMsgLookup(lookup)
+
+	select {
+	case <-ctx.Done():
+		t.Error("onMsgComplete never called")
+	case <-confirmed:
+	}
+
+	// Now let's add more funds to the channel
+	addChInfo, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
+	require.NoError(t, err)
+
+	addChCid, err := ch.addFunds(ctx, addChInfo, filecoin.NewInt(123))
+	require.NoError(t, err)
+
+	// Check if our pending message is there
+	addChInfo2, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
+	require.NoError(t, err)
+
+	require.Equal(t, *addChCid, *addChInfo2.AddFundsMsg)
+
+	// Trigger confirmation
+	ch.msgListeners.onMsgComplete(*addChCid, func(e error) {
+		require.NoError(t, e)
+
+		info, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
+		require.NoError(t, err)
+
+		// Our amount should be updated
+		require.Equal(t, filecoin.NewInt(246), info.Amount)
+		confirmed <- true
+	})
+
+	// Lookup is the same as before
+	api.SetMsgLookup(lookup)
+}
+
+func formatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {
+	createChannelRet := init2.ExecReturn{
+		IDAddress:     chAddr,
+		RobustAddress: chAddr,
+	}
+	createChannelRetBytes, err := cborutil.Dump(&createChannelRet)
+	require.NoError(t, err)
+	lookup := &fil.MsgLookup{
+		Message: blockGen.Next().Cid(),
+		Receipt: fil.MessageReceipt{
+			ExitCode: 0,
+			Return:   createChannelRetBytes,
+			GasUsed:  10,
+		},
+	}
+
+	return lookup
 }
