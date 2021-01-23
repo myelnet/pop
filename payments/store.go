@@ -310,6 +310,11 @@ func (s *Store) MarkVoucherSubmitted(ci *ChannelInfo, sv *paych.SignedVoucher) e
 	return s.putChannelInfo(ci)
 }
 
+// RemoveChannel removes the channel with the given channel ID
+func (s *Store) RemoveChannel(channelID string) error {
+	return s.ds.Delete(dskeyForChannel(channelID))
+}
+
 // The datastore key used to identify the channel info
 func dskeyForChannel(channelID string) datastore.Key {
 	return datastore.KeyWithNamespaces([]string{dsKeyChannelInfo, channelID})
@@ -445,10 +450,23 @@ func (ci *ChannelInfo) markVoucherSubmitted(sv *paych.SignedVoucher) error {
 	return nil
 }
 
+// TODO: This is a hack to get around not being able to CBOR marshall a nil
+// address.Address. It's been fixed in address.Address but we need to wait
+// for the change to propagate to specs-actors before we can remove this hack.
+var emptyAddr address.Address
+
+func init() {
+	addr, err := address.NewActorAddress([]byte("empty"))
+	if err != nil {
+		panic(err)
+	}
+	emptyAddr = addr
+}
+
 func marshallChannelInfo(ci *ChannelInfo) ([]byte, error) {
 	// See note above about CBOR marshalling address.Address
 	if ci.Channel == nil {
-		ci.Channel = &address.Undef
+		ci.Channel = &emptyAddr
 	}
 	return cborutil.Dump(ci)
 }
@@ -459,7 +477,7 @@ func unmarshallChannelInfo(stored *ChannelInfo, value []byte) (*ChannelInfo, err
 	}
 
 	// See note above about CBOR marshalling address.Address
-	if stored.Channel != nil && *stored.Channel == address.Undef {
+	if stored.Channel != nil && *stored.Channel == emptyAddr {
 		stored.Channel = nil
 	}
 

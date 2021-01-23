@@ -18,6 +18,7 @@ require (
 	github.com/google/uuid v1.1.2
 	github.com/gorilla/websocket v1.4.2
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
+	github.com/hannahhoward/go-pubsub v0.0.0-20200423002714-8d62886cc36e
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-blockservice v0.1.4
 	github.com/ipfs/go-cid v0.0.7
@@ -31,6 +32,7 @@ require (
 	github.com/ipfs/go-ipfs-exchange-offline v0.0.1
 	github.com/ipfs/go-ipfs-files v0.0.8
 	github.com/ipfs/go-ipfs-pinner v0.1.0
+	github.com/ipfs/go-ipld-cbor v0.0.5
 	github.com/ipfs/go-ipld-format v0.2.0
 	github.com/ipfs/go-merkledag v0.3.2
 	github.com/ipfs/go-unixfs v0.2.4
