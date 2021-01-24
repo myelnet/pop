@@ -30,12 +30,267 @@ type channel struct {
 	ctx           context.Context
 	api           filecoin.API
 	wal           wallet.Driver
-	actStore      *cbor.BasicIpldStore
 	store         *Store
+	actStore      *cbor.BasicIpldStore
 	lk            *multiLock
 	fundsReqQueue []*fundsReq
 	msgListeners  msgListeners
 }
+
+// get ensures that a channel exists between the from and to addresses,
+// and adds the given amount of funds.
+// If the channel does not exist a create channel message is sent and the
+// message CID is returned.
+// If the channel does exist an add funds message is sent and both the channel
+// address and message CID are returned.
+// If there is an in progress operation (create channel / add funds), get
+// blocks until the previous operation completes, then returns both the channel
+// address and the CID of the new add funds message.
+// If an operation returns an error, subsequent waiting operations will still
+// be attempted.
+func (ch *channel) get(ctx context.Context, amt filecoin.BigInt) (address.Address, cid.Cid, error) {
+	// Add the request to add funds to a queue and wait for the result
+	freq := newFundsReq(ctx, amt)
+	ch.enqueue(freq)
+	select {
+	case res := <-freq.promise:
+		return res.channel, res.mcid, res.err
+	case <-ctx.Done():
+		freq.cancel()
+		return address.Undef, cid.Undef, ctx.Err()
+	}
+}
+
+// getWaitReady waits for the response to the message with the given cid
+func (ch *channel) getWaitReady(ctx context.Context, mcid cid.Cid) (address.Address, error) {
+	ch.lk.Lock()
+
+	// First check if the message has completed
+	msgInfo, err := ch.store.GetMessage(mcid)
+	if err != nil {
+		ch.lk.Unlock()
+
+		return address.Undef, err
+	}
+
+	// If the create channel / add funds message failed, return an error
+	if len(msgInfo.Err) > 0 {
+		ch.lk.Unlock()
+
+		return address.Undef, fmt.Errorf(msgInfo.Err)
+	}
+
+	// If the message has completed successfully
+	if msgInfo.Received {
+		ch.lk.Unlock()
+
+		// Get the channel address
+		ci, err := ch.store.ByMessageCid(mcid)
+		if err != nil {
+			return address.Undef, err
+		}
+
+		if ci.Channel == nil {
+			panic(fmt.Sprintf("create / add funds message %s succeeded but channelInfo.Channel is nil", mcid))
+		}
+		return *ci.Channel, nil
+	}
+
+	// The message hasn't completed yet so wait for it to complete
+	promise := ch.msgPromise(ctx, mcid)
+
+	// Unlock while waiting
+	ch.lk.Unlock()
+
+	select {
+	case res := <-promise:
+		return res.channel, res.err
+	case <-ctx.Done():
+		return address.Undef, ctx.Err()
+	}
+}
+
+type onMsgRes struct {
+	channel address.Address
+	err     error
+}
+
+// msgPromise returns a channel that receives the result of the message with
+// the given CID
+func (ch *channel) msgPromise(ctx context.Context, mcid cid.Cid) chan onMsgRes {
+	promise := make(chan onMsgRes)
+	triggerUnsub := make(chan struct{})
+	unsub := ch.msgListeners.onMsgComplete(mcid, func(err error) {
+		close(triggerUnsub)
+
+		// Use a go-routine so as not to block the event handler loop
+		go func() {
+			res := onMsgRes{err: err}
+			if res.err == nil {
+				// Get the channel associated with the message cid
+				ci, err := ch.store.ByMessageCid(mcid)
+				if err != nil {
+					res.err = err
+				} else {
+					res.channel = *ci.Channel
+				}
+			}
+
+			// Pass the result to the caller
+			select {
+			case promise <- res:
+			case <-ctx.Done():
+			}
+		}()
+	})
+
+	// Unsubscribe when the message is received or the context is done
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-triggerUnsub:
+		}
+
+		unsub()
+	}()
+
+	return promise
+}
+
+///========== Queue Operations ====================
+
+// Queue up an add funds operation
+func (ch *channel) enqueue(task *fundsReq) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	ch.fundsReqQueue = append(ch.fundsReqQueue, task)
+	go ch.processQueue("")
+}
+
+// Run the operations in the queue
+func (ch *channel) processQueue(channelID string) (*AvailableFunds, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	// Remove cancelled requests
+	ch.filterQueue()
+
+	// If there's nothing in the queue, bail out
+	if len(ch.fundsReqQueue) == 0 {
+		return ch.currentAvailableFunds(channelID, filecoin.NewInt(0))
+	}
+
+	// Merge all pending requests into one.
+	// For example if there are pending requests for 3, 2, 4 then
+	// amt = 3 + 2 + 4 = 9
+	merged := newMergedFundsReq(ch.fundsReqQueue[:])
+	amt := merged.sum()
+	if amt.IsZero() {
+		// Note: The amount can be zero if requests are cancelled as we're
+		// building the mergedFundsReq
+		return ch.currentAvailableFunds(channelID, amt)
+	}
+
+	res := ch.processTask(merged.ctx, amt)
+
+	// If the task is waiting on an external event (eg something to appear on
+	// chain) it will return nil
+	if res == nil {
+		// Stop processing the fundsReqQueue and wait. When the event occurs it will
+		// call processQueue() again
+		return ch.currentAvailableFunds(channelID, amt)
+	}
+
+	// Finished processing so clear the queue
+	ch.fundsReqQueue = nil
+
+	// Call the task callback with its results
+	merged.onComplete(res)
+
+	return ch.currentAvailableFunds(channelID, filecoin.NewInt(0))
+}
+
+// filterQueue filters cancelled requests out of the queue
+func (ch *channel) filterQueue() {
+	if len(ch.fundsReqQueue) == 0 {
+		return
+	}
+
+	// Remove cancelled requests
+	i := 0
+	for _, r := range ch.fundsReqQueue {
+		if r.isActive() {
+			ch.fundsReqQueue[i] = r
+			i++
+		}
+	}
+
+	// Allow GC of remaining slice elements
+	for rem := i; rem < len(ch.fundsReqQueue); rem++ {
+		ch.fundsReqQueue[i] = nil
+	}
+
+	// Resize slice
+	ch.fundsReqQueue = ch.fundsReqQueue[:i]
+}
+
+// queueSize is the size of the funds request queue (used by tests)
+func (ch *channel) queueSize() int {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	return len(ch.fundsReqQueue)
+}
+
+// processTask checks the state of the channel and takes appropriate action
+// (see description of getPaych).
+// Note that processTask may be called repeatedly in the same state, and should
+// return nil if there is no state change to be made (eg when waiting for a
+// message to be confirmed on chain)
+func (ch *channel) processTask(ctx context.Context, amt filecoin.BigInt) *paychFundsRes {
+	// Get the payment channel for the from/to addresses.
+	// Note: It's ok if we get ErrChannelNotTracked. It just means we need to
+	// create a channel.
+	channelInfo, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
+	if err != nil && err != ErrChannelNotTracked {
+		return &paychFundsRes{err: err}
+	}
+
+	// If a channel has not yet been created, create one.
+	if channelInfo == nil {
+		mcid, err := ch.create(ctx, amt)
+		if err != nil {
+			return &paychFundsRes{err: err}
+		}
+
+		return &paychFundsRes{mcid: mcid}
+	}
+
+	// If the create channel message has been sent but the channel hasn't
+	// been created on chain yet
+	if channelInfo.CreateMsg != nil {
+		// Wait for the channel to be created before trying again
+		return nil
+	}
+
+	// If an add funds message was sent to the chain but hasn't been confirmed
+	// on chain yet
+	if channelInfo.AddFundsMsg != nil {
+		// Wait for the add funds message to be confirmed before trying again
+		return nil
+	}
+
+	// We need to add more funds, so send an add funds message to
+	// cover the amount for this request
+	mcid, err := ch.addFunds(ctx, channelInfo, amt)
+	if err != nil {
+		return &paychFundsRes{err: err}
+	}
+	return &paychFundsRes{channel: *channelInfo.Channel, mcid: *mcid}
+}
+
+/// ==============================
 
 func (ch *channel) messageBuilder(ctx context.Context, from address.Address) (MessageBuilder, error) {
 	// TODO: check network version and make adjustments on actor version
@@ -200,9 +455,9 @@ func (ch *channel) msgWaitComplete(mcid cid.Cid, err error) {
 
 	// The queue may have been waiting for msg completion to proceed, so
 	// process the next queue item
-	// if len(ca.fundsReqQueue) > 0 {
-	// 	go ca.processQueue("")
-	// }
+	if len(ch.fundsReqQueue) > 0 {
+		go ch.processQueue("")
+	}
 }
 
 // addFunds sends a message to add funds to the channel and returns the message cid
@@ -638,6 +893,17 @@ func (ch *channel) laneState(state ChannelState, chAddr address.Address) (map[ui
 	}
 
 	return laneStates, nil
+}
+
+func (ch *channel) allocateLane(chAddr address.Address) (uint64, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	return ch.store.AllocateLane(chAddr)
+}
+
+func (ch *channel) availableFunds(channelID string) (*AvailableFunds, error) {
+	return ch.processQueue(channelID)
 }
 
 func (ch *channel) currentAvailableFunds(channelID string, queuedAmt filecoin.BigInt) (*AvailableFunds, error) {
