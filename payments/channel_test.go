@@ -210,6 +210,24 @@ func TestChannel(t *testing.T) {
 	res, err := ch.createVoucher(ctx, chAddr, voucher)
 	require.NoError(t, err)
 	require.NotNil(t, res.Voucher)
+
+	// Submits a voucher to the chain
+	_, err = ch.submitVoucher(ctx, chAddr, res.Voucher, nil)
+	require.NoError(t, err)
+
+	vchs, err := ch.listVouchers(ctx, chAddr)
+	require.NoError(t, err)
+	require.Equal(t, len(vchs), 1)
+
+	_, err = ch.settle(ctx, chAddr)
+	require.NoError(t, err)
+
+	setChInfo, err := ch.getChannelInfo(chAddr)
+	require.NoError(t, err)
+	require.True(t, setChInfo.Settling)
+
+	_, err = ch.collect(ctx, chAddr)
+	require.NoError(t, err)
 }
 
 func formatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {

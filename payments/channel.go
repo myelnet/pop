@@ -640,6 +640,217 @@ func (ch *channel) laneState(state ChannelState, chAddr address.Address) (map[ui
 	return laneStates, nil
 }
 
+func (ch *channel) currentAvailableFunds(channelID string, queuedAmt filecoin.BigInt) (*AvailableFunds, error) {
+	if len(channelID) == 0 {
+		return nil, nil
+	}
+
+	channelInfo, err := ch.store.ByChannelID(channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	// The channel may have a pending create or add funds message
+	waitSentinel := channelInfo.CreateMsg
+	if waitSentinel == nil {
+		waitSentinel = channelInfo.AddFundsMsg
+	}
+
+	// Get the total amount redeemed by vouchers.
+	// This includes vouchers that have been submitted, and vouchers that are
+	// in the datastore but haven't yet been submitted.
+	totalRedeemed := filecoin.NewInt(0)
+	if channelInfo.Channel != nil {
+		chAddr := *channelInfo.Channel
+		as, err := ch.loadActorState(chAddr)
+		if err != nil {
+			return nil, err
+		}
+
+		laneStates, err := ch.laneState(as, chAddr)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ls := range laneStates {
+			r, err := ls.Redeemed()
+			if err != nil {
+				return nil, err
+			}
+			totalRedeemed = filecoin.BigAdd(totalRedeemed, r)
+		}
+	}
+
+	return &AvailableFunds{
+		Channel:             channelInfo.Channel,
+		From:                channelInfo.from(),
+		To:                  channelInfo.to(),
+		ConfirmedAmt:        channelInfo.Amount,
+		PendingAmt:          channelInfo.PendingAmount,
+		PendingWaitSentinel: waitSentinel,
+		QueuedAmt:           queuedAmt,
+		VoucherReedeemedAmt: totalRedeemed,
+	}, nil
+}
+
+// submitVoucher sends an Update message to the payment channel actor to anounce a new voucher
+func (ch *channel) submitVoucher(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher, secret []byte) (cid.Cid, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	ci, err := ch.store.ByAddress(chAddr)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	has, err := ci.hasVoucher(sv)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	// If the channel has the voucher
+	if has {
+		// Check that the voucher hasn't already been submitted
+		submitted, err := ci.wasVoucherSubmitted(sv)
+		if err != nil {
+			return cid.Undef, err
+		}
+		if submitted {
+			return cid.Undef, fmt.Errorf("cannot submit voucher that has already been submitted")
+		}
+	}
+
+	mb, err := ch.messageBuilder(ctx, ci.Control)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	msg, err := mb.Update(chAddr, sv, secret)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	smsg, err := ch.mpoolPush(ctx, msg)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	// If the channel didn't already have the voucher
+	if !has {
+		// Add the voucher to the channel
+		ci.Vouchers = append(ci.Vouchers, &VoucherInfo{
+			Voucher: sv,
+		})
+	}
+
+	// Mark the voucher and any lower-nonce vouchers as having been submitted
+	err = ch.store.MarkVoucherSubmitted(ci, sv)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	return smsg.Cid(), nil
+}
+
+func (ch *channel) listVouchers(ctx context.Context, chAddr address.Address) ([]*VoucherInfo, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	// TODO: just having a passthrough method like this feels odd. Seems like
+	// there should be some filtering we're doing here
+	return ch.store.VouchersForPaych(chAddr)
+}
+
+// settle the given channel by sending a Settle message to the chain
+func (ch *channel) settle(ctx context.Context, chAddr address.Address) (cid.Cid, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	ci, err := ch.store.ByAddress(chAddr)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	mb, err := ch.messageBuilder(ctx, ci.Control)
+	if err != nil {
+		return cid.Undef, err
+	}
+	msg, err := mb.Settle(chAddr)
+	if err != nil {
+		return cid.Undef, err
+	}
+	smgs, err := ch.mpoolPush(ctx, msg)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	ci.Settling = true
+	err = ch.store.putChannelInfo(ci)
+	if err != nil {
+		fmt.Printf("Error marking channel as settled: %s", err)
+	}
+
+	return smgs.Cid(), err
+}
+
+// collect the given channel by sending a Collect message to the chain
+func (ch *channel) collect(ctx context.Context, chAddr address.Address) (cid.Cid, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	ci, err := ch.store.ByAddress(chAddr)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	mb, err := ch.messageBuilder(ctx, ci.Control)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	msg, err := mb.Collect(chAddr)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	smsg, err := ch.mpoolPush(ctx, msg)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	return smsg.Cid(), nil
+}
+
+func (ch *channel) getChannelInfo(addr address.Address) (*ChannelInfo, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	return ch.store.ByAddress(addr)
+}
+
+// AvailableFunds describes the current state of a channel on chain
+type AvailableFunds struct {
+	// Channel is the address of the channel
+	Channel *address.Address
+	// From is the from address of the channel (channel creator)
+	From address.Address
+	// To is the to address of the channel
+	To address.Address
+	// ConfirmedAmt is the amount of funds that have been confirmed on-chain
+	// for the channel
+	ConfirmedAmt filecoin.BigInt
+	// PendingAmt is the amount of funds that are pending confirmation on-chain
+	PendingAmt filecoin.BigInt
+	// PendingWaitSentinel can be used with PaychGetWaitReady to wait for
+	// confirmation of pending funds
+	PendingWaitSentinel *cid.Cid
+	// QueuedAmt is the amount that is queued up behind a pending request
+	QueuedAmt filecoin.BigInt
+	// VoucherRedeemedAmt is the amount that is redeemed by vouchers on-chain
+	// and in the local datastore
+	VoucherReedeemedAmt filecoin.BigInt
+}
+
 // VoucherCreateResult is the response to createVoucher method
 type VoucherCreateResult struct {
 	// Voucher that was created, or nil if there was an error or if there
