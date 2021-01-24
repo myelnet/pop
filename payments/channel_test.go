@@ -1,8 +1,10 @@
 package payments
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -11,8 +13,8 @@ import (
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/filecoin-project/go-state-types/abi"
 	tutils "github.com/filecoin-project/specs-actors/support/testing"
-	init2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/init"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin"
+	init2 "github.com/filecoin-project/specs-actors/v3/actors/builtin/init"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
 	"github.com/filecoin-project/specs-actors/v3/support/mock"
 	block "github.com/ipfs/go-block-format"
@@ -51,7 +53,8 @@ func (mb *mockBlocks) Put(b block.Block) error {
 	return nil
 }
 
-func TestCreateAndAddChannel(t *testing.T) {
+// Test the full lifecycle of a channel in ideal conditions
+func TestChannel(t *testing.T) {
 	bgCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
@@ -103,7 +106,7 @@ func TestCreateAndAddChannel(t *testing.T) {
 	// We should be storing a pending message if the channel is pending confirmation
 	require.Equal(t, c, *chInfo.CreateMsg)
 
-	chAddr := tutils.NewIDAddr(t, 100)
+	chAddr := tutils.NewIDAddr(t, 101)
 	lookup := formatMsgLookup(t, chAddr)
 
 	confirmed := make(chan bool, 2)
@@ -159,6 +162,54 @@ func TestCreateAndAddChannel(t *testing.T) {
 		t.Error("onMsgComplete never called for add funds")
 	case <-confirmed:
 	}
+
+	initActorAddr := tutils.NewIDAddr(t, 100)
+	payerAddr := tutils.NewIDAddr(t, 102)
+	payeeAddr := tutils.NewIDAddr(t, 103)
+	payChBalance := abi.NewTokenAmount(9)
+
+	hasher := func(data []byte) [32]byte { return [32]byte{} }
+
+	// Build a payment channel actor straight from the fil actors package
+	builder := mock.NewBuilder(ctx, chAddr).
+		WithBalance(payChBalance, abi.NewTokenAmount(0)).
+		WithEpoch(abi.ChainEpoch(1)).
+		WithCaller(initActorAddr, builtin.InitActorCodeID).
+		WithActorType(payeeAddr, builtin.AccountActorCodeID).
+		WithActorType(payerAddr, builtin.AccountActorCodeID).
+		WithHasher(hasher)
+
+	rt := builder.Build(t)
+	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
+	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
+	actor := paych.Actor{}
+	rt.Call(actor.Constructor, params)
+
+	var st paych.State
+	rt.GetState(&st)
+
+	actState := fil.ActorState{
+		Balance: filecoin.NewInt(9),
+		State:   st,
+	}
+
+	api.SetActorState(&actState)
+	// This is some super hacky stuff to read and send the lanestate amt bytes as if coming from lotus
+	// the mock actor builder doesn't export the underlying block store so we send a fake cbor unmarshaller
+	// to intercept the byte stream
+	objReader := func(c cid.Cid) []byte {
+		var bg bytesGetter
+		rt.StoreGet(c, &bg)
+		return bg.Bytes()
+	}
+	api.SetObjectReader(objReader)
+
+	api.SetAccountKey(ch.from)
+
+	voucher := paych.SignedVoucher{Amount: filecoin.NewInt(123), Lane: 1}
+	res, err := ch.createVoucher(ctx, chAddr, voucher)
+	require.NoError(t, err)
+	require.NotNil(t, res.Voucher)
 }
 
 func formatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {
@@ -251,4 +302,19 @@ func TestLoadActorState(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, ch.from, from)
+}
+
+type bytesGetter struct {
+	b []byte
+}
+
+func (bg *bytesGetter) UnmarshalCBOR(r io.Reader) error {
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(r)
+	bg.b = buf.Bytes()
+	return nil
+}
+
+func (bg *bytesGetter) Bytes() []byte {
+	return bg.b
 }

@@ -11,10 +11,12 @@ import (
 
 // MockLotusAPI is for testing purposes only
 type MockLotusAPI struct {
-	act       *Actor          // actor to return when calling StateGetActor
-	actState  *ActorState     // state returned when calling StateReadState
-	obj       []byte          // bytes returned when calling ChainReadObj
-	msgLookup chan *MsgLookup // msgLookup to return when calling StateWaitMsg
+	act        *Actor      // actor to return when calling StateGetActor
+	actState   *ActorState // state returned when calling StateReadState
+	obj        []byte      // bytes returned when calling ChainReadObj
+	objReader  func(cid.Cid) []byte
+	msgLookup  chan *MsgLookup // msgLookup to return when calling StateWaitMsg
+	accountKey address.Address // address returned when calling StateAccountKey
 }
 
 func NewMockLotusAPI() *MockLotusAPI {
@@ -49,6 +51,9 @@ func (m *MockLotusAPI) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64)
 }
 
 func (m *MockLotusAPI) StateAccountKey(ctx context.Context, addr address.Address, tsk TipSetKey) (address.Address, error) {
+	if m.accountKey != address.Undef {
+		return m.accountKey, nil
+	}
 	return addr, nil
 }
 
@@ -61,6 +66,9 @@ func (m *MockLotusAPI) StateNetworkVersion(ctx context.Context, tsk TipSetKey) (
 }
 
 func (m *MockLotusAPI) ChainReadObj(ctx context.Context, c cid.Cid) ([]byte, error) {
+	if m.objReader != nil {
+		return m.objReader(c), nil
+	}
 	return m.obj, nil
 }
 
@@ -78,6 +86,14 @@ func (m *MockLotusAPI) SetActorState(state *ActorState) {
 
 func (m *MockLotusAPI) SetObject(obj []byte) {
 	m.obj = obj
+}
+
+func (m *MockLotusAPI) SetObjectReader(r func(cid.Cid) []byte) {
+	m.objReader = r
+}
+
+func (m *MockLotusAPI) SetAccountKey(addr address.Address) {
+	m.accountKey = addr
 }
 
 // SetMsgLookup to release the StateWaitMsg request
