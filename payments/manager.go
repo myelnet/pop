@@ -20,6 +20,7 @@ type Manager interface {
 	WaitForChannel(context.Context, cid.Cid) (address.Address, error)
 	ListChannels() ([]address.Address, error)
 	GetChannelInfo(address.Address) (*ChannelInfo, error)
+	CreateVoucher(context.Context, address.Address, filecoin.BigInt, uint64) (*VoucherCreateResult, error)
 }
 
 // Payments is our full payment system, it manages payment channels,
@@ -48,7 +49,7 @@ func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Ba
 	}
 }
 
-// GetChannel adds fund to a new channel in a given direction, if one already exists it will updated it
+// GetChannel adds fund to a new channel in a given direction, if one already exists it will update it
 // it does not wait for the message to be confirmed on chain
 func (p *Payments) GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*ChannelResponse, error) {
 	ch, err := p.channelByFromTo(from, to)
