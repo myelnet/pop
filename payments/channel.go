@@ -601,7 +601,6 @@ func (ch *channel) createVoucher(ctx context.Context, chAddr address.Address, vo
 
 	// Store the voucher
 	if _, err := ch.addVoucherUnlocked(ctx, chAddr, sv, filecoin.NewInt(0)); err != nil {
-		fmt.Printf("Error storing voucher: %v", err)
 		// If there are not enough funds in the channel to cover the voucher,
 		// return a voucher create result with the shortfall
 		if ife, ok := err.(insufficientFundsErr); ok {
