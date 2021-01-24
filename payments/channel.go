@@ -8,12 +8,13 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-address"
+	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	cbortypes "github.com/filecoin-project/go-state-types/cbor"
-	"github.com/filecoin-project/specs-actors/actors/builtin/paych"
-	"github.com/filecoin-project/specs-actors/actors/util/adt"
-	init2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/init"
+	init2 "github.com/filecoin-project/specs-actors/v3/actors/builtin/init"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v3/actors/util/adt"
 	"github.com/hannahhoward/go-pubsub"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -22,7 +23,7 @@ import (
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
 
-// channel is an interface to manage the lifecycle of a payment channel
+// channel manages the lifecycle of a payment channel
 type channel struct {
 	from          address.Address
 	to            address.Address
@@ -310,6 +311,345 @@ func (ch *channel) loadActorState(chAddr address.Address) (ChannelState, error) 
 	return &state, nil
 }
 
+// createVoucher creates a voucher with the given specification, setting its
+// nonce, signing the voucher and storing it in the local datastore.
+// If there are not enough funds in the channel to create the voucher, returns
+// the shortfall in funds.
+func (ch *channel) createVoucher(ctx context.Context, chAddr address.Address, voucher paych.SignedVoucher) (*VoucherCreateResult, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	// Find the channel for the voucher
+	ci, err := ch.store.ByAddress(chAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get channel info by address: %v", err)
+	}
+
+	// Set the voucher channel
+	sv := &voucher
+	sv.ChannelAddr = chAddr
+
+	// Get the next nonce on the given lane
+	sv.Nonce = ch.nextNonceForLane(ci, voucher.Lane)
+
+	// Sign the voucher
+	vb, err := sv.SigningBytes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get voucher signing bytes: %v", err)
+	}
+
+	sig, err := ch.wal.Sign(ctx, ci.Control, vb)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign voucher: %v", err)
+	}
+	sv.Signature = sig
+
+	// Store the voucher
+	if _, err := ch.addVoucherUnlocked(ctx, chAddr, sv, filecoin.NewInt(0)); err != nil {
+		fmt.Printf("Error storing voucher: %v", err)
+		// If there are not enough funds in the channel to cover the voucher,
+		// return a voucher create result with the shortfall
+		if ife, ok := err.(insufficientFundsErr); ok {
+			return &VoucherCreateResult{
+				Shortfall: ife.Shortfall(),
+			}, nil
+		}
+
+		return nil, fmt.Errorf("failed to persist voucher: %v", err)
+	}
+
+	return &VoucherCreateResult{Voucher: sv, Shortfall: filecoin.NewInt(0)}, nil
+}
+
+func (ch *channel) nextNonceForLane(ci *ChannelInfo, lane uint64) uint64 {
+	var maxnonce uint64
+	for _, v := range ci.Vouchers {
+		if v.Voucher.Lane == lane {
+			if v.Voucher.Nonce > maxnonce {
+				maxnonce = v.Voucher.Nonce
+			}
+		}
+	}
+
+	return maxnonce + 1
+}
+
+func (ch *channel) addVoucherUnlocked(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher, minDelta filecoin.BigInt) (filecoin.BigInt, error) {
+	ci, err := ch.store.ByAddress(chAddr)
+	if err != nil {
+		return filecoin.BigInt{}, err
+	}
+
+	// Check if the voucher has already been added
+	for _, v := range ci.Vouchers {
+		eq, err := cborutil.Equals(sv, v.Voucher)
+		if err != nil {
+			return filecoin.BigInt{}, err
+		}
+		if eq {
+			// Ignore the duplicate voucher.
+			fmt.Println("AddVoucher: voucher re-added")
+			return filecoin.NewInt(0), nil
+		}
+
+	}
+
+	// Check voucher validity
+	laneStates, err := ch.checkVoucherValidUnlocked(ctx, chAddr, sv)
+	if err != nil {
+		return filecoin.NewInt(0), err
+	}
+
+	// The change in value is the delta between the voucher amount and
+	// the highest previous voucher amount for the lane
+	laneState, exists := laneStates[sv.Lane]
+	redeemed := big.NewInt(0)
+	if exists {
+		redeemed, err = laneState.Redeemed()
+		if err != nil {
+			return filecoin.NewInt(0), err
+		}
+	}
+
+	delta := filecoin.BigSub(sv.Amount, redeemed)
+	if minDelta.GreaterThan(delta) {
+		return delta, fmt.Errorf("addVoucher: supplied token amount too low; minD=%s, D=%s; laneAmt=%s; v.Amt=%s", minDelta, delta, redeemed, sv.Amount)
+	}
+
+	ci.Vouchers = append(ci.Vouchers, &VoucherInfo{
+		Voucher: sv,
+	})
+
+	if ci.NextLane <= sv.Lane {
+		ci.NextLane = sv.Lane + 1
+	}
+
+	return delta, ch.store.putChannelInfo(ci)
+}
+
+func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher) (map[uint64]LaneState, error) {
+	if sv.ChannelAddr != chAddr {
+		return nil, fmt.Errorf("voucher ChannelAddr doesn't match channel address, got %s, expected %s", sv.ChannelAddr, chAddr)
+	}
+
+	act, err := ch.api.StateGetActor(ctx, chAddr, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load payment channel actor state
+	pchState, err := ch.loadActorState(chAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load channel "From" account actor state
+	f, err := pchState.From()
+	if err != nil {
+		return nil, err
+	}
+
+	from, err := ch.api.StateAccountKey(ctx, f, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+
+	// verify voucher signature
+	vb, err := sv.SigningBytes()
+	if err != nil {
+		return nil, err
+	}
+
+	sig, err := wallet.SigTypeSig(sv.Signature.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: technically, either party may create and sign a voucher.
+	// However, for now, we only accept them from the channel creator.
+	// More complex handling logic can be added later
+	if err := sig.Verify(sv.Signature.Data, from, vb); err != nil {
+		return nil, err
+	}
+
+	// Check the voucher against the highest known voucher nonce / value
+	laneStates, err := ch.laneState(pchState, chAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the new voucher nonce value is less than the highest known
+	// nonce for the lane
+	ls, lsExists := laneStates[sv.Lane]
+	if lsExists {
+		n, err := ls.Nonce()
+		if err != nil {
+			return nil, err
+		}
+
+		if sv.Nonce <= n {
+			return nil, fmt.Errorf("nonce too low")
+		}
+
+		// If the voucher amount is less than the highest known voucher amount
+		r, err := ls.Redeemed()
+		if err != nil {
+			return nil, err
+		}
+		if sv.Amount.LessThanEqual(r) {
+			return nil, fmt.Errorf("voucher amount is lower than amount for voucher with lower nonce")
+		}
+	}
+
+	// Total redeemed is the total redeemed amount for all lanes, including
+	// the new voucher
+	// eg
+	//
+	// lane 1 redeemed:            3
+	// lane 2 redeemed:            2
+	// voucher for lane 1:         5
+	//
+	// Voucher supersedes lane 1 redeemed, therefore
+	// effective lane 1 redeemed:  5
+	//
+	// lane 1:  5
+	// lane 2:  2
+	//          -
+	// total:   7
+	totalRedeemed, err := ch.totalRedeemedWithVoucher(laneStates, sv)
+	if err != nil {
+		return nil, err
+	}
+
+	// Total required balance must not exceed actor balance
+	if act.Balance.LessThan(totalRedeemed) {
+		return nil, newErrInsufficientFunds(filecoin.BigSub(totalRedeemed, act.Balance))
+	}
+
+	if len(sv.Merges) != 0 {
+		return nil, fmt.Errorf("dont currently support paych lane merges")
+	}
+
+	return laneStates, nil
+}
+
+// Get the total redeemed amount across all lanes, after applying the voucher
+func (ch *channel) totalRedeemedWithVoucher(laneStates map[uint64]LaneState, sv *paych.SignedVoucher) (big.Int, error) {
+	// TODO: merges
+	if len(sv.Merges) != 0 {
+		return big.Int{}, fmt.Errorf("dont currently support paych lane merges")
+	}
+
+	total := big.NewInt(0)
+	for _, ls := range laneStates {
+		r, err := ls.Redeemed()
+		if err != nil {
+			return big.Int{}, err
+		}
+		total = big.Add(total, r)
+	}
+
+	lane, ok := laneStates[sv.Lane]
+	if ok {
+		// If the voucher is for an existing lane, and the voucher nonce
+		// is higher than the lane nonce
+		n, err := lane.Nonce()
+		if err != nil {
+			return big.Int{}, err
+		}
+
+		if sv.Nonce > n {
+			// Add the delta between the redeemed amount and the voucher
+			// amount to the total
+			r, err := lane.Redeemed()
+			if err != nil {
+				return big.Int{}, err
+			}
+
+			delta := big.Sub(sv.Amount, r)
+			total = big.Add(total, delta)
+		}
+	} else {
+		// If the voucher is *not* for an existing lane, just add its
+		// value (implicitly a new lane will be created for the voucher)
+		total = big.Add(total, sv.Amount)
+	}
+
+	return total, nil
+}
+
+// laneState gets the LaneStates from chain, then applies all vouchers in
+// the data store over the chain state
+func (ch *channel) laneState(state ChannelState, chAddr address.Address) (map[uint64]LaneState, error) {
+	// TODO: we probably want to call UpdateChannelState with all vouchers to be fully correct
+	//  (but technically dont't need to)
+
+	laneCount, err := state.LaneCount()
+	if err != nil {
+		return nil, err
+	}
+
+	// Note: we use a map instead of an array to store laneStates because the
+	// client sets the lane ID (the index) and potentially they could use a
+	// very large index.
+	laneStates := make(map[uint64]LaneState, laneCount)
+	err = state.ForEachLaneState(func(idx uint64, ls LaneState) error {
+		laneStates[idx] = ls
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply locally stored vouchers
+	vouchers, err := ch.store.VouchersForPaych(chAddr)
+	if err != nil && err != ErrChannelNotTracked {
+		return nil, err
+	}
+
+	for _, v := range vouchers {
+		for range v.Voucher.Merges {
+			return nil, fmt.Errorf("paych merges not handled yet")
+		}
+
+		// Check if there is an existing laneState in the payment channel
+		// for this voucher's lane
+		ls, ok := laneStates[v.Voucher.Lane]
+
+		// If the voucher does not have a higher nonce than the existing
+		// laneState for this lane, ignore it
+		if ok {
+			n, err := ls.Nonce()
+			if err != nil {
+				return nil, err
+			}
+			if v.Voucher.Nonce < n {
+				continue
+			}
+		}
+
+		// Voucher has a higher nonce, so replace laneState with this voucher
+		laneStates[v.Voucher.Lane] = &laneState{
+			LaneState: paych.LaneState{
+				Redeemed: v.Voucher.Amount,
+				Nonce:    v.Voucher.Nonce,
+			},
+		}
+	}
+
+	return laneStates, nil
+}
+
+// VoucherCreateResult is the response to createVoucher method
+type VoucherCreateResult struct {
+	// Voucher that was created, or nil if there was an error or if there
+	// were insufficient funds in the channel
+	Voucher *paych.SignedVoucher
+	// Shortfall is the additional amount that would be needed in the channel
+	// in order to be able to create the voucher
+	Shortfall filecoin.BigInt
+}
+
 // ChannelState is an abstract version of payment channel state that works across
 // versions. TODO: we need to handle future actor version upgrades
 type ChannelState interface {
@@ -365,7 +705,7 @@ func (s *channelState) getOrLoadLsAmt() (*adt.Array, error) {
 	}
 
 	// Get the lane state from the chain
-	lsamt, err := adt.AsArray(s.store, s.State.LaneStates)
+	lsamt, err := adt.AsArray(s.store, s.State.LaneStates, 3)
 	if err != nil {
 		return nil, err
 	}
@@ -626,4 +966,27 @@ func (ml *msgListeners) fireMsgComplete(mcid cid.Cid, err error) {
 		// In theory we shouldn't ever get an error here
 		fmt.Printf("unexpected error publishing message complete: %s", e)
 	}
+}
+
+type insufficientFundsErr interface {
+	Shortfall() filecoin.BigInt
+}
+
+// ErrInsufficientFunds indicates that there are not enough funds in the
+// channel to create a voucher
+type ErrInsufficientFunds struct {
+	shortfall filecoin.BigInt
+}
+
+func newErrInsufficientFunds(shortfall filecoin.BigInt) *ErrInsufficientFunds {
+	return &ErrInsufficientFunds{shortfall: shortfall}
+}
+
+func (e *ErrInsufficientFunds) Error() string {
+	return fmt.Sprintf("not enough funds in channel to cover voucher - shortfall: %d", e.shortfall)
+}
+
+// Shortfall is how much FIL the channel is missing
+func (e *ErrInsufficientFunds) Shortfall() filecoin.BigInt {
+	return e.shortfall
 }
