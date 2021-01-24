@@ -165,6 +165,10 @@ func BigAdd(a, b BigInt) BigInt {
 	return BigInt{Int: big.NewInt(0).Add(a.Int, b.Int)}
 }
 
+func BigSub(a, b BigInt) BigInt {
+	return BigInt{Int: big.NewInt(0).Sub(a.Int, b.Int)}
+}
+
 type BlockHeader struct {
 	Miner address.Address // 0
 
