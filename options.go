@@ -112,7 +112,7 @@ func WithPinner(pinner pin.Pinner) func(*Exchange) error {
 // WithFilecoinAPI sets the api endpoint and auth token for a remote filecoin node
 func WithFilecoinAPI(addr string, header http.Header) func(*Exchange) error {
 	return func(ex *Exchange) error {
-		ex.fEndpoint = filecoin.APIEndpoint{
+		ex.fEndpoint = &filecoin.APIEndpoint{
 			Address: addr,
 			Header:  header,
 		}
