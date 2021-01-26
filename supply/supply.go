@@ -64,7 +64,7 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 	}
 
 	if len(peers) == 0 {
-		return ErrNoPeers
+		return nil // ErrNoPeers is quite noisy so will disable until we find a more elegant way
 	}
 	// Set the amount of peers we want to notify
 	max := 6
