@@ -45,12 +45,14 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 			return nil, err
 		}
 	}
-	// Start our lotus api.
+	// Start our lotus api if we have an endpoint.
 	// TODO: add a Type to fEndpoint so we can config what type of implementation we want
 	// to connect to. Should be fine for now.
-	ex.fAPI, err = filecoin.NewLotusRPC(ctx, ex.fEndpoint.Address, ex.fEndpoint.Header)
-	if err != nil {
-		return nil, err
+	if ex.fEndpoint != nil {
+		ex.fAPI, err = filecoin.NewLotusRPC(ctx, ex.fEndpoint.Address, ex.fEndpoint.Header)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Set wallet from IPFS Keystore, we should make this more generic eventually
 	ex.wallet = wallet.NewIPFS(ex.Keystore, ex.fAPI)
@@ -119,7 +121,7 @@ type Exchange struct {
 	cidListDir   string
 	// filecoin api
 	fAPI      filecoin.API
-	fEndpoint filecoin.APIEndpoint
+	fEndpoint *filecoin.APIEndpoint // optional
 }
 
 // GetBlock gets a single block from a blocks channel
