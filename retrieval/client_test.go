@@ -22,8 +22,8 @@ func TestClientFSM(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("it works", func(t *testing.T) {
-		dealState := makeDealState(DealStatusNew)
-		environment := &mockEnvironment{}
+		dealState := makeClientDealState(DealStatusNew)
+		environment := &mockClientEnvironment{}
 		fsmCtx := fsmtest.NewTestContext(ctx, eventMachine)
 		err := ProposeDeal(fsmCtx, environment, *dealState)
 		require.NoError(t, err)
@@ -31,35 +31,35 @@ func TestClientFSM(t *testing.T) {
 	})
 }
 
-type mockEnvironment struct {
+type mockClientEnvironment struct {
 	OpenDataTransferError        error
 	SendDataTransferVoucherError error
 	CloseDataTransferError       error
 }
 
-func (e *mockEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *DealProposal) (datatransfer.ChannelID, error) {
+func (e *mockClientEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *DealProposal) (datatransfer.ChannelID, error) {
 	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to, Initiator: testnet.GeneratePeers(1)[0]}, e.OpenDataTransferError
 }
 
-func (e *mockEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *DealPayment, _ bool) error {
+func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *DealPayment, _ bool) error {
 	return e.SendDataTransferVoucherError
 }
 
-func (e *mockEnvironment) CloseDataTransfer(_ context.Context, _ datatransfer.ChannelID) error {
+func (e *mockClientEnvironment) CloseDataTransfer(_ context.Context, _ datatransfer.ChannelID) error {
 	return e.CloseDataTransferError
 }
 
-var defaultTotalFunds = abi.NewTokenAmount(4000000)
-var defaultCurrentInterval = uint64(1000)
-var defaultIntervalIncrease = uint64(500)
-var defaultPricePerByte = abi.NewTokenAmount(500)
-var defaultTotalReceived = uint64(6000)
-var defaultBytesPaidFor = uint64(5000)
-var defaultFundsSpent = abi.NewTokenAmount(2500000)
-var defaultPaymentRequested = abi.NewTokenAmount(500000)
-var defaultUnsealFundsPaid = abi.NewTokenAmount(0)
+func makeClientDealState(status DealStatus) *ClientDealState {
+	var defaultTotalFunds = abi.NewTokenAmount(4000000)
+	var defaultCurrentInterval = uint64(1000)
+	var defaultIntervalIncrease = uint64(500)
+	var defaultPricePerByte = abi.NewTokenAmount(500)
+	var defaultTotalReceived = uint64(6000)
+	var defaultBytesPaidFor = uint64(5000)
+	var defaultFundsSpent = abi.NewTokenAmount(2500000)
+	var defaultPaymentRequested = abi.NewTokenAmount(500000)
+	var defaultUnsealFundsPaid = abi.NewTokenAmount(0)
 
-func makeDealState(status DealStatus) *ClientDealState {
 	paymentInfo := &PaymentInfo{}
 
 	switch status {

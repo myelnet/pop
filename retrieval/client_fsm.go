@@ -25,7 +25,8 @@ var paymentChannelCreationStates = []fsm.StateKey{
 	DealStatusPaymentChannelAllocatingLane,
 }
 
-// ClientChart are the events that can happen in a retrieval client
+// ClientChart is the state chart defining the events that can happen in a retrieval client
+// it is almost identical to go-fil-markets implementation except we don't support legacy events
 var ClientChart = fsm.Events{
 	fsm.Event(ClientEventOpen).
 		From(DealStatusNew).ToNoChange(),
