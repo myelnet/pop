@@ -1,4 +1,4 @@
-package retrieval
+package client
 
 import (
 	"context"
@@ -14,15 +14,17 @@ import (
 	fsmtest "github.com/filecoin-project/go-statemachine/fsm/testutil"
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/stretchr/testify/require"
+
+	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 )
 
 func TestClientFSM(t *testing.T) {
 	ctx := context.Background()
-	eventMachine, err := fsm.NewEventProcessor(ClientDealState{}, "Status", ClientChart)
+	eventMachine, err := fsm.NewEventProcessor(deal.ClientState{}, "Status", FSMEvents)
 	require.NoError(t, err)
 
 	t.Run("it works", func(t *testing.T) {
-		dealState := makeClientDealState(DealStatusNew)
+		dealState := makeClientDealState(deal.StatusNew)
 		environment := &mockClientEnvironment{}
 		fsmCtx := fsmtest.NewTestContext(ctx, eventMachine)
 		err := ProposeDeal(fsmCtx, environment, *dealState)
@@ -37,11 +39,11 @@ type mockClientEnvironment struct {
 	CloseDataTransferError       error
 }
 
-func (e *mockClientEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *DealProposal) (datatransfer.ChannelID, error) {
+func (e *mockClientEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *deal.Proposal) (datatransfer.ChannelID, error) {
 	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to, Initiator: testnet.GeneratePeers(1)[0]}, e.OpenDataTransferError
 }
 
-func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *DealPayment, _ bool) error {
+func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *deal.Payment, _ bool) error {
 	return e.SendDataTransferVoucherError
 }
 
@@ -49,7 +51,7 @@ func (e *mockClientEnvironment) CloseDataTransfer(_ context.Context, _ datatrans
 	return e.CloseDataTransferError
 }
 
-func makeClientDealState(status DealStatus) *ClientDealState {
+func makeClientDealState(status deal.Status) *deal.ClientState {
 	var defaultTotalFunds = abi.NewTokenAmount(4000000)
 	var defaultCurrentInterval = uint64(1000)
 	var defaultIntervalIncrease = uint64(500)
@@ -60,21 +62,21 @@ func makeClientDealState(status DealStatus) *ClientDealState {
 	var defaultPaymentRequested = abi.NewTokenAmount(500000)
 	var defaultUnsealFundsPaid = abi.NewTokenAmount(0)
 
-	paymentInfo := &PaymentInfo{}
+	paymentInfo := &deal.PaymentInfo{}
 
 	switch status {
-	case DealStatusNew, DealStatusAccepted, DealStatusPaymentChannelCreating:
+	case deal.StatusNew, deal.StatusAccepted, deal.StatusPaymentChannelCreating:
 		paymentInfo = nil
 	}
 
-	params := Params{
+	params := deal.Params{
 		PricePerByte:            defaultPricePerByte,
 		PaymentInterval:         0,
 		PaymentIntervalIncrease: defaultIntervalIncrease,
 		UnsealPrice:             big.Zero(),
 	}
 
-	return &ClientDealState{
+	return &deal.ClientState{
 		TotalFunds:       defaultTotalFunds,
 		MinerWallet:      address.TestAddress,
 		ClientWallet:     address.TestAddress2,
@@ -86,8 +88,8 @@ func makeClientDealState(status DealStatus) *ClientDealState {
 		FundsSpent:       defaultFundsSpent,
 		UnsealFundsPaid:  defaultUnsealFundsPaid,
 		PaymentRequested: defaultPaymentRequested,
-		DealProposal: DealProposal{
-			ID:     DealID(10),
+		Proposal: deal.Proposal{
+			ID:     deal.ID(10),
 			Params: params,
 		},
 	}
