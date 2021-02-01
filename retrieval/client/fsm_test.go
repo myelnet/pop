@@ -15,6 +15,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/myelnet/go-hop-exchange/payments"
 	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 )
 
@@ -37,18 +38,23 @@ type mockClientEnvironment struct {
 	OpenDataTransferError        error
 	SendDataTransferVoucherError error
 	CloseDataTransferError       error
+	payments                     payments.Manager
 }
 
 func (e *mockClientEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *deal.Proposal) (datatransfer.ChannelID, error) {
 	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to, Initiator: testnet.GeneratePeers(1)[0]}, e.OpenDataTransferError
 }
 
-func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *deal.Payment, _ bool) error {
+func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *deal.Payment) error {
 	return e.SendDataTransferVoucherError
 }
 
 func (e *mockClientEnvironment) CloseDataTransfer(_ context.Context, _ datatransfer.ChannelID) error {
 	return e.CloseDataTransferError
+}
+
+func (e *mockClientEnvironment) Payments() payments.Manager {
+	return e.payments
 }
 
 func makeClientDealState(status deal.Status) *deal.ClientState {

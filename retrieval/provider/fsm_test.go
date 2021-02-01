@@ -34,10 +34,11 @@ func TestProviderFSM(t *testing.T) {
 }
 
 type mockProviderEnvironment struct {
-	TrackTransferError     error
-	UntrackTransferError   error
-	CloseDataTransferError error
-	DeleteStoreError       error
+	TrackTransferError      error
+	UntrackTransferError    error
+	CloseDataTransferError  error
+	DeleteStoreError        error
+	ResumeDataTransferError error
 }
 
 func (te *mockProviderEnvironment) DeleteStore(storeID multistore.StoreID) error {
@@ -54,6 +55,10 @@ func (te *mockProviderEnvironment) UntrackTransfer(ds deal.ProviderState) error 
 
 func (te *mockProviderEnvironment) CloseDataTransfer(_ context.Context, _ datatransfer.ChannelID) error {
 	return te.CloseDataTransferError
+}
+
+func (te *mockProviderEnvironment) ResumeDataTransfer(_ context.Context, _ datatransfer.ChannelID) error {
+	return te.ResumeDataTransferError
 }
 
 func makeProviderDealState(status deal.Status) *deal.ProviderState {

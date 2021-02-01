@@ -21,6 +21,8 @@ type Manager interface {
 	ListChannels() ([]address.Address, error)
 	GetChannelInfo(address.Address) (*ChannelInfo, error)
 	CreateVoucher(context.Context, address.Address, filecoin.BigInt, uint64) (*VoucherCreateResult, error)
+	AllocateLane(context.Context, address.Address) (uint64, error)
+	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
 }
 
 // Payments is our full payment system, it manages payment channels,
@@ -99,7 +101,7 @@ func (p *Payments) CreateVoucher(ctx context.Context, chAddr address.Address, am
 }
 
 // AllocateLane creates a new lane for a given channel
-func (p *Payments) AllocateLane(chAddr address.Address) (uint64, error) {
+func (p *Payments) AllocateLane(ctx context.Context, chAddr address.Address) (uint64, error) {
 	ch, err := p.channelByAddress(chAddr)
 	if err != nil {
 		return 0, fmt.Errorf("Unable to find channel to allocate lane: %v", err)
@@ -148,6 +150,155 @@ func (p *Payments) GetChannelInfo(chAddr address.Address) (*ChannelInfo, error) 
 		return nil, err
 	}
 	return ch.getChannelInfo(chAddr)
+}
+
+// AddVoucherInbound adds a voucher for an inbound channel.
+// If the channel is not in the store, fetches the channel from state (and checks that
+// the channel To address is owned by the wallet).
+func (p *Payments) AddVoucherInbound(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher, proof []byte, minDelta filecoin.BigInt) (filecoin.BigInt, error) {
+	if len(proof) > 0 {
+		return filecoin.NewInt(0), fmt.Errorf("err proof not supported")
+	}
+	// Get the channel, creating it from state if necessary
+	ch, err := p.inboundChannel(ctx, chAddr)
+	if err != nil {
+		return filecoin.BigInt{}, err
+	}
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+	return ch.addVoucherUnlocked(ctx, chAddr, sv, minDelta)
+}
+
+// inboundChannel gets an accessor for the given channel. The channel
+// must either exist in the store, or be an inbound channel that can be created
+// from state.
+func (p *Payments) inboundChannel(ctx context.Context, chAddr address.Address) (*channel, error) {
+	// Make sure channel is in store, or can be fetched from state, and that
+	// the channel To address is owned by the wallet
+	ci, err := p.trackInboundChannel(ctx, chAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// This is an inbound channel, so To is the Control address (this node)
+	from := ci.Target
+	to := ci.Control
+	return p.channelByFromTo(from, to)
+}
+
+func (p *Payments) trackInboundChannel(ctx context.Context, chAddr address.Address) (*ChannelInfo, error) {
+	// Need to take an exclusive lock here so that channel operations can't run
+	// in parallel (see channelLock)
+	p.lk.Lock()
+	defer p.lk.Unlock()
+
+	// Check if channel is in store
+	ci, err := p.store.ByAddress(chAddr)
+	if err == nil {
+		// Channel is in store, so it's already being tracked
+		return ci, nil
+	}
+
+	// If there's an error (besides channel not in store) return err
+	if err != ErrChannelNotTracked {
+		return nil, err
+	}
+
+	// Channel is not in store, so get channel from state
+	stateCi, err := p.loadStateChannelInfo(chAddr, DirInbound)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check that channel To address is in wallet
+	// to := stateCi.Control // Inbound channel so To addr is Control (this node)
+	// toKey, err := pm.api.StateAccountKey(ctx, to, filecoin.EmptyTSK)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// has, err := pm.wallet.WalletHas(ctx, toKey)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if !has {
+	// 	msg := "cannot add voucher for channel %s: wallet does not have key for address %s"
+	// 	return nil, fmt.Errorf(msg, ch, to)
+	// }
+
+	// Save channel to store
+	return p.store.TrackChannel(stateCi)
+}
+
+func (p *Payments) loadStateChannelInfo(chAddr address.Address, dir uint64) (*ChannelInfo, error) {
+	ch := &channel{
+		ctx:          p.ctx,
+		api:          p.api,
+		wal:          p.wal,
+		actStore:     p.actStore,
+		store:        p.store,
+		lk:           &multiLock{globalLock: &p.lk},
+		msgListeners: newMsgListeners(),
+	}
+	as, err := ch.loadActorState(chAddr)
+	if err != nil {
+		return nil, err
+	}
+	f, err := as.From()
+	if err != nil {
+		return nil, err
+	}
+	from, err := p.api.StateAccountKey(p.ctx, f, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to get account key for From actor state: %v", err)
+	}
+	t, err := as.To()
+	if err != nil {
+		return nil, err
+	}
+	to, err := p.api.StateAccountKey(p.ctx, t, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to get account key for To actor state: %v", err)
+	}
+	nextLane, err := nextLaneFromState(as)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to get next lane from state: %v", err)
+	}
+	ci := &ChannelInfo{
+		Channel:   &chAddr,
+		Direction: dir,
+		NextLane:  nextLane,
+	}
+	if dir == DirOutbound {
+		ci.Control = from
+		ci.Target = to
+	} else {
+		ci.Control = to
+		ci.Target = from
+	}
+	return ci, nil
+
+}
+
+func nextLaneFromState(st ChannelState) (uint64, error) {
+	laneCount, err := st.LaneCount()
+	if err != nil {
+		return 0, err
+	}
+	if laneCount == 0 {
+		return 0, nil
+	}
+
+	maxID := uint64(0)
+	if err := st.ForEachLaneState(func(idx uint64, _ LaneState) error {
+		if idx > maxID {
+			maxID = idx
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return maxID + 1, nil
 }
 
 func (p *Payments) channelByFromTo(from address.Address, to address.Address) (*channel, error) {

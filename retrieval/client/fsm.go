@@ -13,6 +13,7 @@ import (
 	"github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-peer"
 
+	"github.com/myelnet/go-hop-exchange/payments"
 	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 )
 
@@ -334,6 +335,7 @@ var StateEntryFuncs = fsm.StateEntryFuncs{
 // DealEnvironment is a bridge to the environment a client deal is executing in.
 // It provides access to relevant functionality on the retrieval client
 type DealEnvironment interface {
+	Payments() payments.Manager
 	OpenDataTransfer(ctx context.Context, to peer.ID, proposal *deal.Proposal) (datatransfer.ChannelID, error)
 	SendDataTransferVoucher(context.Context, datatransfer.ChannelID, *deal.Payment) error
 	CloseDataTransfer(context.Context, datatransfer.ChannelID) error
@@ -360,92 +362,92 @@ func SetupPaymentChannelStart(ctx fsm.Context, environment DealEnvironment, ds d
 	// if err != nil {
 	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
 	// }
+	res, err := environment.Payments().GetChannel(ctx.Context(), ds.ClientWallet, ds.MinerWallet, ds.TotalFunds)
+	if err != nil {
+		return ctx.Trigger(EventPaymentChannelErrored, err)
+	}
 
-	// if paych == address.Undef {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelCreateInitiated, msgCID)
-	// }
+	if res.Channel == address.Undef {
+		return ctx.Trigger(EventPaymentChannelCreateInitiated, res.WaitSentinel)
+	}
 
-	// return ctx.Trigger(rm.ClientEventPaymentChannelAddingFunds, msgCID, paych)
-	return nil
+	return ctx.Trigger(EventPaymentChannelAddingFunds, res.WaitSentinel, res.Channel)
 }
 
 // WaitPaymentChannelReady waits for a pending operation on a payment channel -- either creating or depositing funds
 func WaitPaymentChannelReady(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-	// paych, err := environment.Node().WaitForPaymentChannelReady(ctx.Context(), *deal.WaitMsgCID)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
-	// return ctx.Trigger(rm.ClientEventPaymentChannelReady, paych)
-	return nil
+	paych, err := environment.Payments().WaitForChannel(ctx.Context(), *ds.WaitMsgCID)
+	if err != nil {
+		return ctx.Trigger(EventPaymentChannelErrored, err)
+	}
+	return ctx.Trigger(EventPaymentChannelReady, paych)
 }
 
 // AllocateLane allocates a lane for this retrieval operation
 func AllocateLane(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-	// lane, err := environment.Node().AllocateLane(ctx.Context(), deal.PaymentInfo.PayCh)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventAllocateLaneErrored, err)
-	// }
-	// return ctx.Trigger(rm.ClientEventLaneAllocated, lane)
-	return nil
+	lane, err := environment.Payments().AllocateLane(ctx.Context(), ds.PaymentInfo.PayCh)
+	if err != nil {
+		return ctx.Trigger(EventAllocateLaneErrored, err)
+	}
+	return ctx.Trigger(EventLaneAllocated, lane)
 }
 
 // Ongoing just double checks that we may need to move out of the ongoing state cause a payment was previously requested
 func Ongoing(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-	// if deal.PaymentRequested.GreaterThan(big.Zero()) {
-	// 	if deal.LastPaymentRequested {
-	// 		return ctx.Trigger(rm.ClientEventLastPaymentRequested, big.Zero())
-	// 	}
-	// 	return ctx.Trigger(rm.ClientEventPaymentRequested, big.Zero())
-	// }
+	if ds.PaymentRequested.GreaterThan(big.Zero()) {
+		if ds.LastPaymentRequested {
+			return ctx.Trigger(EventLastPaymentRequested, big.Zero())
+		}
+		return ctx.Trigger(EventPaymentRequested, big.Zero())
+	}
 	return nil
 }
 
 // ProcessPaymentRequested processes a request for payment from the provider
 func ProcessPaymentRequested(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
 	// see if we need to send payment
-	// if deal.TotalReceived-deal.BytesPaidFor >= deal.CurrentInterval ||
-	// 	deal.AllBlocksReceived ||
-	// 	deal.UnsealPrice.GreaterThan(deal.UnsealFundsPaid) {
-	// 	return ctx.Trigger(rm.ClientEventSendFunds)
-	// }
+	if ds.TotalReceived-ds.BytesPaidFor >= ds.CurrentInterval ||
+		ds.AllBlocksReceived ||
+		ds.UnsealPrice.GreaterThan(ds.UnsealFundsPaid) {
+		return ctx.Trigger(EventSendFunds)
+	}
 	return nil
 }
 
 // SendFunds sends the next amount requested by the provider
-func SendFunds(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
+func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error {
 	// check that paymentRequest <= (totalReceived - bytesPaidFor) * pricePerByte + (unsealPrice - unsealFundsPaid), or fail
-	// retrievalPrice := big.Mul(abi.NewTokenAmount(int64(deal.TotalReceived-deal.BytesPaidFor)), deal.PricePerByte)
-	// unsealPrice := big.Sub(deal.UnsealPrice, deal.UnsealFundsPaid)
-	// if deal.PaymentRequested.GreaterThan(big.Add(retrievalPrice, unsealPrice)) {
-	// 	return ctx.Trigger(rm.ClientEventBadPaymentRequested, "too much money requested for bytes sent")
-	// }
-
-	// tok, _, err := environment.Node().GetChainHead(ctx.Context())
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventCreateVoucherFailed, err)
-	// }
+	retrievalPrice := big.Mul(abi.NewTokenAmount(int64(ds.TotalReceived-ds.BytesPaidFor)), ds.PricePerByte)
+	unsealPrice := big.Sub(ds.UnsealPrice, ds.UnsealFundsPaid)
+	if ds.PaymentRequested.GreaterThan(big.Add(retrievalPrice, unsealPrice)) {
+		return ctx.Trigger(EventBadPaymentRequested, "too much money requested for bytes sent")
+	}
 
 	// create payment voucher with node (or fail) for (fundsSpent + paymentRequested)
 	// use correct payCh + lane
 	// (node will do subtraction back to paymentRequested... slightly odd behavior but... well anyway)
-	// voucher, err := environment.Node().CreatePaymentVoucher(ctx.Context(), deal.PaymentInfo.PayCh, big.Add(deal.FundsSpent, deal.PaymentRequested), deal.PaymentInfo.Lane, tok)
-	// if err != nil {
-	// 	shortfallErr, ok := err.(rm.ShortfallError)
-	// 	if ok {
-	// 		return ctx.Trigger(rm.ClientEventVoucherShortfall, shortfallErr.Shortfall())
-	// 	}
-	// 	return ctx.Trigger(rm.ClientEventCreateVoucherFailed, err)
-	// }
+	voucher, err := env.Payments().CreateVoucher(ctx.Context(), ds.PaymentInfo.PayCh, big.Add(ds.FundsSpent, ds.PaymentRequested), ds.PaymentInfo.Lane)
+	if err != nil {
+		return ctx.Trigger(EventCreateVoucherFailed, err)
+	}
+	if voucher.Voucher == nil {
+		err := deal.NewShortfallError(voucher.Shortfall)
+		shortfallErr, ok := err.(deal.ShortfallError)
+		if ok {
+			return ctx.Trigger(EventVoucherShortfall, shortfallErr.Shortfall())
+		}
+		return ctx.Trigger(EventCreateVoucherFailed, err)
+	}
 
 	// send payment voucher (or fail)
-	// err = environment.SendDataTransferVoucher(ctx.Context(), deal.ChannelID, &rm.DealPayment{
-	// 	ID:             deal.DealProposal.ID,
-	// 	PaymentChannel: deal.PaymentInfo.PayCh,
-	// 	PaymentVoucher: voucher,
-	// }, deal.LegacyProtocol)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventWriteDealPaymentErrored, err)
-	// }
+	err = env.SendDataTransferVoucher(ctx.Context(), ds.ChannelID, &deal.Payment{
+		ID:             ds.Proposal.ID,
+		PaymentChannel: ds.PaymentInfo.PayCh,
+		PaymentVoucher: voucher.Voucher,
+	})
+	if err != nil {
+		return ctx.Trigger(EventWriteDealPaymentErrored, err)
+	}
 
 	return ctx.Trigger(EventPaymentSent)
 }

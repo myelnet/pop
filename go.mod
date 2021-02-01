@@ -51,5 +51,6 @@ require (
 	github.com/supranational/blst v0.3.2
 	github.com/whyrusleeping/cbor-gen v0.0.0-20200826160007-0b9f6c5fb163
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
+	google.golang.org/appengine v1.6.5
 	gotest.tools v2.2.0+incompatible
 )

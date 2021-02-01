@@ -156,12 +156,17 @@ type DealEnvironment interface {
 	TrackTransfer(deal.ProviderState) error
 	UntrackTransfer(deal.ProviderState) error
 	DeleteStore(multistore.StoreID) error
+	ResumeDataTransfer(context.Context, datatransfer.ChannelID) error
 	CloseDataTransfer(context.Context, datatransfer.ChannelID) error
 }
 
 // TrackTransfer resumes a deal so we can start sending data
 func TrackTransfer(ctx fsm.Context, environment DealEnvironment, ds deal.ProviderState) error {
 	err := environment.TrackTransfer(ds)
+	if err != nil {
+		return ctx.Trigger(EventDataTransferError, err)
+	}
+	err = environment.ResumeDataTransfer(ctx.Context(), ds.ChannelID)
 	if err != nil {
 		return ctx.Trigger(EventDataTransferError, err)
 	}

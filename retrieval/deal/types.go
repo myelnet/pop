@@ -140,6 +140,21 @@ type ProviderState struct {
 	LegacyProtocol  bool
 }
 
+// Identifier provides a unique id for this provider deal
+func (pds ProviderState) Identifier() ProviderDealIdentifier {
+	return ProviderDealIdentifier{Receiver: pds.Receiver, DealID: pds.ID}
+}
+
+// ProviderDealIdentifier is a value that uniquely identifies a deal
+type ProviderDealIdentifier struct {
+	Receiver peer.ID
+	DealID   ID
+}
+
+func (p ProviderDealIdentifier) String() string {
+	return fmt.Sprintf("%v/%v", p.Receiver, p.DealID)
+}
+
 // PaymentInfo is the payment channel and lane for a deal, once it is setup
 type PaymentInfo struct {
 	PayCh address.Address
@@ -156,4 +171,22 @@ type Payment struct {
 // Type method makes DealPayment usable as a voucher
 func (dr *Payment) Type() datatransfer.TypeIdentifier {
 	return "RetrievalDealPayment/1"
+}
+
+// ShortfallError is an error that indicates a short fall of funds
+type ShortfallError struct {
+	shortfall abi.TokenAmount
+}
+
+// NewShortfallError returns a new error indicating a shortfall of funds
+func NewShortfallError(shortfall abi.TokenAmount) error {
+	return ShortfallError{shortfall}
+}
+
+// Shortfall returns the numerical value of the shortfall
+func (se ShortfallError) Shortfall() abi.TokenAmount {
+	return se.shortfall
+}
+func (se ShortfallError) Error() string {
+	return fmt.Sprintf("Inssufficient Funds. Shortfall: %s", se.shortfall.String())
 }

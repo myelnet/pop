@@ -129,6 +129,10 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 	return testNode
 }
 
+func (tn *TestNode) SetupGraphSync(ctx context.Context) {
+	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
+}
+
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
 	var err error
 	tn.DTStoredCounter = storedcounter.New(tn.Ds, datastore.NewKey("nextDTID"))
