@@ -20,4 +20,8 @@ but does not require unsealing as the blocks are not sealed in storage sectors b
 
 7. Once the channel address is returned the state machine will call the payment manager to allocate and return a new lane number
 
+8. Meanwhile the provider resumes the data transfer and starts sending blocks until the given payment interval is reached and will request a payment to continue.
+
+9. The Client will create a new voucher for the requested payment, sign it and send to the provider. The provider will validate the voucher and if accepted send the next amount of bytes.
+
 

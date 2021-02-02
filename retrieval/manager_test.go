@@ -32,7 +32,6 @@ var blockGen = blocksutil.NewBlockGenerator()
 type mockPayments struct {
 	chResponse *payments.ChannelResponse
 	chAddr     address.Address
-	voucher    *payments.VoucherCreateResult
 }
 
 func (p *mockPayments) GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*payments.ChannelResponse, error) {
@@ -52,7 +51,21 @@ func (p *mockPayments) GetChannelInfo(addr address.Address) (*payments.ChannelIn
 }
 
 func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, amt filecoin.BigInt, lane uint64) (*payments.VoucherCreateResult, error) {
-	return p.voucher, nil
+	// sig := &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("doesn't matter")}
+	vouch := &paych.SignedVoucher{
+		ChannelAddr: addr,
+		TimeLockMin: abi.ChainEpoch(1),
+		TimeLockMax: abi.ChainEpoch(0),
+		Lane:        lane,
+		Nonce:       0,
+		Amount:      amt,
+		// Signature:      sig,
+	}
+	vouchRes := &payments.VoucherCreateResult{
+		Voucher:   vouch,
+		Shortfall: filecoin.NewInt(0),
+	}
+	return vouchRes, nil
 }
 
 func (p *mockPayments) AllocateLane(ctx context.Context, add address.Address) (uint64, error) {
@@ -64,119 +77,115 @@ func (p *mockPayments) AddVoucherInbound(ctx context.Context, addr address.Addre
 }
 
 func TestRetrieval(t *testing.T) {
-	bgCtx := context.Background()
 
-	mn := mocknet.New(bgCtx)
-
-	n1 := testutil.NewTestNode(mn, t)
-	n2 := testutil.NewTestNode(mn, t)
-
-	err := mn.LinkAll()
-	require.NoError(t, err)
-
-	dTTmpDir, err := ioutil.TempDir("", "dt-tmp")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dTTmpDir)
-	})
-
-	// n1.SetupDataTransfer(bgCtx, t)
-	n1.SetupGraphSync(bgCtx)
-	tp1 := &Transport{
-		Host:      n1.Host,
-		GraphSync: n1.Gs,
-		Datastore: n1.Ds,
-		DirPath:   dTTmpDir,
+	testCases := []struct {
+		name string
+	}{
+		{name: "Basic transfer"},
 	}
-	dt1, err := tp1.NewDataTransfer(bgCtx, "client")
-	require.NoError(t, err)
-	chResponse := &payments.ChannelResponse{
-		Channel:      address.Undef,
-		WaitSentinel: blockGen.Next().Cid(),
+	for i, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			bgCtx := context.Background()
+
+			mn := mocknet.New(bgCtx)
+
+			n1 := testutil.NewTestNode(mn, t)
+			n2 := testutil.NewTestNode(mn, t)
+
+			err := mn.LinkAll()
+			require.NoError(t, err)
+
+			dTTmpDir, err := ioutil.TempDir("", "dt-tmp")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_ = os.RemoveAll(dTTmpDir)
+			})
+
+			// n1.SetupDataTransfer(bgCtx, t)
+			n1.SetupGraphSync(bgCtx)
+			tp1 := &Transport{
+				Host:      n1.Host,
+				GraphSync: n1.Gs,
+				Datastore: n1.Ds,
+				DirPath:   dTTmpDir,
+			}
+			dt1, err := tp1.NewDataTransfer(bgCtx, "client")
+			require.NoError(t, err)
+			chResponse := &payments.ChannelResponse{
+				Channel:      address.Undef,
+				WaitSentinel: blockGen.Next().Cid(),
+			}
+			chAddr := tutils.NewIDAddr(t, uint64(i*10))
+
+			pay1 := &mockPayments{
+				chResponse: chResponse,
+				chAddr:     chAddr,
+			}
+			r1, err := NewClient(bgCtx, n1.Ms, n1.Ds, n1.Counter, dt1, pay1, n1.Host.ID())
+			require.NoError(t, err)
+
+			// n2.SetupDataTransfer(bgCtx, t)
+			n2.SetupGraphSync(bgCtx)
+			tp2 := &Transport{
+				Host:      n2.Host,
+				GraphSync: n2.Gs,
+				Datastore: n2.Ds,
+				DirPath:   dTTmpDir,
+			}
+			dt2, err := tp2.NewDataTransfer(bgCtx, "provider")
+			require.NoError(t, err)
+			pay2 := &mockPayments{}
+			r2, err := NewProvider(bgCtx, n2.Ms, n2.Ds, dt2, pay2, n2.Host.ID())
+			require.NoError(t, err)
+
+			// n1 is our client and is retrieving a file n2 has so we add it first
+			link, origBytes := n2.LoadUnixFSFileToStore(bgCtx, t, "/retrieval/readme.md")
+			rootCid := link.(cidlink.Link).Cid
+
+			clientAddr, err := address.NewIDAddress(uint64(10))
+			require.NoError(t, err)
+			providerAddr, err := address.NewIDAddress(uint64(99))
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+			defer cancel()
+
+			r2.SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
+				fmt.Println("Provider:", deal.Statuses[state.Status])
+			})
+
+			clientDealStateChan := make(chan deal.ClientState)
+			r1.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
+				fmt.Println("Client:", deal.Statuses[state.Status])
+				switch state.Status {
+				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
+					clientDealStateChan <- state
+					return
+				}
+			})
+
+			clientStoreID := n1.Ms.Next()
+			pricePerByte := abi.NewTokenAmount(1000)
+			paymentInterval := uint64(10000)
+			paymentIntervalIncrease := uint64(1000)
+			unsealPrice := big.Zero()
+			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
+			require.NoError(t, err)
+
+			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes))))
+
+			did, err := r1.Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
+			require.NoError(t, err)
+			require.Equal(t, did, deal.ID(0))
+
+			select {
+			case <-ctx.Done():
+				t.Fatal("deal failed to complete")
+			case clientDealState := <-clientDealStateChan:
+				require.Equal(t, deal.StatusCompleted, clientDealState.Status)
+			}
+
+			n1.VerifyFileTransferred(bgCtx, t, rootCid, origBytes)
+		})
 	}
-	chAddr := tutils.NewIDAddr(t, 101)
-	// sig := &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("doesn't matter")}
-	vouch := &paych.SignedVoucher{
-		ChannelAddr: chAddr,
-		TimeLockMin: abi.ChainEpoch(1),
-		TimeLockMax: abi.ChainEpoch(0),
-		Lane:        0,
-		Nonce:       0,
-		Amount:      big.NewInt(1),
-		// Signature:      sig,
-	}
-	vouchRes := &payments.VoucherCreateResult{
-		Voucher:   vouch,
-		Shortfall: filecoin.NewInt(0),
-	}
-	pay1 := &mockPayments{
-		chResponse: chResponse,
-		chAddr:     chAddr,
-		voucher:    vouchRes,
-	}
-	r1, err := NewClient(bgCtx, n1.Ms, n1.Ds, n1.Counter, dt1, pay1, n1.Host.ID())
-	require.NoError(t, err)
-
-	// n2.SetupDataTransfer(bgCtx, t)
-	n2.SetupGraphSync(bgCtx)
-	tp2 := &Transport{
-		Host:      n2.Host,
-		GraphSync: n2.Gs,
-		Datastore: n2.Ds,
-		DirPath:   dTTmpDir,
-	}
-	dt2, err := tp2.NewDataTransfer(bgCtx, "provider")
-	require.NoError(t, err)
-	pay2 := &mockPayments{}
-	r2, err := NewProvider(bgCtx, n2.Ms, n2.Ds, dt2, pay2, n2.Host.ID())
-	require.NoError(t, err)
-
-	// n1 is our client and is retrieving a file n2 has so we add it first
-	link, origBytes := n2.LoadUnixFSFileToStore(bgCtx, t, "/retrieval/readme.md")
-	rootCid := link.(cidlink.Link).Cid
-
-	clientAddr, err := address.NewIDAddress(uint64(10))
-	require.NoError(t, err)
-	providerAddr, err := address.NewIDAddress(uint64(99))
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
-	defer cancel()
-
-	r2.SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
-		fmt.Println("Provider:", deal.Statuses[state.Status])
-	})
-
-	clientDealStateChan := make(chan deal.ClientState)
-	r1.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
-		fmt.Println("Client:", deal.Statuses[state.Status])
-		switch state.Status {
-		case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
-			clientDealStateChan <- state
-			return
-		}
-	})
-
-	clientStoreID := n1.Ms.Next()
-	pricePerByte := abi.NewTokenAmount(1000)
-	paymentInterval := uint64(10000)
-	paymentIntervalIncrease := uint64(1000)
-	unsealPrice := big.Zero()
-	params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
-	require.NoError(t, err)
-
-	expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes))))
-
-	did, err := r1.Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
-	require.NoError(t, err)
-	require.Equal(t, did, deal.ID(0))
-
-	select {
-	case <-ctx.Done():
-		t.Fatal("deal failed to complete")
-	case clientDealState := <-clientDealStateChan:
-		require.Equal(t, deal.StatusCompleted, clientDealState.Status)
-	}
-
-	n1.VerifyFileTransferred(bgCtx, t, rootCid, origBytes)
 }

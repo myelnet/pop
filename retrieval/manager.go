@@ -34,19 +34,6 @@ type Unsubscribe func()
 
 // Manager handles all retrieval operations both as client and provider
 type Manager interface {
-	SubscribeToProviderEvents(subscriber provider.Subscriber) Unsubscribe
-	SubscribeToClientEvents(subscriber client.Subscriber) Unsubscribe
-	// Retrieve(
-	// 	ctx context.Context,
-	// 	root cid.Cid,
-	// 	params deal.Params,
-	// 	totalFunds abi.TokenAmount,
-	// 	sender peer.ID,
-	// 	client address.Address,
-	// 	provider address.Address,
-	// 	storeID *multistore.StoreID,
-	// ) (deal.ID, error)
-	Start(context.Context) error
 }
 
 // Retrieval manager implementation
@@ -84,13 +71,6 @@ func NewClient(
 		dataTransfer: dt,
 		pay:          pay,
 	}
-	// c.dataTransfer, err = tp.NewDataTransfer("client")
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// if err := c.dataTransfer.Start(ctx); err != nil {
-	// 	return nil, err
-	// }
 	c.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("client-v0")), fsm.Parameters{
 		Environment:     &clientDealEnvironment{c},
 		StateType:       deal.ClientState{},
@@ -120,6 +100,9 @@ func NewClient(
 	// 	&deal.Proposal{},
 	// 	TransportConfigurer(pid, &clientStoreGetter{c}),
 	// )
+	// if err != nil {
+	// 	return nil, err
+	// }
 	return c, nil
 }
 
@@ -159,13 +142,6 @@ func NewProvider(
 		dataTransfer: dt,
 		pay:          pay,
 	}
-	// p.dataTransfer, err = tp.NewDataTransfer("provider")
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// if err := p.dataTransfer.Start(ctx); err != nil {
-	// 	return nil, err
-	// }
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{
 		Environment:     &providerDealEnvironment{p},
 		StateType:       deal.ProviderState{},
@@ -275,67 +251,27 @@ func New(
 	sc *storedcounter.StoredCounter,
 	pay payments.Manager,
 	tp Transporter,
-) (Manager, error) {
+) (*Client, *Provider, error) {
 
 	dt, err := tp.NewDataTransfer(ctx, "client")
-
+	if err != nil {
+		return nil, nil, err
+	}
 	c, err := NewClient(ctx, ms, ds, sc, dt, pay, tp.PeerID())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	dt, err = tp.NewDataTransfer(ctx, "provider")
+	if err != nil {
+		return nil, nil, err
+	}
 	p, err := NewProvider(ctx, ms, ds, dt, pay, tp.PeerID())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Provider setup
-	r := &Retrieval{
-		client:   c,
-		provider: p,
-	}
-	return r, nil
-}
-
-// SubscribeToProviderEvents to listen to transfer state changes on the provider side
-func (r *Retrieval) SubscribeToProviderEvents(subscriber provider.Subscriber) Unsubscribe {
-	return Unsubscribe(r.provider.subscribers.Subscribe(subscriber))
-}
-
-// SubscribeToClientEvents to listen to transfer state changes on the client side
-func (r *Retrieval) SubscribeToClientEvents(subscriber client.Subscriber) Unsubscribe {
-	return Unsubscribe(r.provider.subscribers.Subscribe(subscriber))
-}
-
-// Start the data transfer
-func (r *Retrieval) Start(ctx context.Context) error {
-	ready := make(chan error, 2)
-	// if err := r.provider.dataTransfer.Start(ctx); err != nil {
-	// 	return err
-	// }
-	r.provider.dataTransfer.OnReady(func(err error) {
-		ready <- err
-	})
-	// if err := r.client.dataTransfer.Start(ctx); err != nil {
-	// 	return err
-	// }
-	r.client.dataTransfer.OnReady(func(err error) {
-		ready <- err
-	})
-
-	for i := 0; i < cap(ready); i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-ready:
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+	return c, p, nil
 }
 
 // Retrieve content
