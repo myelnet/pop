@@ -15,7 +15,6 @@ import (
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/ipfs/go-ipfs/keystore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/go-hop-exchange/filecoin"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
@@ -32,7 +31,7 @@ func TestAddFunds(t *testing.T) {
 
 	api := fil.NewMockLotusAPI()
 
-	ks := keystore.NewMemKeystore()
+	ks := wallet.NewMemKeystore()
 
 	w := wallet.NewIPFS(ks, api)
 
@@ -133,7 +132,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 
 	api := fil.NewMockLotusAPI()
 
-	ks := keystore.NewMemKeystore()
+	ks := wallet.NewMemKeystore()
 
 	w := wallet.NewIPFS(ks, api)
 

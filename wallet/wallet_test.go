@@ -14,7 +14,6 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
-	"github.com/ipfs/go-ipfs/keystore"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +22,7 @@ var blockGenerator = blocksutil.NewBlockGenerator()
 
 func TestSecpSignature(t *testing.T) {
 	ctx := context.Background()
-	ks := keystore.NewMemKeystore()
+	ks := NewMemKeystore()
 
 	w := NewIPFS(ks, nil)
 
@@ -72,7 +71,7 @@ func TestSecpSignature(t *testing.T) {
 
 func TestDefaultAddress(t *testing.T) {
 	ctx := context.Background()
-	ks := keystore.NewMemKeystore()
+	ks := NewMemKeystore()
 
 	w := NewIPFS(ks, nil)
 
@@ -108,7 +107,7 @@ func TestDefaultAddress(t *testing.T) {
 
 func TestImportKey(t *testing.T) {
 	ctx := context.Background()
-	ks := keystore.NewMemKeystore()
+	ks := NewMemKeystore()
 
 	w := NewIPFS(ks, nil)
 
@@ -178,7 +177,7 @@ func TestTransfer(t *testing.T) {
 		t.Fatal(ctx)
 	}
 	defer api.Close()
-	ks := keystore.NewMemKeystore()
+	ks := NewMemKeystore()
 
 	w := NewIPFS(ks, api)
 
