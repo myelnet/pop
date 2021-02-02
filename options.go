@@ -11,10 +11,10 @@ import (
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	pin "github.com/ipfs/go-ipfs-pinner"
-	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange/filecoin"
+	"github.com/myelnet/go-hop-exchange/wallet"
 )
 
 // TODO: We should be able to customize these in the options
@@ -48,7 +48,7 @@ func WithDatastore(ds datastore.Batching) func(*Exchange) error {
 }
 
 // WithKeystore sets an IPFS keystore as the underlying key storage solution
-func WithKeystore(ks keystore.Keystore) func(*Exchange) error {
+func WithKeystore(ks wallet.Keystore) func(*Exchange) error {
 	return func(ex *Exchange) error {
 		ex.Keystore = ks
 		return nil

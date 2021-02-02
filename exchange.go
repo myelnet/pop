@@ -20,7 +20,6 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	pin "github.com/ipfs/go-ipfs-pinner"
-	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -108,7 +107,7 @@ type Exchange struct {
 	PubSub      *pubsub.PubSub
 	GraphSync   graphsync.GraphExchange
 	Pinner      pin.Pinner
-	Keystore    keystore.Keystore
+	Keystore    wallet.Keystore
 
 	multiStore   *multistore.MultiStore
 	supply       supply.Manager
