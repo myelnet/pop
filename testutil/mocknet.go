@@ -16,6 +16,7 @@ import (
 	dtimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
@@ -68,6 +69,8 @@ type TestNode struct {
 	DTTmpDir        string
 	DTStoredCounter *storedcounter.StoredCounter
 	Dt              datatransfer.Manager
+	Ms              *multistore.MultiStore
+	Counter         *storedcounter.StoredCounter
 }
 
 func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
@@ -110,6 +113,11 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 
 	testNode.Bs = blockstore.NewBlockstore(testNode.Ds)
 
+	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
+	require.NoError(t, err)
+
+	testNode.Counter = storedcounter.New(testNode.Ds, datastore.NewKey("nextID"))
+
 	testNode.DAG = merkledag.NewDAGService(blockservice.New(testNode.Bs, offline.Exchange(testNode.Bs)))
 
 	testNode.Loader = makeLoader(testNode.Bs)
@@ -119,6 +127,10 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 	require.NoError(t, err)
 
 	return testNode
+}
+
+func (tn *TestNode) SetupGraphSync(ctx context.Context) {
+	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
 }
 
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
