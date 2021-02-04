@@ -284,3 +284,8 @@ func NewDataTransfer(h host.Host, gs graphsync.GraphExchange, ds datastore.Batch
 	// Build the manager
 	return dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
 }
+
+// DataTransfer gives access to the datatransfer manager instance powering all the transfers for the exchange
+func (e *Exchange) DataTransfer() datatransfer.Manager {
+	return e.dataTransfer
+}
