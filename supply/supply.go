@@ -16,7 +16,7 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
-	SendAddRequest(context.Context, cid.Cid, uint64) error
+	SendAddRequest(context.Context, cid.Cid, uint64)
 	SubscribeToEvents(Subscriber) Unsubscribe
 }
 

@@ -165,7 +165,6 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 		done := make(chan bool)
 		unsub := exch.Supply().SubscribeToEvents(func(evt supply.Event) {
-			runenv.RecordMessage("Sent to %v peers", len(evt.Providers))
 			done <- true
 		})
 		defer unsub()
@@ -190,8 +189,7 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		}
 
 		select {
-		case is := <-done:
-			runenv.RecordMessage("client is done %v", is)
+		case <-done:
 			initCtx.SyncClient.MustSignalEntry(ctx, completed)
 			return nil
 		case <-ctx.Done():
@@ -238,7 +236,7 @@ func importFile(ctx context.Context, fpath string, dg ipldformat.DAGService) (ci
 		return cid.Undef, err
 	}
 
-	go bufferedDS.Commit()
+	bufferedDS.Commit()
 
 	return nd.Cid(), nil
 }
