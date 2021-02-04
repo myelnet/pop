@@ -11,6 +11,7 @@ import (
 
 // EventReceiver is any thing that can receive FSM events
 type EventReceiver interface {
+	Has(id interface{}) (bool, error)
 	Send(id interface{}, name fsm.EventName, args ...interface{}) (err error)
 }
 
@@ -44,10 +45,14 @@ func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
 			return
 		}
 
+		if has, _ := deals.Has(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}); !has {
+			return
+		}
+
 		if channelState.Status() == datatransfer.Completed {
 			err := deals.Send(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}, EventComplete)
 			if err != nil {
-				fmt.Println("processing dt event:", err)
+				fmt.Println("processing provider dt event:", err)
 			}
 		}
 
@@ -58,7 +63,7 @@ func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
 
 		err := deals.Send(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}, retrievalEvent, params...)
 		if err != nil {
-			fmt.Println("processing dt event:", err)
+			fmt.Printf("processing provider dt event %s: %v\n", datatransfer.Events[event.Code], err)
 		}
 
 	}

@@ -41,7 +41,7 @@ func (m *Manifest) HandleAddRequest(stream AddRequestStreamer) {
 	// we may need to request deal info in the message
 	// + check if we have room to store it
 	if err := m.AddBlock(context.Background(), req, stream.OtherPeer()); err != nil {
-		fmt.Println("Unable to add new block to our supply")
+		fmt.Println("Unable to add new block to our supply", err)
 		return
 	}
 }
