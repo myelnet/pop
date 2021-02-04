@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	datatransfer "github.com/filecoin-project/go-data-transfer"
 	bserv "github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -43,14 +44,10 @@ var testcases = map[string]interface{}{
 }
 
 func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
-	// State notifying when a client has added content
-	addedState := sync.State("added")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	role := runenv.StringParam("role")
-	runenv.RecordMessage("Started instance with role: %s", role)
 
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
@@ -71,7 +68,12 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	ip := initCtx.NetClient.MustGetDataNetworkIP()
 
 	// create a new libp2p Host that listens on a random TCP port
-	h, err := lp2p.New(ctx, lp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)))
+	h, err := lp2p.New(ctx,
+		lp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
+		// Running without security because of a bug
+		// see https://github.com/libp2p/go-libp2p-noise/issues/70
+		lp2p.NoSecurity,
+	)
 	if err != nil {
 		return err
 	}
@@ -154,6 +156,23 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	runenv.RecordMessage("done dialling my peers")
 
+	otherClients := runenv.IntParam("clients")
+	if role == "client" {
+		otherClients--
+	}
+
+	done := make(chan datatransfer.Event, otherClients)
+	unsubscribe := exch.DataTransfer().SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
+		// We only wait for content we receive from clients
+		if channelState.Sender() == h.ID() {
+			return
+		}
+		if channelState.Status() == datatransfer.Completed || event.Code == datatransfer.Error {
+			done <- event
+		}
+	})
+	defer unsubscribe()
+
 	// Wait for all peers to signal that they're done with the connection phase.
 	initCtx.SyncClient.MustSignalAndWait(ctx, "connected", runenv.TestInstanceCount)
 
@@ -176,15 +195,20 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err != nil {
 			return err
 		}
-		initCtx.SyncClient.MustSignalEntry(ctx, addedState)
-		return nil
 	}
 
-	err = <-initCtx.SyncClient.MustBarrier(ctx, addedState, runenv.IntParam("clients")).C
-	if err != nil {
-		return err
+	for i := 0; i < cap(done); i++ {
+		select {
+		case evt := <-done:
+			if evt.Code == datatransfer.Error {
+				return fmt.Errorf("datatransfer error: %s", evt.Message)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
+	initCtx.SyncClient.MustSignalAndWait(ctx, "completed", runenv.TestInstanceCount)
 	_ = h.Close()
 	return nil
 }

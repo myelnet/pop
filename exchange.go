@@ -59,8 +59,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	ex.net = NewFromLibp2pHost(ex.Host)
 
 	// Retrieval data transfer setup
-	ex.dataTransfer, err = NewDataTransfer(ex.Host, ex.GraphSync, ex.Datastore, "retrieval", ex.cidListDir)
-	err = ex.dataTransfer.Start(ctx)
+	ex.dataTransfer, err = NewDataTransfer(ctx, ex.Host, ex.GraphSync, ex.Datastore, "retrieval", ex.cidListDir)
 	if err != nil {
 		return nil, err
 	}
@@ -80,19 +79,10 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	ex.reqSub = sub
 	go ex.requestLoop(ctx)
 
-	// Setup a separate data transfer instance for supplying new blocks to serve
-	// TODO: not sure if it would be better to reuse the same data transfer manager but it seems
-	// safer to separate the instances in case our supply breaks we can still serve blocks or the other
-	// way around. It is probably better to create isolated store instances for supply and retrieval
-	// transactions. Will improve when I have more evidence.
-	sdataTransfer, err := NewDataTransfer(ex.Host, ex.GraphSync, ex.Datastore, "supply", ex.cidListDir)
-	if err != nil {
-		return nil, err
-	}
 	// TODO: validate AddRequest
-	sdataTransfer.RegisterVoucherType(&supply.AddRequest{}, &UnifiedRequestValidator{})
+	ex.dataTransfer.RegisterVoucherType(&supply.AddRequest{}, &UnifiedRequestValidator{})
 
-	ex.supply = supply.New(ctx, ex.Host, sdataTransfer)
+	ex.supply = supply.New(ctx, ex.Host, ex.dataTransfer)
 
 	return ex, nil
 }
@@ -270,7 +260,7 @@ func (e *Exchange) Wallet() wallet.Driver {
 }
 
 // NewDataTransfer packages together all the things needed for a new manager to work
-func NewDataTransfer(h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
+func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
 	// Create a special key for persisting the datatransfer manager state
 	dtDs := namespace.Wrap(ds, datastore.NewKey(dsprefix+"-datatransfer"))
 	// Setup datatransfer network
@@ -282,7 +272,21 @@ func NewDataTransfer(h host.Host, gs graphsync.GraphExchange, ds datastore.Batch
 	// persist ids for new transfers
 	storedCounter := storedcounter.New(ds, key)
 	// Build the manager
-	return dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
+	dt, err := dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
+	if err != nil {
+		return nil, err
+	}
+	ready := make(chan error, 1)
+	dt.OnReady(func(err error) {
+		ready <- err
+	})
+	dt.Start(ctx)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-ready:
+		return dt, err
+	}
 }
 
 // DataTransfer gives access to the datatransfer manager instance powering all the transfers for the exchange
