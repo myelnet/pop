@@ -159,6 +159,7 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	initCtx.SyncClient.MustSignalAndWait(ctx, "connected", runenv.TestInstanceCount)
 
 	if role == "client" {
+
 		// generate 1600 bytes of random data
 		data := make([]byte, 1600)
 		rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)

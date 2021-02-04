@@ -293,3 +293,8 @@ func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchang
 func (e *Exchange) DataTransfer() datatransfer.Manager {
 	return e.dataTransfer
 }
+
+// Supply exposes the supply manager
+func (e *Exchange) Supply() supply.Manager {
+	return e.supply
+}
