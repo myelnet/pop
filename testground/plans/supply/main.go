@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/testground/sdk-go/run"
 	"github.com/testground/sdk-go/runtime"
@@ -43,6 +44,8 @@ var testcases = map[string]interface{}{
 }
 
 func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
+	completed := sync.State("completed")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
@@ -160,6 +163,13 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	if role == "client" {
 
+		done := make(chan bool)
+		unsub := exch.Supply().SubscribeToEvents(func(evt supply.Event) {
+			runenv.RecordMessage("Sent to %v peers", len(evt.Providers))
+			done <- true
+		})
+		defer unsub()
+
 		// generate 1600 bytes of random data
 		data := make([]byte, 1600)
 		rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
@@ -178,9 +188,22 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err != nil {
 			return err
 		}
+
+		select {
+		case <-done:
+			runenv.RecordMessage("client is done")
+			initCtx.SyncClient.MustSignalEntry(ctx, completed)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
-	initCtx.SyncClient.MustSignalAndWait(ctx, "completed", runenv.TestInstanceCount)
+	err = <-initCtx.SyncClient.MustBarrier(ctx, completed, runenv.IntParam("clients")).C
+	if err != nil {
+		return err
+	}
+
 	_ = h.Close()
 	return nil
 }
