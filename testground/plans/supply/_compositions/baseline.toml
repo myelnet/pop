@@ -1,0 +1,30 @@
+[metadata]
+  name = "baseline"
+
+[global]
+  plan = "supply"
+  case = "supply"
+  total_instances = 10
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.run.test_params]
+  clients = "7"
+  providers = "3"
+
+[[groups]]
+  id = "providers"
+  [groups.instances]
+    count = 3
+  [groups.run]
+    [groups.run.test_params]
+      role = "provider"
+
+[[groups]]
+  id = "clients"
+  [groups.instances]
+    count = 7
+  [groups.run]
+    [groups.run.test_params]
+      role = "client"
+

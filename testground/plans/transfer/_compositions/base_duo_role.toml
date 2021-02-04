@@ -1,0 +1,17 @@
+[metadata]
+  name = "base_duo_role"
+
+[global]
+  plan = "transfer"
+  case = "duo_role"
+  total_instances = 2
+  builder = "docker:go"
+  runner = "local:docker"
+
+[[groups]]
+  id = "all"
+  [groups.instances]
+    count = 2
+  [groups.run]
+    [groups.run.test_params]
+      role = "all"
