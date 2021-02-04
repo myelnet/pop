@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/hannahhoward/go-pubsub"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -29,6 +30,8 @@ type Supply struct {
 	// Keep track of which of our peers may have a block
 	// Not use for anything else than debugging currently but may be useful eventualy
 	providerPeers map[cid.Cid]*peer.Set
+	// New content subscriber to know when we've sent the content to new providers
+	subscribers *pubsub.PubSub
 }
 
 // New instance of the SupplyManager
@@ -49,6 +52,7 @@ func New(
 		net:           net,
 		man:           manifest,
 		providerPeers: make(map[cid.Cid]*peer.Set),
+		subscribers:   pubsub.New(EventDispatcher),
 	}
 	return m
 }
@@ -108,6 +112,44 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 		s.providerPeers[payload].Add(p)
 	}
 
+	// Notify subscribers
+	s.subscribers.Publish(Event{
+		PayloadCID: payload,
+		Providers:  s.providerPeers[payload].Peers(),
+	})
+
 	return nil
 
+}
+
+// SubscribeToEvents to listen for supply events
+func (s *Supply) SubscribeToEvents(subscriber Subscriber) Unsubscribe {
+	return Unsubscribe(s.subscribers.Subscribe(subscriber))
+}
+
+// Subscriber is a callback to listen for supply events
+type Subscriber func(event Event)
+
+// Unsubscribe cancels a subscription
+type Unsubscribe func()
+
+// Event determines when we propagated content to a new provider
+// TODO: different event types etc
+type Event struct {
+	PayloadCID cid.Cid
+	Providers  []peer.ID
+}
+
+// EventDispatcher converts our pubsub signature to our callback signature
+func EventDispatcher(evt pubsub.Event, subscriberFn pubsub.SubscriberFn) error {
+	ie, ok := evt.(Event)
+	if !ok {
+		return fmt.Errorf("wrong type of event")
+	}
+	cb, ok := subscriberFn.(Subscriber)
+	if !ok {
+		return fmt.Errorf("wrong subscriber")
+	}
+	cb(ie)
+	return nil
 }

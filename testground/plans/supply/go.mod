@@ -18,8 +18,6 @@ require (
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-core v0.8.0
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
-	github.com/myelnet/go-hop-exchange v0.0.0-20210204120303-ad17216580c9
+	github.com/myelnet/go-hop-exchange v0.0.0-20210204132026-20f3895e7b70
 	github.com/testground/sdk-go v0.2.7
 )
-
-replace github.com/myelnet/go-hop-exchange => ../../../.

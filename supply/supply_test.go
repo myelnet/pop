@@ -52,12 +52,15 @@ func TestSendAddRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	done := make(chan bool, 1)
+	unsubscribe := supply.SubscribeToEvents(func(event Event) {
+		require.Equal(t, rootCid, event.PayloadCID)
+		done <- true
+	})
+	defer unsubscribe()
+
 	go func(ctx context.Context, c cid.Cid, b []byte) {
 		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
 		require.NoError(t, err)
-
-		done <- true
-
 	}(ctx, rootCid, origBytes)
 
 	select {

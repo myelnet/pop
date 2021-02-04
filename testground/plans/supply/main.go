@@ -10,7 +10,6 @@ import (
 	"os"
 	"time"
 
-	datatransfer "github.com/filecoin-project/go-data-transfer"
 	bserv "github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -44,7 +43,7 @@ var testcases = map[string]interface{}{
 }
 
 func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
 	role := runenv.StringParam("role")
@@ -156,23 +155,6 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	runenv.RecordMessage("done dialling my peers")
 
-	otherClients := runenv.IntParam("clients")
-	if role == "client" {
-		otherClients--
-	}
-
-	done := make(chan datatransfer.Event, otherClients)
-	unsubscribe := exch.DataTransfer().SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		// We only wait for content we receive from clients
-		if channelState.Sender() == h.ID() {
-			return
-		}
-		if channelState.Status() == datatransfer.Completed || event.Code == datatransfer.Error {
-			done <- event
-		}
-	})
-	defer unsubscribe()
-
 	// Wait for all peers to signal that they're done with the connection phase.
 	initCtx.SyncClient.MustSignalAndWait(ctx, "connected", runenv.TestInstanceCount)
 
@@ -194,17 +176,6 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		_, err = importFile(ctx, file.Name(), DAG)
 		if err != nil {
 			return err
-		}
-	}
-
-	for i := 0; i < cap(done); i++ {
-		select {
-		case evt := <-done:
-			if evt.Code == datatransfer.Error {
-				return fmt.Errorf("datatransfer error: %s", evt.Message)
-			}
-		case <-ctx.Done():
-			return ctx.Err()
 		}
 	}
 
