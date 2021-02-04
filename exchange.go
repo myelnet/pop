@@ -155,6 +155,7 @@ func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 // HasBlock to stay consistent with Bitswap anounces a new block to our peers
 // the name is a bit ambiguous, not to be confused with checking if a block is cached locally
 func (e *Exchange) HasBlock(bl blocks.Block) error {
+	// Probably need a timed context here but I don't want to block the thread
 	return e.Announce(context.Background(), bl.Cid())
 }
 
@@ -164,7 +165,8 @@ func (e *Exchange) Announce(ctx context.Context, c cid.Cid) error {
 	if err != nil {
 		return err
 	}
-	return e.supply.SendAddRequest(ctx, c, uint64(size))
+	go e.supply.SendAddRequest(ctx, c, uint64(size))
+	return nil
 }
 
 // IsOnline just to respect the exchange interface

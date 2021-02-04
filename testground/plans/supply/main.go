@@ -190,8 +190,8 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		}
 
 		select {
-		case <-done:
-			runenv.RecordMessage("client is done")
+		case is := <-done:
+			runenv.RecordMessage("client is done %v", is)
 			initCtx.SyncClient.MustSignalEntry(ctx, completed)
 			return nil
 		case <-ctx.Done():
@@ -238,10 +238,7 @@ func importFile(ctx context.Context, fpath string, dg ipldformat.DAGService) (ci
 		return cid.Undef, err
 	}
 
-	err = bufferedDS.Commit()
+	go bufferedDS.Commit()
 
-	if err != nil {
-		return cid.Undef, err
-	}
 	return nd.Cid(), nil
 }

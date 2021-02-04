@@ -59,8 +59,7 @@ func TestSendAddRequest(t *testing.T) {
 	defer unsubscribe()
 
 	go func(ctx context.Context, c cid.Cid, b []byte) {
-		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
-		require.NoError(t, err)
+		supply.SendAddRequest(ctx, c, uint64(len(b)))
 	}(ctx, rootCid, origBytes)
 
 	select {
@@ -95,12 +94,14 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 	supply := New(ctx, n1.Host, n1.Dt)
 
 	done := make(chan bool, 1)
-	go func(ctx context.Context, c cid.Cid, b []byte) {
-		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
-		require.NoError(t, err)
-
+	unsubscribe := supply.SubscribeToEvents(func(event Event) {
+		require.Equal(t, rootCid, event.PayloadCID)
 		done <- true
+	})
+	defer unsubscribe()
 
+	go func(ctx context.Context, c cid.Cid, b []byte) {
+		supply.SendAddRequest(ctx, c, uint64(len(b)))
 	}(ctx, rootCid, origBytes)
 
 	select {

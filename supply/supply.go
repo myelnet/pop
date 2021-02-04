@@ -59,7 +59,7 @@ func New(
 }
 
 // SendAddRequest to the network until we have propagated the content to enough peers
-func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint64) error {
+func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint64) {
 	// Get the current connected peers
 	var peers []peer.ID
 	for _, pid := range s.h.Peerstore().Peers() {
@@ -69,7 +69,11 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 	}
 
 	if len(peers) == 0 {
-		return nil // ErrNoPeers is quite noisy so will disable until we find a more elegant way
+		s.subscribers.Publish(Event{
+			PayloadCID: payload,
+			Providers:  make([]peer.ID, 0),
+		})
+		return // ErrNoPeers is quite noisy so will disable until we find a more elegant way
 	}
 	// Set the amount of peers we want to notify
 	max := 6
@@ -108,19 +112,20 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 	s.providerPeers[payload] = peer.NewSet()
 	// For for a defined amount of successful transfers
 	for i := 0; i < cap(c); i++ {
-		// TODO: add a timeout but not sure how long we can tolerate waiting for peers to pull
-		p := <-c
-		s.providerPeers[payload].Add(p)
+		select {
+		case p := <-c:
+			s.providerPeers[payload].Add(p)
+		case <-ctx.Done():
+			return
+		}
 	}
 
 	// Notify subscribers
+	// TODO: publish error event
 	s.subscribers.Publish(Event{
 		PayloadCID: payload,
 		Providers:  s.providerPeers[payload].Peers(),
 	})
-
-	return nil
-
 }
 
 // SubscribeToEvents to listen for supply events
