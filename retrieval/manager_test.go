@@ -101,16 +101,7 @@ func TestRetrieval(t *testing.T) {
 				_ = os.RemoveAll(dTTmpDir)
 			})
 
-			// n1.SetupDataTransfer(bgCtx, t)
-			n1.SetupGraphSync(bgCtx)
-			tp1 := &Transport{
-				Host:      n1.Host,
-				GraphSync: n1.Gs,
-				Datastore: n1.Ds,
-				DirPath:   dTTmpDir,
-			}
-			dt1, err := tp1.NewDataTransfer(bgCtx, "client")
-			require.NoError(t, err)
+			n1.SetupDataTransfer(bgCtx, t)
 			chResponse := &payments.ChannelResponse{
 				Channel:      address.Undef,
 				WaitSentinel: blockGen.Next().Cid(),
@@ -121,21 +112,12 @@ func TestRetrieval(t *testing.T) {
 				chResponse: chResponse,
 				chAddr:     chAddr,
 			}
-			r1, err := NewClient(bgCtx, n1.Ms, n1.Ds, n1.Counter, dt1, pay1, n1.Host.ID())
+			r1, err := New(bgCtx, n1.Ms, n1.Ds, n1.Counter, pay1, n1.Dt, n1.Host.ID())
 			require.NoError(t, err)
 
-			// n2.SetupDataTransfer(bgCtx, t)
-			n2.SetupGraphSync(bgCtx)
-			tp2 := &Transport{
-				Host:      n2.Host,
-				GraphSync: n2.Gs,
-				Datastore: n2.Ds,
-				DirPath:   dTTmpDir,
-			}
-			dt2, err := tp2.NewDataTransfer(bgCtx, "provider")
-			require.NoError(t, err)
+			n2.SetupDataTransfer(bgCtx, t)
 			pay2 := &mockPayments{}
-			r2, err := NewProvider(bgCtx, n2.Ms, n2.Ds, dt2, pay2, n2.Host.ID())
+			r2, err := New(bgCtx, n2.Ms, n2.Ds, n2.Counter, pay2, n2.Dt, n2.Host.ID())
 			require.NoError(t, err)
 
 			// n1 is our client and is retrieving a file n2 has so we add it first
@@ -150,12 +132,12 @@ func TestRetrieval(t *testing.T) {
 			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 			defer cancel()
 
-			r2.SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
+			r2.Provider().SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
 				fmt.Println("Provider:", deal.Statuses[state.Status])
 			})
 
 			clientDealStateChan := make(chan deal.ClientState)
-			r1.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
+			r1.Client().SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 				fmt.Println("Client:", deal.Statuses[state.Status])
 				switch state.Status {
 				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
@@ -174,7 +156,7 @@ func TestRetrieval(t *testing.T) {
 
 			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes))))
 
-			did, err := r1.Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
+			did, err := r1.Client().Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
 			require.NoError(t, err)
 			require.Equal(t, did, deal.ID(0))
 
