@@ -4,14 +4,14 @@
 [global]
   plan = "transfer"
   case = "duo_role"
-  total_instances = 2
+  total_instances = 4
   builder = "docker:go"
   runner = "local:docker"
 
 [[groups]]
   id = "all"
   [groups.instances]
-    count = 2
+    count = 4
   [groups.run]
     [groups.run.test_params]
       role = "all"

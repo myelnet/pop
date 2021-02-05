@@ -18,6 +18,6 @@ require (
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-core v0.8.0
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
-	github.com/myelnet/go-hop-exchange v0.0.0-20210205095824-5f217d1af3ad
+	github.com/myelnet/go-hop-exchange v0.0.0-20210205103204-dd28a5646a7d
 	github.com/testground/sdk-go v0.2.7
 )

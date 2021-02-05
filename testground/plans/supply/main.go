@@ -165,6 +165,7 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 		done := make(chan bool)
 		unsub := exch.Supply().SubscribeToEvents(func(evt supply.Event) {
+			runenv.RecordMessage("done")
 			done <- true
 		})
 		defer unsub()
@@ -187,6 +188,8 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err != nil {
 			return err
 		}
+
+		runenv.RecordMessage("waiting for done signal")
 
 		select {
 		case <-done:
@@ -236,7 +239,7 @@ func importFile(ctx context.Context, fpath string, dg ipldformat.DAGService) (ci
 		return cid.Undef, err
 	}
 
-	bufferedDS.Commit()
+	err = bufferedDS.Commit()
 
-	return nd.Cid(), nil
+	return nd.Cid(), err
 }

@@ -120,6 +120,7 @@ func (s *Supply) processAddRequest(payload cid.Cid, size uint64) {
 	for i := 0; i < cap(c); i++ {
 		select {
 		case p := <-c:
+			fmt.Println("adding peers")
 			s.providerPeers[payload].Add(p)
 		case <-s.ctx.Done():
 			return
