@@ -111,8 +111,6 @@ type Exchange struct {
 	// filecoin api
 	fAPI      filecoin.API
 	fEndpoint *filecoin.APIEndpoint // optional
-	// cleanup
-	cancelAddReq context.CancelFunc
 }
 
 // GetBlock gets a single block from a blocks channel
@@ -162,14 +160,11 @@ func (e *Exchange) HasBlock(bl blocks.Block) error {
 
 // Announce new content to the network
 func (e *Exchange) Announce(c cid.Cid) error {
-	ctx, cancel := context.WithCancel(context.Background())
 	size, err := e.Blockstore.GetSize(c)
 	if err != nil {
-		cancel()
 		return err
 	}
-	go e.supply.SendAddRequest(ctx, c, uint64(size))
-	e.cancelAddReq = cancel
+	e.supply.SendAddRequest(c, uint64(size))
 	return nil
 }
 
@@ -206,9 +201,6 @@ func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID) e
 // Close the Hop exchange
 func (e *Exchange) Close() error {
 	e.fAPI.Close()
-	if e.cancelAddReq != nil {
-		e.cancelAddReq()
-	}
 	return nil
 }
 

@@ -16,7 +16,7 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
-	SendAddRequest(context.Context, cid.Cid, uint64)
+	SendAddRequest(cid.Cid, uint64)
 	SubscribeToEvents(Subscriber) Unsubscribe
 }
 
@@ -27,6 +27,7 @@ type Supply struct {
 	dt  datatransfer.Manager
 	net *Network
 	man *Manifest
+	ctx context.Context
 
 	// Keep track of which of our peers may have a block
 	// Not use for anything else than debugging currently but may be useful eventualy
@@ -52,6 +53,7 @@ func New(
 		dt:            dt,
 		net:           net,
 		man:           manifest,
+		ctx:           ctx,
 		providerPeers: make(map[cid.Cid]*peer.Set),
 		subscribers:   pubsub.New(EventDispatcher),
 	}
@@ -59,7 +61,11 @@ func New(
 }
 
 // SendAddRequest to the network until we have propagated the content to enough peers
-func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint64) {
+func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) {
+	go s.processAddRequest(payload, size)
+}
+
+func (s *Supply) processAddRequest(payload cid.Cid, size uint64) {
 	// Get the current connected peers
 	var peers []peer.ID
 	for _, pid := range s.h.Peerstore().Peers() {
@@ -115,7 +121,7 @@ func (s *Supply) SendAddRequest(ctx context.Context, payload cid.Cid, size uint6
 		select {
 		case p := <-c:
 			s.providerPeers[payload].Add(p)
-		case <-ctx.Done():
+		case <-s.ctx.Done():
 			return
 		}
 	}

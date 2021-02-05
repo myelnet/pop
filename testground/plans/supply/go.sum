@@ -792,6 +792,8 @@ github.com/myelnet/go-hop-exchange v0.0.0-20210204222406-d5bb8be44c9e h1:R8J2YTn
 github.com/myelnet/go-hop-exchange v0.0.0-20210204222406-d5bb8be44c9e/go.mod h1:OAkdseju7yfPJjl96nWeyzErQASZSQudxHty+jv8EQk=
 github.com/myelnet/go-hop-exchange v0.0.0-20210204223015-146c12ca3f45 h1:bMtK5atOKTLLfWTjJZk4aQDAJY+j+KDhIrhjTyFk1h4=
 github.com/myelnet/go-hop-exchange v0.0.0-20210204223015-146c12ca3f45/go.mod h1:OAkdseju7yfPJjl96nWeyzErQASZSQudxHty+jv8EQk=
+github.com/myelnet/go-hop-exchange v0.0.0-20210205075112-3e722e60ded4 h1:QQ+d7FfGK2VT8wfRkq5eODNk/GnMsN1nU8QB6VRoWEg=
+github.com/myelnet/go-hop-exchange v0.0.0-20210205075112-3e722e60ded4/go.mod h1:OAkdseju7yfPJjl96nWeyzErQASZSQudxHty+jv8EQk=
 github.com/neelance/astrewrite v0.0.0-20160511093645-99348263ae86/go.mod h1:kHJEU3ofeGjhHklVoIGuVj85JJwZ6kWPaJwCIxgnFmo=
 github.com/neelance/sourcemap v0.0.0-20151028013722-8c68805598ab/go.mod h1:Qr6/a/Q4r9LP1IltGz7tA7iOK1WonHEYhu1HRBA7ZiM=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=

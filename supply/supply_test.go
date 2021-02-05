@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -58,9 +57,7 @@ func TestSendAddRequest(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	go func(ctx context.Context, c cid.Cid, b []byte) {
-		supply.SendAddRequest(ctx, c, uint64(len(b)))
-	}(ctx, rootCid, origBytes)
+	supply.SendAddRequest(rootCid, uint64(len(origBytes)))
 
 	select {
 	case <-ctx.Done():
@@ -100,9 +97,7 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	go func(ctx context.Context, c cid.Cid, b []byte) {
-		supply.SendAddRequest(ctx, c, uint64(len(b)))
-	}(ctx, rootCid, origBytes)
+	supply.SendAddRequest(rootCid, uint64(len(origBytes)))
 
 	select {
 	case <-ctx.Done():
