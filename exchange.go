@@ -165,6 +165,7 @@ func (e *Exchange) Announce(c cid.Cid) error {
 		return err
 	}
 	e.supply.SendAddRequest(c, uint64(size))
+	fmt.Println("sent add request")
 	return nil
 }
 
