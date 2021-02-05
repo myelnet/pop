@@ -111,6 +111,8 @@ type Exchange struct {
 	// filecoin api
 	fAPI      filecoin.API
 	fEndpoint *filecoin.APIEndpoint // optional
+	// cleanup
+	cancelAddReq context.CancelFunc
 }
 
 // GetBlock gets a single block from a blocks channel
@@ -155,17 +157,19 @@ func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 // HasBlock to stay consistent with Bitswap anounces a new block to our peers
 // the name is a bit ambiguous, not to be confused with checking if a block is cached locally
 func (e *Exchange) HasBlock(bl blocks.Block) error {
-	// Probably need a timed context here but I don't want to block the thread
-	return e.Announce(context.Background(), bl.Cid())
+	return e.Announce(bl.Cid())
 }
 
 // Announce new content to the network
-func (e *Exchange) Announce(ctx context.Context, c cid.Cid) error {
+func (e *Exchange) Announce(c cid.Cid) error {
+	ctx, cancel := context.WithCancel(context.Background())
 	size, err := e.Blockstore.GetSize(c)
 	if err != nil {
+		cancel()
 		return err
 	}
 	go e.supply.SendAddRequest(ctx, c, uint64(size))
+	e.cancelAddReq = cancel
 	return nil
 }
 
@@ -202,6 +206,9 @@ func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID) e
 // Close the Hop exchange
 func (e *Exchange) Close() error {
 	e.fAPI.Close()
+	if e.cancelAddReq != nil {
+		e.cancelAddReq()
+	}
 	return nil
 }
 
