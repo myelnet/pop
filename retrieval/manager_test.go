@@ -79,9 +79,12 @@ func (p *mockPayments) AddVoucherInbound(ctx context.Context, addr address.Addre
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
-		name string
+		name     string
+		addFunds bool
 	}{
 		{name: "Basic transfer"},
+		{name: "Existing channel", addFunds: true},
+		{name: "Shortfall"},
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -102,11 +105,17 @@ func TestRetrieval(t *testing.T) {
 			})
 
 			n1.SetupDataTransfer(bgCtx, t)
+			chAddr := tutils.NewIDAddr(t, uint64(i*10))
+			// If we are creating a new channel the response will return an undefined address
+			// while we wait for the create operation to be confirmed
+			chResAddr := address.Undef
+			if testCase.addFunds {
+				chResAddr = chAddr
+			}
 			chResponse := &payments.ChannelResponse{
-				Channel:      address.Undef,
+				Channel:      chResAddr,
 				WaitSentinel: blockGen.Next().Cid(),
 			}
-			chAddr := tutils.NewIDAddr(t, uint64(i*10))
 
 			pay1 := &mockPayments{
 				chResponse: chResponse,

@@ -352,16 +352,7 @@ func ProposeDeal(ctx fsm.Context, environment DealEnvironment, ds deal.ClientSta
 
 // SetupPaymentChannelStart initiates setting up a payment channel for a deal
 func SetupPaymentChannelStart(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-
-	// tok, _, err := environment.Node().GetChainHead(ctx.Context())
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
-
-	// paych, msgCID, err := environment.Node().GetOrCreatePaymentChannel(ctx.Context(), deal.ClientWallet, deal.MinerWallet, deal.TotalFunds, tok)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
+	// We may already have a payment channel ready to go otherwise the state machine will wait for it
 	res, err := environment.Payments().GetChannel(ctx.Context(), ds.ClientWallet, ds.MinerWallet, ds.TotalFunds)
 	if err != nil {
 		return ctx.Trigger(EventPaymentChannelErrored, err)
