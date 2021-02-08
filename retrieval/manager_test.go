@@ -187,7 +187,10 @@ func TestRetrieval(t *testing.T) {
 					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
 						ConfirmedAmt: state.VoucherShortfall,
 					})
-					r1.Client().TryRestartInsufficientFunds(state.PaymentInfo.PayCh)
+					// Need to wait a bit for status to update in state machine
+					time.Sleep(10 * time.Millisecond)
+					err := r1.Client().TryRestartInsufficientFunds(state.PaymentInfo.PayCh)
+					require.NoError(t, err)
 					return
 				}
 			})
