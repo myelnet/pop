@@ -93,12 +93,14 @@ func TestRetrieval(t *testing.T) {
 		name     string
 		addFunds bool
 		chFunds  payments.AvailableFunds
+		free     bool
 	}{
 		{name: "Basic transfer"},
 		{name: "Existing channel", addFunds: true},
 		{name: "Shortfall", chFunds: payments.AvailableFunds{
 			ConfirmedAmt: abi.NewTokenAmount(-40100000),
 		}},
+		{name: "Free transfer", free: true},
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -179,6 +181,9 @@ func TestRetrieval(t *testing.T) {
 
 			clientStoreID := n1.Ms.Next()
 			pricePerByte := abi.NewTokenAmount(1000)
+			if testCase.free {
+				pricePerByte = big.Zero()
+			}
 			paymentInterval := uint64(10000)
 			paymentIntervalIncrease := uint64(1000)
 			unsealPrice := big.Zero()
@@ -187,6 +192,9 @@ func TestRetrieval(t *testing.T) {
 
 			// We offset it a bit since it's usually higher with ipld encoding
 			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+200)))
+			if testCase.free {
+				expectedTotal = big.Zero()
+			}
 
 			did, err := r1.Client().Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
 			require.NoError(t, err)

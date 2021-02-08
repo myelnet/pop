@@ -90,6 +90,9 @@ var FSMEvents = fsm.Events{
 		}),
 
 	// Payment channel setup
+	fsm.Event(EventPaymentChannelSkip).
+		From(deal.StatusAccepted).To(deal.StatusOngoing),
+
 	fsm.Event(EventPaymentChannelErrored).
 		FromMany(deal.StatusAccepted, deal.StatusPaymentChannelCreating, deal.StatusPaymentChannelAddingFunds).To(deal.StatusFailing).
 		Action(func(ds *deal.ClientState, err error) error {
@@ -194,6 +197,7 @@ var FSMEvents = fsm.Events{
 		FromMany(paymentChannelCreationStates...).ToJustRecord().
 		FromMany(deal.StatusSendFunds, deal.StatusFundsNeeded).ToJustRecord().
 		From(deal.StatusFundsNeededLastPayment).To(deal.StatusSendFundsLastPayment).
+		From(deal.StatusClientWaitingForLastBlocks).To(deal.StatusCompleted).
 		Action(func(ds *deal.ClientState) error {
 			ds.AllBlocksReceived = true
 			return nil
@@ -201,7 +205,9 @@ var FSMEvents = fsm.Events{
 	fsm.Event(EventBlocksReceived).
 		FromMany(deal.StatusOngoing,
 			deal.StatusFundsNeeded,
-			deal.StatusFundsNeededLastPayment).ToNoChange().
+			deal.StatusFundsNeededLastPayment,
+			deal.StatusCheckComplete,
+			deal.StatusClientWaitingForLastBlocks).ToNoChange().
 		FromMany(paymentChannelCreationStates...).ToJustRecord().
 		Action(recordReceived),
 
@@ -276,6 +282,12 @@ var FSMEvents = fsm.Events{
 			state.Message = "Provider sent complete status without sending all data"
 			return nil
 		}),
+
+	// the provider indicated that all blocks have been sent, so the client
+	// should wait for the last blocks to arrive (only needed when price
+	// per byte is zero)
+	fsm.Event(EventWaitForLastBlocks).
+		From(deal.StatusCheckComplete).To(deal.StatusClientWaitingForLastBlocks),
 
 	// after cancelling a deal is complete
 	fsm.Event(EventCancelComplete).
@@ -353,6 +365,10 @@ func ProposeDeal(ctx fsm.Context, environment DealEnvironment, ds deal.ClientSta
 
 // SetupPaymentChannelStart initiates setting up a payment channel for a deal
 func SetupPaymentChannelStart(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
+	// If the total funds required for the deal are zero, skip creating the payment channel
+	if ds.TotalFunds.IsZero() {
+		return ctx.Trigger(EventPaymentChannelSkip)
+	}
 	// We may already have a payment channel ready to go otherwise the state machine will wait for it
 	res, err := environment.Payments().GetChannel(ctx.Context(), ds.ClientWallet, ds.MinerWallet, ds.TotalFunds)
 	if err != nil {
@@ -482,9 +498,22 @@ func CancelDeal(ctx fsm.Context, environment DealEnvironment, ds deal.ClientStat
 
 // CheckComplete verifies that a provider that completed without a last payment requested did in fact send us all the data
 func CheckComplete(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-	if !ds.AllBlocksReceived {
-		return ctx.Trigger(EventEarlyTermination)
+	// This function is called when the provider tells the client that it has
+	// sent all the blocks, so check if all blocks have been received.
+	if ds.AllBlocksReceived {
+		return ctx.Trigger(EventCompleteVerified)
 	}
 
-	return ctx.Trigger(EventCompleteVerified)
+	// If the deal price per byte is zero, wait for the last blocks to
+	// arrive
+	if ds.PricePerByte.IsZero() {
+		return ctx.Trigger(EventWaitForLastBlocks)
+	}
+
+	// If the deal price per byte is non-zero, the provider should only
+	// have sent the complete message after receiving the last payment
+	// from the client, which should happen after all blocks have been
+	// received. So if they haven't been received the provider is trying
+	// to terminate the deal early.
+	return ctx.Trigger(EventEarlyTermination)
 }
