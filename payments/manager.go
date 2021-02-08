@@ -23,6 +23,7 @@ type Manager interface {
 	CreateVoucher(context.Context, address.Address, filecoin.BigInt, uint64) (*VoucherCreateResult, error)
 	AllocateLane(context.Context, address.Address) (uint64, error)
 	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
+	ChannelAvailableFunds(address.Address) (*AvailableFunds, error)
 }
 
 // Payments is our full payment system, it manages payment channels,

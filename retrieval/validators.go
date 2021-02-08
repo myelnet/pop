@@ -216,7 +216,9 @@ func (pr *ProviderRevalidator) loadDealState(channel *channelData) error {
 func (pr *ProviderRevalidator) writeDealState(d deal.ProviderState) {
 	channel := pr.trackedChannels[d.ChannelID]
 	channel.totalSent = d.TotalSent
-	channel.totalPaidFor = big.Div(big.Max(big.Sub(d.FundsReceived, d.UnsealPrice), big.Zero()), d.PricePerByte).Uint64()
+	if !d.PricePerByte.IsZero() {
+		channel.totalPaidFor = big.Div(big.Max(big.Sub(d.FundsReceived, d.UnsealPrice), big.Zero()), d.PricePerByte).Uint64()
+	}
 	channel.interval = d.CurrentInterval
 	channel.pricePerByte = d.PricePerByte
 }
@@ -319,19 +321,20 @@ func (pr *ProviderRevalidator) OnPullDataSent(chid datatransfer.ChannelID, addit
 	}
 
 	channel.totalSent += additionalBytesSent
-	if channel.totalSent-channel.totalPaidFor >= channel.interval {
-		paymentOwed := big.Mul(abi.NewTokenAmount(int64(channel.totalSent-channel.totalPaidFor)), channel.pricePerByte)
-		err := pr.env.SendEvent(channel.dealID, provider.EventPaymentRequested, channel.totalSent)
-		if err != nil {
-			return true, nil, err
-		}
-		return true, &deal.Response{
-			ID:          channel.dealID.DealID,
-			Status:      deal.StatusFundsNeeded,
-			PaymentOwed: paymentOwed,
-		}, datatransfer.ErrPause
+	if channel.pricePerByte.IsZero() || channel.totalSent-channel.totalPaidFor < channel.interval {
+		return true, nil, pr.env.SendEvent(channel.dealID, provider.EventBlockSent, channel.totalSent)
 	}
-	return true, nil, pr.env.SendEvent(channel.dealID, provider.EventBlockSent, channel.totalSent)
+
+	paymentOwed := big.Mul(abi.NewTokenAmount(int64(channel.totalSent-channel.totalPaidFor)), channel.pricePerByte)
+	err = pr.env.SendEvent(channel.dealID, provider.EventPaymentRequested, channel.totalSent)
+	if err != nil {
+		return true, nil, err
+	}
+	return true, &deal.Response{
+		ID:          channel.dealID.DealID,
+		Status:      deal.StatusFundsNeeded,
+		PaymentOwed: paymentOwed,
+	}, datatransfer.ErrPause
 }
 
 // OnPushDataReceived is called on the responder side when more bytes are received
