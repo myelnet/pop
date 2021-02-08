@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -52,13 +51,13 @@ func TestSendAddRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	done := make(chan bool, 1)
-	go func(ctx context.Context, c cid.Cid, b []byte) {
-		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
-		require.NoError(t, err)
-
+	unsubscribe := supply.SubscribeToEvents(func(event Event) {
+		require.Equal(t, rootCid, event.PayloadCID)
 		done <- true
+	})
+	defer unsubscribe()
 
-	}(ctx, rootCid, origBytes)
+	supply.SendAddRequest(rootCid, uint64(len(origBytes)))
 
 	select {
 	case <-ctx.Done():
@@ -92,13 +91,13 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 	supply := New(ctx, n1.Host, n1.Dt)
 
 	done := make(chan bool, 1)
-	go func(ctx context.Context, c cid.Cid, b []byte) {
-		err := supply.SendAddRequest(ctx, c, uint64(len(b)))
-		require.NoError(t, err)
-
+	unsubscribe := supply.SubscribeToEvents(func(event Event) {
+		require.Equal(t, rootCid, event.PayloadCID)
 		done <- true
+	})
+	defer unsubscribe()
 
-	}(ctx, rootCid, origBytes)
+	supply.SendAddRequest(rootCid, uint64(len(origBytes)))
 
 	select {
 	case <-ctx.Done():

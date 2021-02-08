@@ -55,6 +55,9 @@ var testcases = map[string]interface{}{
 	"duo_role":  run.InitializedTestCaseFn(runDuorole),
 }
 
+// runDuorole means all nodes are both client and provider so each will
+// import some random bytes in the blockstore and publish the cid to all the peers
+// then collect any cid it receives to retrieve them all from whomever sent it
 func runDuorole(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -170,7 +173,7 @@ func runDuorole(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 }
 
-// Prototyping what it would look like running multiple datatransfer instances on the same host
+// runPickrole forces a node to decide if they will be a client or a provider and only fill that role
 func runPickrole(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
