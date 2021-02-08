@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/testground/sdk-go/run"
 	"github.com/testground/sdk-go/runtime"
@@ -43,14 +44,12 @@ var testcases = map[string]interface{}{
 }
 
 func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
-	// State notifying when a client has added content
-	addedState := sync.State("added")
+	completed := sync.State("completed")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
 	role := runenv.StringParam("role")
-	runenv.RecordMessage("Started instance with role: %s", role)
 
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
@@ -71,7 +70,12 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	ip := initCtx.NetClient.MustGetDataNetworkIP()
 
 	// create a new libp2p Host that listens on a random TCP port
-	h, err := lp2p.New(ctx, lp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)))
+	h, err := lp2p.New(ctx,
+		lp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
+		// Running without security because of a bug
+		// see https://github.com/libp2p/go-libp2p-noise/issues/70
+		lp2p.NoSecurity,
+	)
 	if err != nil {
 		return err
 	}
@@ -158,6 +162,14 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	initCtx.SyncClient.MustSignalAndWait(ctx, "connected", runenv.TestInstanceCount)
 
 	if role == "client" {
+
+		done := make(chan bool)
+		unsub := exch.Supply().SubscribeToEvents(func(evt supply.Event) {
+			runenv.RecordMessage("done")
+			done <- true
+		})
+		defer unsub()
+
 		// generate 1600 bytes of random data
 		data := make([]byte, 1600)
 		rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
@@ -176,11 +188,19 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err != nil {
 			return err
 		}
-		initCtx.SyncClient.MustSignalEntry(ctx, addedState)
-		return nil
+
+		runenv.RecordMessage("waiting for done signal")
+
+		select {
+		case <-done:
+			initCtx.SyncClient.MustSignalEntry(ctx, completed)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
-	err = <-initCtx.SyncClient.MustBarrier(ctx, addedState, runenv.IntParam("clients")).C
+	err = <-initCtx.SyncClient.MustBarrier(ctx, completed, runenv.IntParam("clients")).C
 	if err != nil {
 		return err
 	}
@@ -221,8 +241,5 @@ func importFile(ctx context.Context, fpath string, dg ipldformat.DAGService) (ci
 
 	err = bufferedDS.Commit()
 
-	if err != nil {
-		return cid.Undef, err
-	}
-	return nd.Cid(), nil
+	return nd.Cid(), err
 }

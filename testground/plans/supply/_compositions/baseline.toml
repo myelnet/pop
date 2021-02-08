@@ -4,12 +4,12 @@
 [global]
   plan = "supply"
   case = "supply"
-  total_instances = 10
+  total_instances = 4
   builder = "docker:go"
   runner = "local:docker"
 
 [global.run.test_params]
-  clients = "7"
+  clients = "1"
   providers = "3"
 
 [[groups]]
@@ -23,7 +23,7 @@
 [[groups]]
   id = "clients"
   [groups.instances]
-    count = 7
+    count = 1
   [groups.run]
     [groups.run.test_params]
       role = "client"
