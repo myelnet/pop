@@ -90,6 +90,9 @@ var FSMEvents = fsm.Events{
 		}),
 
 	// Payment channel setup
+	fsm.Event(EventPaymentChannelSkip).
+		From(deal.StatusAccepted).To(deal.StatusOngoing),
+
 	fsm.Event(EventPaymentChannelErrored).
 		FromMany(deal.StatusAccepted, deal.StatusPaymentChannelCreating, deal.StatusPaymentChannelAddingFunds).To(deal.StatusFailing).
 		Action(func(ds *deal.ClientState, err error) error {
@@ -194,6 +197,7 @@ var FSMEvents = fsm.Events{
 		FromMany(paymentChannelCreationStates...).ToJustRecord().
 		FromMany(deal.StatusSendFunds, deal.StatusFundsNeeded).ToJustRecord().
 		From(deal.StatusFundsNeededLastPayment).To(deal.StatusSendFundsLastPayment).
+		From(deal.StatusClientWaitingForLastBlocks).To(deal.StatusCompleted).
 		Action(func(ds *deal.ClientState) error {
 			ds.AllBlocksReceived = true
 			return nil
@@ -201,7 +205,9 @@ var FSMEvents = fsm.Events{
 	fsm.Event(EventBlocksReceived).
 		FromMany(deal.StatusOngoing,
 			deal.StatusFundsNeeded,
-			deal.StatusFundsNeededLastPayment).ToNoChange().
+			deal.StatusFundsNeededLastPayment,
+			deal.StatusCheckComplete,
+			deal.StatusClientWaitingForLastBlocks).ToNoChange().
 		FromMany(paymentChannelCreationStates...).ToJustRecord().
 		Action(recordReceived),
 
@@ -214,6 +220,7 @@ var FSMEvents = fsm.Events{
 		FromMany(deal.StatusCheckFunds).To(deal.StatusInsufficientFunds).
 		Action(func(ds *deal.ClientState, shortfall abi.TokenAmount) error {
 			ds.Message = fmt.Sprintf("not enough current or pending funds in payment channel, shortfall of %s", shortfall.String())
+			ds.VoucherShortfall = shortfall
 			return nil
 		}),
 	fsm.Event(EventBadPaymentRequested).
@@ -266,6 +273,7 @@ var FSMEvents = fsm.Events{
 	// completing deals
 	fsm.Event(EventComplete).
 		From(deal.StatusOngoing).To(deal.StatusCheckComplete).
+		From(deal.StatusBlocksComplete).To(deal.StatusCheckComplete).
 		From(deal.StatusFinalizing).To(deal.StatusCompleted),
 	fsm.Event(EventCompleteVerified).
 		From(deal.StatusCheckComplete).To(deal.StatusCompleted),
@@ -275,6 +283,12 @@ var FSMEvents = fsm.Events{
 			state.Message = "Provider sent complete status without sending all data"
 			return nil
 		}),
+
+	// the provider indicated that all blocks have been sent, so the client
+	// should wait for the last blocks to arrive (only needed when price
+	// per byte is zero)
+	fsm.Event(EventWaitForLastBlocks).
+		From(deal.StatusCheckComplete).To(deal.StatusClientWaitingForLastBlocks),
 
 	// after cancelling a deal is complete
 	fsm.Event(EventCancelComplete).
@@ -352,16 +366,11 @@ func ProposeDeal(ctx fsm.Context, environment DealEnvironment, ds deal.ClientSta
 
 // SetupPaymentChannelStart initiates setting up a payment channel for a deal
 func SetupPaymentChannelStart(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-
-	// tok, _, err := environment.Node().GetChainHead(ctx.Context())
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
-
-	// paych, msgCID, err := environment.Node().GetOrCreatePaymentChannel(ctx.Context(), deal.ClientWallet, deal.MinerWallet, deal.TotalFunds, tok)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
+	// If the total funds required for the deal are zero, skip creating the payment channel
+	if ds.TotalFunds.IsZero() {
+		return ctx.Trigger(EventPaymentChannelSkip)
+	}
+	// We may already have a payment channel ready to go otherwise the state machine will wait for it
 	res, err := environment.Payments().GetChannel(ctx.Context(), ds.ClientWallet, ds.MinerWallet, ds.TotalFunds)
 	if err != nil {
 		return ctx.Trigger(EventPaymentChannelErrored, err)
@@ -455,27 +464,26 @@ func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error 
 // CheckFunds examines current available funds in a payment channel after a voucher shortfall to determine
 // a course of action -- whether it's a good time to try again, wait for pending operations, or
 // we've truly expended all funds and we need to wait for a manual readd
-func CheckFunds(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
+func CheckFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error {
 	// if we already have an outstanding operation, let's wait for that to complete
-	// if deal.WaitMsgCID != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelAddingFunds, *deal.WaitMsgCID, deal.PaymentInfo.PayCh)
-	// }
-	// availableFunds, err := environment.Node().CheckAvailableFunds(ctx.Context(), deal.PaymentInfo.PayCh)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
-	// unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
-	// shortfall := big.Sub(deal.PaymentRequested, unredeemedFunds)
-	// if shortfall.LessThanEqual(big.Zero()) {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelReady, deal.PaymentInfo.PayCh)
-	// }
-	// totalInFlight := big.Add(availableFunds.PendingAmt, availableFunds.QueuedAmt)
-	// if totalInFlight.LessThan(shortfall) || availableFunds.PendingWaitSentinel == nil {
-	// 	finalShortfall := big.Sub(shortfall, totalInFlight)
-	// 	return ctx.Trigger(rm.ClientEventFundsExpended, finalShortfall)
-	// }
-	// return ctx.Trigger(rm.ClientEventPaymentChannelAddingFunds, *availableFunds.PendingWaitSentinel, deal.PaymentInfo.PayCh)
-	return nil
+	if ds.WaitMsgCID != nil {
+		return ctx.Trigger(EventPaymentChannelAddingFunds, *ds.WaitMsgCID, ds.PaymentInfo.PayCh)
+	}
+	availableFunds, err := env.Payments().ChannelAvailableFunds(ds.PaymentInfo.PayCh)
+	if err != nil {
+		return ctx.Trigger(EventPaymentChannelErrored, err)
+	}
+	unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
+	shortfall := big.Sub(ds.PaymentRequested, unredeemedFunds)
+	if shortfall.LessThanEqual(big.Zero()) {
+		return ctx.Trigger(EventPaymentChannelReady, ds.PaymentInfo.PayCh)
+	}
+	totalInFlight := big.Add(availableFunds.PendingAmt, availableFunds.QueuedAmt)
+	if totalInFlight.LessThan(shortfall) || availableFunds.PendingWaitSentinel == nil {
+		finalShortfall := big.Sub(shortfall, totalInFlight)
+		return ctx.Trigger(EventFundsExpended, finalShortfall)
+	}
+	return ctx.Trigger(EventPaymentChannelAddingFunds, *availableFunds.PendingWaitSentinel, ds.PaymentInfo.PayCh)
 }
 
 // CancelDeal clears a deal that went wrong for an unknown reason
@@ -491,9 +499,22 @@ func CancelDeal(ctx fsm.Context, environment DealEnvironment, ds deal.ClientStat
 
 // CheckComplete verifies that a provider that completed without a last payment requested did in fact send us all the data
 func CheckComplete(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
-	if !ds.AllBlocksReceived {
-		return ctx.Trigger(EventEarlyTermination)
+	// This function is called when the provider tells the client that it has
+	// sent all the blocks, so check if all blocks have been received.
+	if ds.AllBlocksReceived {
+		return ctx.Trigger(EventCompleteVerified)
 	}
 
-	return ctx.Trigger(EventCompleteVerified)
+	// If the deal price per byte is zero, wait for the last blocks to
+	// arrive
+	if ds.PricePerByte.IsZero() {
+		return ctx.Trigger(EventWaitForLastBlocks)
+	}
+
+	// If the deal price per byte is non-zero, the provider should only
+	// have sent the complete message after receiving the last payment
+	// from the client, which should happen after all blocks have been
+	// received. So if they haven't been received the provider is trying
+	// to terminate the deal early.
+	return ctx.Trigger(EventEarlyTermination)
 }

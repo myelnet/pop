@@ -45,6 +45,9 @@ const (
 	// deal to resume
 	EventPaymentChannelReady
 
+	// EventPaymentChannelSkip means we can skip payment channel because the deal price is 0
+	EventPaymentChannelSkip
+
 	// EventPaymentChannelAddingFunds mean we are waiting for funds to be
 	// added to a payment channel
 	EventPaymentChannelAddingFunds
@@ -116,6 +119,11 @@ const (
 
 	// EventCancel runs when a user cancels a deal
 	EventCancel
+
+	// EventWaitForLastBlocks is fired when the provider has told
+	// the client that all blocks were sent for the deal, and the client is
+	// waiting for the last blocks to arrive
+	EventWaitForLastBlocks
 )
 
 // Events is a human readable map of client event name -> event description
@@ -128,6 +136,7 @@ var Events = map[Event]string{
 	EventPaymentChannelReady:           "ClientEventPaymentChannelReady",
 	EventPaymentChannelAddingFunds:     "ClientEventPaymentChannelAddingFunds",
 	EventPaymentChannelAddFundsErrored: "ClientEventPaymentChannelAddFundsErrored",
+	EventPaymentChannelSkip:            "ClientEventPaymentChannelSkip",
 	EventWriteDealProposalErrored:      "ClientEventWriteDealProposalErrored",
 	EventDealRejected:                  "ClientEventDealRejected",
 	EventDealNotFound:                  "ClientEventDealNotFound",
@@ -154,4 +163,5 @@ var Events = map[Event]string{
 	EventVoucherShortfall:              "ClientEventVoucherShortfall",
 	EventRecheckFunds:                  "ClientEventRecheckFunds",
 	EventCancel:                        "ClientEventCancel",
+	EventWaitForLastBlocks:             "ClientEventWaitForLastBlocks",
 }

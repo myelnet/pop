@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,9 +33,14 @@ var blockGen = blocksutil.NewBlockGenerator()
 type mockPayments struct {
 	chResponse *payments.ChannelResponse
 	chAddr     address.Address
+	chFunds    *payments.AvailableFunds
+	lk         sync.Mutex
 }
 
 func (p *mockPayments) GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*payments.ChannelResponse, error) {
+	p.lk.Lock()
+	defer p.lk.Unlock()
+	p.chFunds.ConfirmedAmt = big.Add(p.chFunds.ConfirmedAmt, amt)
 	return p.chResponse, nil
 }
 
@@ -51,6 +57,11 @@ func (p *mockPayments) GetChannelInfo(addr address.Address) (*payments.ChannelIn
 }
 
 func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, amt filecoin.BigInt, lane uint64) (*payments.VoucherCreateResult, error) {
+	if amt.GreaterThan(p.chFunds.ConfirmedAmt) {
+		return &payments.VoucherCreateResult{
+			Shortfall: big.Sub(amt, p.chFunds.ConfirmedAmt),
+		}, nil
+	}
 	// sig := &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("doesn't matter")}
 	vouch := &paych.SignedVoucher{
 		ChannelAddr: addr,
@@ -76,12 +87,31 @@ func (p *mockPayments) AddVoucherInbound(ctx context.Context, addr address.Addre
 	return expectedAmount, nil
 }
 
+func (p *mockPayments) ChannelAvailableFunds(chAddr address.Address) (*payments.AvailableFunds, error) {
+	return p.chFunds, nil
+}
+
+func (p *mockPayments) SetChannelAvailableFunds(funds payments.AvailableFunds) {
+	p.lk.Lock()
+	defer p.lk.Unlock()
+	chFunds := addZeroesToAvailableFunds(funds)
+	p.chFunds = &chFunds
+}
+
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
-		name string
+		name     string
+		addFunds bool
+		chFunds  payments.AvailableFunds
+		free     bool
 	}{
 		{name: "Basic transfer"},
+		{name: "Existing channel", addFunds: true},
+		{name: "Shortfall", chFunds: payments.AvailableFunds{
+			ConfirmedAmt: abi.NewTokenAmount(-40100000),
+		}},
+		{name: "Free transfer", free: true},
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -102,15 +132,24 @@ func TestRetrieval(t *testing.T) {
 			})
 
 			n1.SetupDataTransfer(bgCtx, t)
+			chAddr := tutils.NewIDAddr(t, uint64(i*10))
+			// If we are creating a new channel the response will return an undefined address
+			// while we wait for the create operation to be confirmed
+			chResAddr := address.Undef
+			if testCase.addFunds {
+				chResAddr = chAddr
+			}
 			chResponse := &payments.ChannelResponse{
-				Channel:      address.Undef,
+				Channel:      chResAddr,
 				WaitSentinel: blockGen.Next().Cid(),
 			}
-			chAddr := tutils.NewIDAddr(t, uint64(i*10))
+
+			chFunds := addZeroesToAvailableFunds(testCase.chFunds)
 
 			pay1 := &mockPayments{
 				chResponse: chResponse,
 				chAddr:     chAddr,
+				chFunds:    &chFunds,
 			}
 			r1, err := New(bgCtx, n1.Ms, n1.Ds, n1.Counter, pay1, n1.Dt, n1.Host.ID())
 			require.NoError(t, err)
@@ -143,18 +182,35 @@ func TestRetrieval(t *testing.T) {
 				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
 					clientDealStateChan <- state
 					return
+				case deal.StatusInsufficientFunds:
+					// Simulate reaprovisioning the payment channel
+					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
+						ConfirmedAmt: state.VoucherShortfall,
+					})
+					// Need to wait a bit for status to update in state machine
+					time.Sleep(10 * time.Millisecond)
+					err := r1.Client().TryRestartInsufficientFunds(state.PaymentInfo.PayCh)
+					require.NoError(t, err)
+					return
 				}
 			})
 
 			clientStoreID := n1.Ms.Next()
 			pricePerByte := abi.NewTokenAmount(1000)
+			if testCase.free {
+				pricePerByte = big.Zero()
+			}
 			paymentInterval := uint64(10000)
 			paymentIntervalIncrease := uint64(1000)
 			unsealPrice := big.Zero()
 			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
 			require.NoError(t, err)
 
-			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes))))
+			// We offset it a bit since it's usually higher with ipld encoding
+			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+200)))
+			if testCase.free {
+				expectedTotal = big.Zero()
+			}
 
 			did, err := r1.Client().Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
 			require.NoError(t, err)
@@ -170,4 +226,20 @@ func TestRetrieval(t *testing.T) {
 			n1.VerifyFileTransferred(bgCtx, t, rootCid, origBytes)
 		})
 	}
+}
+
+func addZeroesToAvailableFunds(channelAvailableFunds payments.AvailableFunds) payments.AvailableFunds {
+	if channelAvailableFunds.ConfirmedAmt.Nil() {
+		channelAvailableFunds.ConfirmedAmt = big.Zero()
+	}
+	if channelAvailableFunds.PendingAmt.Nil() {
+		channelAvailableFunds.PendingAmt = big.Zero()
+	}
+	if channelAvailableFunds.QueuedAmt.Nil() {
+		channelAvailableFunds.QueuedAmt = big.Zero()
+	}
+	if channelAvailableFunds.VoucherReedeemedAmt.Nil() {
+		channelAvailableFunds.VoucherReedeemedAmt = big.Zero()
+	}
+	return channelAvailableFunds
 }

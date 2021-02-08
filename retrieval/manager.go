@@ -230,3 +230,21 @@ func (c *Client) Retrieve(
 func (c *Client) SubscribeToEvents(subscriber client.Subscriber) Unsubscribe {
 	return Unsubscribe(c.subscribers.Subscribe(subscriber))
 }
+
+// TryRestartInsufficientFunds attempts to restart any deals stuck in the insufficient funds state
+// after funds are added to a given payment channel
+func (c *Client) TryRestartInsufficientFunds(chAddr address.Address) error {
+	var deals []deal.ClientState
+	err := c.stateMachines.List(&deals)
+	if err != nil {
+		return err
+	}
+	for _, d := range deals {
+		if d.Status == deal.StatusInsufficientFunds && d.PaymentInfo.PayCh == chAddr {
+			if err := c.stateMachines.Send(d.ID, client.EventRecheckFunds); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
