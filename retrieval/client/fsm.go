@@ -214,6 +214,7 @@ var FSMEvents = fsm.Events{
 		FromMany(deal.StatusCheckFunds).To(deal.StatusInsufficientFunds).
 		Action(func(ds *deal.ClientState, shortfall abi.TokenAmount) error {
 			ds.Message = fmt.Sprintf("not enough current or pending funds in payment channel, shortfall of %s", shortfall.String())
+			ds.VoucherShortfall = shortfall
 			return nil
 		}),
 	fsm.Event(EventBadPaymentRequested).
@@ -446,27 +447,26 @@ func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error 
 // CheckFunds examines current available funds in a payment channel after a voucher shortfall to determine
 // a course of action -- whether it's a good time to try again, wait for pending operations, or
 // we've truly expended all funds and we need to wait for a manual readd
-func CheckFunds(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
+func CheckFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error {
 	// if we already have an outstanding operation, let's wait for that to complete
-	// if deal.WaitMsgCID != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelAddingFunds, *deal.WaitMsgCID, deal.PaymentInfo.PayCh)
-	// }
-	// availableFunds, err := environment.Node().CheckAvailableFunds(ctx.Context(), deal.PaymentInfo.PayCh)
-	// if err != nil {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelErrored, err)
-	// }
-	// unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
-	// shortfall := big.Sub(deal.PaymentRequested, unredeemedFunds)
-	// if shortfall.LessThanEqual(big.Zero()) {
-	// 	return ctx.Trigger(rm.ClientEventPaymentChannelReady, deal.PaymentInfo.PayCh)
-	// }
-	// totalInFlight := big.Add(availableFunds.PendingAmt, availableFunds.QueuedAmt)
-	// if totalInFlight.LessThan(shortfall) || availableFunds.PendingWaitSentinel == nil {
-	// 	finalShortfall := big.Sub(shortfall, totalInFlight)
-	// 	return ctx.Trigger(rm.ClientEventFundsExpended, finalShortfall)
-	// }
-	// return ctx.Trigger(rm.ClientEventPaymentChannelAddingFunds, *availableFunds.PendingWaitSentinel, deal.PaymentInfo.PayCh)
-	return nil
+	if ds.WaitMsgCID != nil {
+		return ctx.Trigger(EventPaymentChannelAddingFunds, *ds.WaitMsgCID, ds.PaymentInfo.PayCh)
+	}
+	availableFunds, err := env.Payments().ChannelAvailableFunds(ds.PaymentInfo.PayCh)
+	if err != nil {
+		return ctx.Trigger(EventPaymentChannelErrored, err)
+	}
+	unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
+	shortfall := big.Sub(ds.PaymentRequested, unredeemedFunds)
+	if shortfall.LessThanEqual(big.Zero()) {
+		return ctx.Trigger(EventPaymentChannelReady, ds.PaymentInfo.PayCh)
+	}
+	totalInFlight := big.Add(availableFunds.PendingAmt, availableFunds.QueuedAmt)
+	if totalInFlight.LessThan(shortfall) || availableFunds.PendingWaitSentinel == nil {
+		finalShortfall := big.Sub(shortfall, totalInFlight)
+		return ctx.Trigger(EventFundsExpended, finalShortfall)
+	}
+	return ctx.Trigger(EventPaymentChannelAddingFunds, *availableFunds.PendingWaitSentinel, ds.PaymentInfo.PayCh)
 }
 
 // CancelDeal clears a deal that went wrong for an unknown reason

@@ -32,9 +32,11 @@ var blockGen = blocksutil.NewBlockGenerator()
 type mockPayments struct {
 	chResponse *payments.ChannelResponse
 	chAddr     address.Address
+	chFunds    *payments.AvailableFunds
 }
 
 func (p *mockPayments) GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*payments.ChannelResponse, error) {
+	p.chFunds.ConfirmedAmt = big.Add(p.chFunds.ConfirmedAmt, amt)
 	return p.chResponse, nil
 }
 
@@ -51,6 +53,11 @@ func (p *mockPayments) GetChannelInfo(addr address.Address) (*payments.ChannelIn
 }
 
 func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, amt filecoin.BigInt, lane uint64) (*payments.VoucherCreateResult, error) {
+	if amt.GreaterThan(p.chFunds.ConfirmedAmt) {
+		return &payments.VoucherCreateResult{
+			Shortfall: big.Sub(amt, p.chFunds.ConfirmedAmt),
+		}, nil
+	}
 	// sig := &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("doesn't matter")}
 	vouch := &paych.SignedVoucher{
 		ChannelAddr: addr,
@@ -76,15 +83,22 @@ func (p *mockPayments) AddVoucherInbound(ctx context.Context, addr address.Addre
 	return expectedAmount, nil
 }
 
+func (p *mockPayments) ChannelAvailableFunds(chAddr address.Address) (*payments.AvailableFunds, error) {
+	return p.chFunds, nil
+}
+
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
 		name     string
 		addFunds bool
+		chFunds  payments.AvailableFunds
 	}{
 		{name: "Basic transfer"},
 		{name: "Existing channel", addFunds: true},
-		{name: "Shortfall"},
+		{name: "Shortfall", chFunds: payments.AvailableFunds{
+			ConfirmedAmt: abi.NewTokenAmount(-40100000),
+		}},
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -117,9 +131,12 @@ func TestRetrieval(t *testing.T) {
 				WaitSentinel: blockGen.Next().Cid(),
 			}
 
+			chFunds := addZeroesToAvailableFunds(testCase.chFunds)
+
 			pay1 := &mockPayments{
 				chResponse: chResponse,
 				chAddr:     chAddr,
+				chFunds:    &chFunds,
 			}
 			r1, err := New(bgCtx, n1.Ms, n1.Ds, n1.Counter, pay1, n1.Dt, n1.Host.ID())
 			require.NoError(t, err)
@@ -152,6 +169,11 @@ func TestRetrieval(t *testing.T) {
 				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
 					clientDealStateChan <- state
 					return
+				case deal.StatusInsufficientFunds:
+					// Simulate reaprovisioning the payment channel
+					pay1.chFunds.ConfirmedAmt = state.VoucherShortfall
+					r1.Client().TryRestartInsufficientFunds(state.PaymentInfo.PayCh)
+					return
 				}
 			})
 
@@ -163,7 +185,8 @@ func TestRetrieval(t *testing.T) {
 			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
 			require.NoError(t, err)
 
-			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes))))
+			// We offset it a bit since it's usually higher with ipld encoding
+			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+200)))
 
 			did, err := r1.Client().Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
 			require.NoError(t, err)
@@ -179,4 +202,20 @@ func TestRetrieval(t *testing.T) {
 			n1.VerifyFileTransferred(bgCtx, t, rootCid, origBytes)
 		})
 	}
+}
+
+func addZeroesToAvailableFunds(channelAvailableFunds payments.AvailableFunds) payments.AvailableFunds {
+	if channelAvailableFunds.ConfirmedAmt.Nil() {
+		channelAvailableFunds.ConfirmedAmt = big.Zero()
+	}
+	if channelAvailableFunds.PendingAmt.Nil() {
+		channelAvailableFunds.PendingAmt = big.Zero()
+	}
+	if channelAvailableFunds.QueuedAmt.Nil() {
+		channelAvailableFunds.QueuedAmt = big.Zero()
+	}
+	if channelAvailableFunds.VoucherReedeemedAmt.Nil() {
+		channelAvailableFunds.VoucherReedeemedAmt = big.Zero()
+	}
+	return channelAvailableFunds
 }
