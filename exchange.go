@@ -63,6 +63,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	if err != nil {
 		return nil, err
 	}
+	// TODO: this is an empty validator for now
 	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
 	// Gossip sub subscription for incoming content queries
@@ -207,7 +208,6 @@ func (e *Exchange) Close() error {
 // requestLoop runs by default in the background when the Hop client is initialized
 // it iterates over new gossip messages and sends a response if we have the block in store
 func (e *Exchange) requestLoop(ctx context.Context) {
-	fmt.Println("waiting for requests")
 	for {
 		msg, err := e.reqSub.Next(ctx)
 		if err != nil {
