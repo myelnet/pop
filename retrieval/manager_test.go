@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,9 +34,12 @@ type mockPayments struct {
 	chResponse *payments.ChannelResponse
 	chAddr     address.Address
 	chFunds    *payments.AvailableFunds
+	lk         sync.Mutex
 }
 
 func (p *mockPayments) GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*payments.ChannelResponse, error) {
+	p.lk.Lock()
+	defer p.lk.Unlock()
 	p.chFunds.ConfirmedAmt = big.Add(p.chFunds.ConfirmedAmt, amt)
 	return p.chResponse, nil
 }
@@ -85,6 +89,13 @@ func (p *mockPayments) AddVoucherInbound(ctx context.Context, addr address.Addre
 
 func (p *mockPayments) ChannelAvailableFunds(chAddr address.Address) (*payments.AvailableFunds, error) {
 	return p.chFunds, nil
+}
+
+func (p *mockPayments) SetChannelAvailableFunds(funds payments.AvailableFunds) {
+	p.lk.Lock()
+	defer p.lk.Unlock()
+	chFunds := addZeroesToAvailableFunds(funds)
+	p.chFunds = &chFunds
 }
 
 func TestRetrieval(t *testing.T) {
@@ -173,7 +184,9 @@ func TestRetrieval(t *testing.T) {
 					return
 				case deal.StatusInsufficientFunds:
 					// Simulate reaprovisioning the payment channel
-					pay1.chFunds.ConfirmedAmt = state.VoucherShortfall
+					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
+						ConfirmedAmt: state.VoucherShortfall,
+					})
 					r1.Client().TryRestartInsufficientFunds(state.PaymentInfo.PayCh)
 					return
 				}

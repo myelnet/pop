@@ -273,6 +273,7 @@ var FSMEvents = fsm.Events{
 	// completing deals
 	fsm.Event(EventComplete).
 		From(deal.StatusOngoing).To(deal.StatusCheckComplete).
+		From(deal.StatusBlocksComplete).To(deal.StatusCheckComplete).
 		From(deal.StatusFinalizing).To(deal.StatusCompleted),
 	fsm.Event(EventCompleteVerified).
 		From(deal.StatusCheckComplete).To(deal.StatusCompleted),
