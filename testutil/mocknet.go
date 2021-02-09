@@ -137,6 +137,15 @@ func (tn *TestNode) SetupGraphSync(ctx context.Context) {
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
 }
 
+func (tn *TestNode) SetupTempRepo(t *testing.T) {
+	var err error
+	tn.DTTmpDir, err = ioutil.TempDir("", "dt-tmp")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tn.DTTmpDir)
+	})
+}
+
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
 	var err error
 	tn.DTStoredCounter = storedcounter.New(tn.Ds, datastore.NewKey("nextDTID"))

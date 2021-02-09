@@ -20,10 +20,13 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	pin "github.com/ipfs/go-ipfs-pinner"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange/filecoin"
+	"github.com/myelnet/go-hop-exchange/payments"
+	"github.com/myelnet/go-hop-exchange/retrieval"
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
@@ -63,6 +66,15 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	if err != nil {
 		return nil, err
 	}
+	// Add a special adaptor to use the blockstore with cbor encoding
+	cborblocks := cbor.NewCborStore(ex.Blockstore)
+	// Create our payment manager
+	paym := payments.New(ctx, ex.fAPI, ex.wallet, ex.Datastore, cborblocks)
+	// Create our retrieval manager
+	ex.Retrieval, err = retrieval.New(ctx, ex.multiStore, ex.Datastore, paym, ex.dataTransfer, ex.Host.ID())
+	if err != nil {
+		return nil, err
+	}
 	// TODO: this is an empty validator for now
 	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
@@ -99,6 +111,7 @@ type Exchange struct {
 	GraphSync   graphsync.GraphExchange
 	Pinner      pin.Pinner
 	Keystore    wallet.Keystore
+	Retrieval   retrieval.Manager
 
 	multiStore   *multistore.MultiStore
 	supply       supply.Manager
@@ -141,13 +154,18 @@ func (e *Exchange) GetBlock(p context.Context, k cid.Cid) (blocks.Block, error) 
 
 // GetBlocks creates a new session before getting a stream of blocks
 func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
+	defAddr, err := e.wallet.DefaultAddress()
+	if err != nil {
+		return nil, err
+	}
 	session := &Session{
-		blockstore:   e.Blockstore,
-		reqTopic:     e.reqTopic,
-		net:          e.net,
-		dataTransfer: e.dataTransfer,
-		responses:    make(map[peer.ID]QueryResponse),
-		res:          make(chan peer.ID),
+		blockstore: e.Blockstore,
+		reqTopic:   e.reqTopic,
+		net:        e.net,
+		retriever:  e.Retrieval.Client(),
+		addr:       defAddr,
+		responses:  make(map[peer.ID]QueryResponse),
+		res:        make(chan peer.ID),
 	}
 	e.net.SetDelegate(session)
 	return session.GetBlocks(ctx, keys)
@@ -177,26 +195,31 @@ func (e *Exchange) IsOnline() bool {
 // NewSession creates a Hop session for streaming blocks
 func (e *Exchange) NewSession(ctx context.Context) exchange.Fetcher {
 	return &Session{
-		blockstore:   e.Blockstore,
-		reqTopic:     e.reqTopic,
-		net:          e.net,
-		dataTransfer: e.dataTransfer,
-		responses:    make(map[peer.ID]QueryResponse),
-		res:          make(chan peer.ID),
+		blockstore: e.Blockstore,
+		reqTopic:   e.reqTopic,
+		net:        e.net,
+		responses:  make(map[peer.ID]QueryResponse),
+		res:        make(chan peer.ID),
 	}
 }
 
 // Retrieve creates a new session and calls retrieve on specified root cid
-func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID) error {
-	session := &Session{
-		blockstore:   e.Blockstore,
-		reqTopic:     e.reqTopic,
-		net:          e.net,
-		dataTransfer: e.dataTransfer,
-		responses:    make(map[peer.ID]QueryResponse),
-		res:          make(chan peer.ID),
+// you do need an address to pay retrieval to
+func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID, addr address.Address) error {
+	defAddr, err := e.wallet.DefaultAddress()
+	if err != nil {
+		return err
 	}
-	return session.Retrieve(ctx, root, peerID)
+	session := &Session{
+		blockstore: e.Blockstore,
+		reqTopic:   e.reqTopic,
+		net:        e.net,
+		retriever:  e.Retrieval.Client(),
+		addr:       defAddr,
+		responses:  make(map[peer.ID]QueryResponse),
+		res:        make(chan peer.ID),
+	}
+	return session.Retrieve(ctx, root, peerID, addr)
 }
 
 // Close the Hop exchange
