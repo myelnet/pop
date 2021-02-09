@@ -5,7 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/big"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
@@ -15,17 +16,21 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-hop-exchange/retrieval"
+	"github.com/myelnet/go-hop-exchange/retrieval/client"
+	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 )
 
 // Session to exchange multiple blocks with a set of connected peers
 type Session struct {
-	blockstore   blockstore.Blockstore
-	reqTopic     *pubsub.Topic
-	net          RetrievalMarketNetwork
-	dataTransfer datatransfer.Manager
-	responses    map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
-	res          chan peer.ID              // First response we get
-	started      bool                      // If we found a satisfying response and we started retrieving
+	blockstore blockstore.Blockstore
+	reqTopic   *pubsub.Topic
+	net        RetrievalMarketNetwork
+	retriever  *retrieval.Client
+	addr       address.Address
+	responses  map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
+	res        chan peer.ID              // First response we get
+	started    bool                      // If we found a satisfying response and we started retrieving
 }
 
 // HandleQueryStream for direct provider queries
@@ -74,16 +79,13 @@ func (s *Session) GetBlocks(ctx context.Context, ks []cid.Cid) (<-chan blocks.Bl
 }
 
 func (s *Session) responseLoop(ctx context.Context, root cid.Cid, out chan blocks.Block) {
-	fmt.Println("Waiting for response")
-
 	for {
 		select {
 		case pid := <-s.res:
 			response := s.responses[pid]
 			// We can decide here some extra logic to reject the response
 			// For now we always accept the first one
-			fmt.Println("Received response", response.Size)
-			err := s.Retrieve(ctx, root, pid)
+			err := s.Retrieve(ctx, root, pid, response.PaymentAddress)
 			if err != nil {
 				// Maybe retry?
 				fmt.Println("Failed to retrieve, err")
@@ -109,32 +111,37 @@ func AllSelector() iprime.Node {
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 }
 
-// Retrieve an entire dag from the root. TODO: add FIL payment channel
-func (s *Session) Retrieve(ctx context.Context, root cid.Cid, sender peer.ID) error {
+// Retrieve an entire dag from the root.
+func (s *Session) Retrieve(ctx context.Context, root cid.Cid, sender peer.ID, addr address.Address) error {
 
-	done := make(chan datatransfer.Event, 1)
-	unsubscribe := s.dataTransfer.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		if channelState.Status() == datatransfer.Completed {
-			done <- event
-
-		}
-		if event.Code == datatransfer.Error {
-			done <- event
+	done := make(chan deal.ClientState, 1)
+	unsubscribe := s.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
+		switch state.Status {
+		case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
+			done <- state
+			return
 		}
 	})
 	defer unsubscribe()
 
-	voucher := StorageDataTransferVoucher{Proposal: root}
-	_, err := s.dataTransfer.OpenPullDataChannel(ctx, sender, &voucher, root, AllSelector())
+	// TODO: price should be determined based on provider proposal
+	pricePerByte := big.Zero()
+	paymentInterval := uint64(10000)
+	paymentIntervalIncrease := uint64(1000)
+	unsealPrice := big.Zero()
+	params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
+	expectedTotal := big.Zero()
+
+	_, err = s.retriever.Retrieve(ctx, root, params, expectedTotal, sender, s.addr, addr, nil)
 	if err != nil {
 		return err
 	}
 
 	select {
-	case event := <-done:
-		if event.Code == datatransfer.Error {
-			return fmt.Errorf("Retrieval error: %v", event.Message)
+	case state := <-done:
+		if state.Status == deal.StatusCompleted {
+			return nil
 		}
-		return nil
+		return fmt.Errorf("Retrieval error: %v, %v", deal.Statuses[state.Status], state.Message)
 	}
 }

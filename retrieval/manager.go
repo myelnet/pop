@@ -97,11 +97,11 @@ func New(
 	ctx context.Context,
 	ms *multistore.MultiStore,
 	ds datastore.Batching,
-	sc *storedcounter.StoredCounter,
 	pay payments.Manager,
 	dt datatransfer.Manager,
 	self peer.ID,
 ) (Manager, error) {
+	sc := storedcounter.New(ds, datastore.NewKey("/retrieval/deal-id"))
 	var err error
 	// Client setup
 	c := &Client{

@@ -18,6 +18,7 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 type Manager interface {
 	SendAddRequest(cid.Cid, uint64)
 	SubscribeToEvents(Subscriber) Unsubscribe
+	ProviderPeersForContent(cid.Cid) ([]peer.ID, error)
 }
 
 // Supply keeps track of the content we store and provide on the network
@@ -58,6 +59,15 @@ func New(
 		subscribers:   pubsub.New(EventDispatcher),
 	}
 	return m
+}
+
+// ProviderPeersForContent gets the known providers for a given content id
+func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
+	pset, ok := s.providerPeers[c]
+	if !ok {
+		return nil, fmt.Errorf("content not tracked")
+	}
+	return pset.Peers(), nil
 }
 
 // SendAddRequest to the network until we have propagated the content to enough peers
@@ -120,7 +130,6 @@ func (s *Supply) processAddRequest(payload cid.Cid, size uint64) {
 	for i := 0; i < cap(c); i++ {
 		select {
 		case p := <-c:
-			fmt.Println("adding peers")
 			s.providerPeers[payload].Add(p)
 		case <-s.ctx.Done():
 			return
