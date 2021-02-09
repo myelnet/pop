@@ -62,7 +62,6 @@ func (s *Session) GetBlock(ctx context.Context, k cid.Cid) (blocks.Block, error)
 
 // GetBlocks from one or multiple providers
 func (s *Session) GetBlocks(ctx context.Context, ks []cid.Cid) (<-chan blocks.Block, error) {
-
 	out := make(chan blocks.Block)
 	m := Query{
 		PayloadCID:  ks[0],
@@ -93,6 +92,7 @@ func (s *Session) responseLoop(ctx context.Context, root cid.Cid, out chan block
 			response := s.responses[pid]
 
 			s.lk.Unlock()
+
 			// We can decide here some extra logic to reject the response
 			// For now we always accept the first one
 			err := s.Retrieve(ctx, root, pid, response.PaymentAddress)
@@ -109,6 +109,8 @@ func (s *Session) responseLoop(ctx context.Context, root cid.Cid, out chan block
 			}
 
 			out <- block
+			return
+		case <-ctx.Done():
 			return
 		}
 	}

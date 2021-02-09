@@ -71,8 +71,7 @@ func New(
 
 			set, ok := s.providerPeers[root]
 			if !ok {
-				s.providerPeers[root] = peer.NewSet()
-				set = s.providerPeers[root]
+				return
 			}
 			rec := channelState.Recipient()
 			if rec != h.ID() {
@@ -103,6 +102,9 @@ func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
 
 // SendAddRequest to the network until we have propagated the content to enough peers
 func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) error {
+	s.lk.Lock()
+	s.providerPeers[payload] = peer.NewSet()
+	s.lk.Unlock()
 	// Select the providers we want to send to
 	providers, err := s.selectProviders()
 	if err != nil {

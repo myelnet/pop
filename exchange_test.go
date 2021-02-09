@@ -2,7 +2,8 @@ package hop
 
 import (
 	"context"
-	"fmt"
+	"math/rand"
+	"os"
 	"testing"
 	"time"
 
@@ -161,31 +162,32 @@ func TestExchangeViaDAG(t *testing.T) {
 	})
 	defer unsubscribe()
 
+	// generate 800 bytes of random data to make a single block
+	data := make([]byte, 800)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
+
+	file, err := os.Create("tmp")
+	require.NoError(t, err)
+	defer os.Remove(file.Name())
+
+	_, err = file.Write(data)
+	require.NoError(t, err)
+
 	// When using the exchange to power the dag it automatically propagates the content
 	// to the network
-	link, origBytes := cnode.LoadUnixFSFileToStore(ctx, t, "/README.md")
+	link, origBytes := cnode.LoadUnixFSFileToStore(ctx, t, file.Name())
 	rootCid := link.(cidlink.Link).Cid
 
 	select {
 	case <-ctx.Done():
 		t.Error("could not finish")
 	case <-done:
-		pp, err := client.Supply().ProviderPeersForContent(rootCid)
-		require.NoError(t, err)
-		for _, p := range pp {
-			pnodes[p].VerifyFileTransferred(ctx, t, rootCid, origBytes)
-		}
 	}
 
 	cnode.NukeBlockstore(ctx, t)
-	fmt.Println("it goes beyond loading file and nuking bs")
 
-	// Sanity check to make sure our client does not have a copy of our blocks
-	_, err := cnode.DAG.Get(ctx, rootCid)
-	require.Error(t, err)
-
-	// Now we fetch it again from our providers
-	_, err = client.GetBlock(ctx, rootCid)
+	// Now we should be able to get it back from providers with the DAG interface
+	_, err = cnode.DAG.Get(ctx, rootCid)
 	require.NoError(t, err)
 
 	// And we verify we got the file back
