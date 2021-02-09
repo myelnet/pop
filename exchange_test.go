@@ -85,4 +85,16 @@ func TestExchange(t *testing.T) {
 		}
 	}
 
+	cnode.NukeBlockstore(ctx, t)
+
+	// Sanity check to make sure our client does not have a copy of our blocks
+	_, err = cnode.DAG.Get(ctx, rootCid)
+	require.Error(t, err)
+
+	// Now we fetch it again from our providers
+	_, err = client.GetBlock(ctx, rootCid)
+	require.NoError(t, err)
+
+	// And we verify we got the file back
+	cnode.VerifyFileTransferred(ctx, t, rootCid, origBytes)
 }

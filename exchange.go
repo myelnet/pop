@@ -58,11 +58,20 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	}
 	// Set wallet from IPFS Keystore, we should make this more generic eventually
 	ex.wallet = wallet.NewIPFS(ex.Keystore, ex.fAPI)
+	// Make a new default key to be sure we have an address where to receive our payments
+	ex.SelfAddress, err = ex.wallet.NewKey(ctx, wallet.KTSecp256k1)
+	if err != nil {
+		return nil, err
+	}
 	// Setup the messaging protocol for communicating retrieval deals
 	ex.net = NewFromLibp2pHost(ex.Host)
 
 	// Retrieval data transfer setup
 	ex.dataTransfer, err = NewDataTransfer(ctx, ex.Host, ex.GraphSync, ex.Datastore, "retrieval", ex.cidListDir)
+	if err != nil {
+		return nil, err
+	}
+	ex.multiStore, err = multistore.NewMultiDstore(ex.Datastore)
 	if err != nil {
 		return nil, err
 	}
@@ -154,16 +163,12 @@ func (e *Exchange) GetBlock(p context.Context, k cid.Cid) (blocks.Block, error) 
 
 // GetBlocks creates a new session before getting a stream of blocks
 func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
-	defAddr, err := e.wallet.DefaultAddress()
-	if err != nil {
-		return nil, err
-	}
 	session := &Session{
 		blockstore: e.Blockstore,
 		reqTopic:   e.reqTopic,
 		net:        e.net,
 		retriever:  e.Retrieval.Client(),
-		addr:       defAddr,
+		addr:       e.SelfAddress,
 		responses:  make(map[peer.ID]QueryResponse),
 		res:        make(chan peer.ID),
 	}
@@ -205,6 +210,7 @@ func (e *Exchange) NewSession(ctx context.Context) exchange.Fetcher {
 
 // Retrieve creates a new session and calls retrieve on specified root cid
 // you do need an address to pay retrieval to
+// TODO: improve this method is not super useful as is
 func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID, addr address.Address) error {
 	defAddr, err := e.wallet.DefaultAddress()
 	if err != nil {

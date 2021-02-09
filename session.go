@@ -79,16 +79,13 @@ func (s *Session) GetBlocks(ctx context.Context, ks []cid.Cid) (<-chan blocks.Bl
 }
 
 func (s *Session) responseLoop(ctx context.Context, root cid.Cid, out chan blocks.Block) {
-	fmt.Println("Waiting for response")
-
 	for {
 		select {
 		case pid := <-s.res:
 			response := s.responses[pid]
 			// We can decide here some extra logic to reject the response
 			// For now we always accept the first one
-			fmt.Println("Received response", response.Size)
-			err := s.Retrieve(ctx, root, pid, address.Undef)
+			err := s.Retrieve(ctx, root, pid, response.PaymentAddress)
 			if err != nil {
 				// Maybe retry?
 				fmt.Println("Failed to retrieve, err")

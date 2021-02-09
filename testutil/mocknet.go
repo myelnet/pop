@@ -44,6 +44,7 @@ import (
 	selectors "github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-peer"
+	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -127,7 +128,10 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 	testNode.Loader = makeLoader(testNode.Bs)
 	testNode.Storer = makeStorer(testNode.Bs)
 
-	testNode.Host, err = mn.GenPeer()
+	// We generate our own peer to avoid the default bogus private key
+	peer := tnet.RandPeerNetParamsOrFatal(t)
+
+	testNode.Host, err = mn.AddPeer(peer.PrivKey, peer.Addr)
 	require.NoError(t, err)
 
 	return testNode
@@ -229,6 +233,16 @@ func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t *testing.T, lin
 	}
 
 	require.EqualValues(t, origBytes, b)
+}
+
+func (tn *TestNode) NukeBlockstore(ctx context.Context, t *testing.T) {
+	cids, err := tn.Bs.AllKeysChan(ctx)
+	require.NoError(t, err)
+
+	for i := 0; i < cap(cids); i++ {
+		err := tn.Bs.DeleteBlock(<-cids)
+		require.NoError(t, err)
+	}
 }
 
 func (tn *TestNode) GetGraphSize(ctx context.Context, root cid.Cid, sel ipld.Node) (int, error) {
