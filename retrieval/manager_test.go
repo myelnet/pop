@@ -151,12 +151,12 @@ func TestRetrieval(t *testing.T) {
 				chAddr:     chAddr,
 				chFunds:    &chFunds,
 			}
-			r1, err := New(bgCtx, n1.Ms, n1.Ds, n1.Counter, pay1, n1.Dt, n1.Host.ID())
+			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, n1.Host.ID())
 			require.NoError(t, err)
 
 			n2.SetupDataTransfer(bgCtx, t)
 			pay2 := &mockPayments{}
-			r2, err := New(bgCtx, n2.Ms, n2.Ds, n2.Counter, pay2, n2.Dt, n2.Host.ID())
+			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, n2.Host.ID())
 			require.NoError(t, err)
 
 			// n1 is our client and is retrieving a file n2 has so we add it first
