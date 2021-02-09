@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
@@ -31,6 +32,7 @@ type Session struct {
 	responses  map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
 	res        chan peer.ID              // First response we get
 	started    bool                      // If we found a satisfying response and we started retrieving
+	lk         sync.Mutex
 }
 
 // HandleQueryStream for direct provider queries
@@ -43,6 +45,9 @@ func (s *Session) HandleQueryStream(stream RetrievalQueryStream) {
 		fmt.Println("Unable to read query response", err)
 		return
 	}
+
+	s.lk.Lock()
+	defer s.lk.Unlock()
 
 	s.responses[stream.OtherPeer()] = response
 	if !s.started {
@@ -82,7 +87,12 @@ func (s *Session) responseLoop(ctx context.Context, root cid.Cid, out chan block
 	for {
 		select {
 		case pid := <-s.res:
+
+			s.lk.Lock()
+
 			response := s.responses[pid]
+
+			s.lk.Unlock()
 			// We can decide here some extra logic to reject the response
 			// For now we always accept the first one
 			err := s.Retrieve(ctx, root, pid, response.PaymentAddress)

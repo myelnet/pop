@@ -3,6 +3,7 @@ package supply
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/hannahhoward/go-pubsub"
@@ -16,7 +17,7 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
-	SendAddRequest(cid.Cid, uint64)
+	SendAddRequest(cid.Cid, uint64) error
 	SubscribeToEvents(Subscriber) Unsubscribe
 	ProviderPeersForContent(cid.Cid) ([]peer.ID, error)
 }
@@ -30,6 +31,7 @@ type Supply struct {
 	man *Manifest
 	ctx context.Context
 
+	lk sync.Mutex
 	// Keep track of which of our peers may have a block
 	// Not use for anything else than debugging currently but may be useful eventualy
 	providerPeers map[cid.Cid]*peer.Set
@@ -49,7 +51,7 @@ func New(
 	// Set the manifest to handle our messages
 	net.SetDelegate(manifest)
 	// We wrap it all in our Supply object
-	m := &Supply{
+	s := &Supply{
 		h:             h,
 		dt:            dt,
 		net:           net,
@@ -58,11 +60,40 @@ func New(
 		providerPeers: make(map[cid.Cid]*peer.Set),
 		subscribers:   pubsub.New(EventDispatcher),
 	}
-	return m
+
+	// listen for datatransfer events to identify the peers who pulled the content
+	s.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
+		if channelState.Status() == datatransfer.Completed {
+			s.lk.Lock()
+			defer s.lk.Unlock()
+
+			root := channelState.BaseCID()
+
+			set, ok := s.providerPeers[root]
+			if !ok {
+				s.providerPeers[root] = peer.NewSet()
+				set = s.providerPeers[root]
+			}
+			rec := channelState.Recipient()
+			if rec != h.ID() {
+				set.Add(rec)
+			}
+			// Notify subscribers
+			// TODO: publish error event
+			s.subscribers.Publish(Event{
+				PayloadCID: root,
+				Providers:  set.Peers(),
+			})
+		}
+	})
+
+	return s
 }
 
 // ProviderPeersForContent gets the known providers for a given content id
 func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
+	s.lk.Lock()
+	defer s.lk.Unlock()
 	pset, ok := s.providerPeers[c]
 	if !ok {
 		return nil, fmt.Errorf("content not tracked")
@@ -71,12 +102,19 @@ func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
 }
 
 // SendAddRequest to the network until we have propagated the content to enough peers
-func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) {
-	go s.processAddRequest(payload, size)
+func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) error {
+	// Select the providers we want to send to
+	providers, err := s.selectProviders()
+	if err != nil {
+		return err
+	}
+	s.processAddRequests(payload, size, providers)
+	return nil
 }
 
-func (s *Supply) processAddRequest(payload cid.Cid, size uint64) {
+func (s *Supply) selectProviders() ([]peer.ID, error) {
 	// Get the current connected peers
+	// TODO: select only peers who support our request protocol
 	var peers []peer.ID
 	for _, pid := range s.h.Peerstore().Peers() {
 		if pid != s.h.ID() {
@@ -85,32 +123,20 @@ func (s *Supply) processAddRequest(payload cid.Cid, size uint64) {
 	}
 
 	if len(peers) == 0 {
-		s.subscribers.Publish(Event{
-			PayloadCID: payload,
-			Providers:  make([]peer.ID, 0),
-		})
-		return // ErrNoPeers is quite noisy so will disable until we find a more elegant way
+		return nil, nil // ErrNoPeers is quite noisy so will disable until we find a more elegant way
 	}
-	// Set the amount of peers we want to notify
+	// TODO: Allow configurating the amount of peers we want to notify
 	max := 6
 	// If we have less peers we adjust accordingly
-	if len(peers) < 6 {
-		max = len(peers)
+	if len(peers) > max {
+		peers = peers[:max]
 	}
+	return peers, nil
+}
 
-	// wait for all the peers who pull the data from us
-	c := make(chan peer.ID, max)
-	// listen for datatransfer events to identify the peers who pulled the content
-	unsubscribe := s.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		if channelState.Status() == datatransfer.Completed {
-			c <- channelState.OtherPeer()
-		}
-	})
-	// Clean up when we're done
-	defer unsubscribe()
-
-	for i := 0; i < max; i++ {
-		stream, err := s.net.NewAddRequestStream(peers[i])
+func (s *Supply) processAddRequests(payload cid.Cid, size uint64, peers []peer.ID) {
+	for _, p := range peers {
+		stream, err := s.net.NewAddRequestStream(p)
 		if err != nil {
 			fmt.Println("Unable to create new request stream", err)
 			continue
@@ -125,23 +151,6 @@ func (s *Supply) processAddRequest(payload cid.Cid, size uint64) {
 			continue
 		}
 	}
-	s.providerPeers[payload] = peer.NewSet()
-	// For for a defined amount of successful transfers
-	for i := 0; i < cap(c); i++ {
-		select {
-		case p := <-c:
-			s.providerPeers[payload].Add(p)
-		case <-s.ctx.Done():
-			return
-		}
-	}
-
-	// Notify subscribers
-	// TODO: publish error event
-	s.subscribers.Publish(Event{
-		PayloadCID: payload,
-		Providers:  s.providerPeers[payload].Peers(),
-	})
 }
 
 // SubscribeToEvents to listen for supply events

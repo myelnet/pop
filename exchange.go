@@ -188,8 +188,7 @@ func (e *Exchange) Announce(c cid.Cid) error {
 	if err != nil {
 		return err
 	}
-	e.supply.SendAddRequest(c, uint64(size))
-	return nil
+	return e.supply.SendAddRequest(c, uint64(size))
 }
 
 // IsOnline just to respect the exchange interface
