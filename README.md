@@ -16,9 +16,9 @@
 
 - IPFS exchange interface like Bitswap
 - Turn any IPFS node into a Filecoin retrieval provider (YES, that means you will earn FIL when we launch on mainnet!)
-- New content is dispatched via Gossipsub and stored if enough space if available
+- New content is dispatched via Gossipsub and stored if enough space is available
 - IPFS Plugin to wrap the default Bitswap implementation and fetch blocks from Filecoin if not available on the public IPFS network
-- Does NOT allow for uploading to Filecoin (we will provide a separate plugin for that in the future, in the meantime you can use the Myel app)
+- Upload and retrieve directly from Filecoin if not secondary providers cache the content (Coming Soon)
 
 ## Background
 
@@ -84,6 +84,9 @@ blocks := bserv.New(bstore, exch)
 dag := dag.NewDAGService(n.blocks)
 
 ```
+`WithFilecoinAPI` is optional and if not provided, the node only supports free transfers
+and will charge 0 price per byte to client requests for content it serves. This is mostly
+for testing purposes.
 
 3. When getting from the DAG it will automatically query the network
 
