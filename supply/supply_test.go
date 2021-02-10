@@ -50,12 +50,15 @@ func TestSendAddRequest(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	done := make(chan bool, 1)
+	receivers := make(chan peer.ID, 6)
+	done := make(chan error)
 	unsubscribe := supply.SubscribeToEvents(func(event Event) {
-		if len(event.Providers) == 6 {
-			require.Equal(t, rootCid, event.PayloadCID)
-			done <- true
+		require.Equal(t, rootCid, event.PayloadCID)
+		receivers <- event.Provider
+		if len(receivers)+1 == cap(receivers) {
+			done <- nil
 		}
+
 	})
 	defer unsubscribe()
 
