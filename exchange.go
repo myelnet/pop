@@ -27,6 +27,8 @@ import (
 	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/payments"
 	"github.com/myelnet/go-hop-exchange/retrieval"
+	"github.com/myelnet/go-hop-exchange/retrieval/client"
+	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
@@ -40,6 +42,7 @@ const RequestTopic = "/myel/hop/request/1.0"
 func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
 	var err error
 	ex := &Exchange{}
+
 	// For ease of customizing all the exchange components
 	for _, option := range options {
 		err := option(ex)
@@ -99,6 +102,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 		return nil, err
 	}
 	ex.reqSub = sub
+
 	go ex.requestLoop(ctx)
 
 	// TODO: validate AddRequest
@@ -163,16 +167,10 @@ func (e *Exchange) GetBlock(p context.Context, k cid.Cid) (blocks.Block, error) 
 
 // GetBlocks creates a new session before getting a stream of blocks
 func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
-	session := &Session{
-		blockstore: e.Blockstore,
-		reqTopic:   e.reqTopic,
-		net:        e.net,
-		retriever:  e.Retrieval.Client(),
-		addr:       e.SelfAddress,
-		responses:  make(map[peer.ID]QueryResponse),
-		res:        make(chan peer.ID),
+	session, err := e.Session(ctx, keys[0])
+	if err != nil {
+		return nil, err
 	}
-	e.net.SetDelegate(session)
 	return session.GetBlocks(ctx, keys)
 }
 
@@ -188,8 +186,7 @@ func (e *Exchange) Announce(c cid.Cid) error {
 	if err != nil {
 		return err
 	}
-	e.supply.SendAddRequest(c, uint64(size))
-	return nil
+	return e.supply.SendAddRequest(c, uint64(size))
 }
 
 // IsOnline just to respect the exchange interface
@@ -199,38 +196,63 @@ func (e *Exchange) IsOnline() bool {
 
 // NewSession creates a Hop session for streaming blocks
 func (e *Exchange) NewSession(ctx context.Context) exchange.Fetcher {
-	return &Session{
+	session, _ := e.Session(ctx, cid.Undef)
+	return session
+}
+
+// Session returns a new sync session
+func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) {
+	// Track when the session is completed
+	done := make(chan error)
+	// Subscribe to client events to send to the channel
+	cl := e.Retrieval.Client()
+	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
+		switch state.Status {
+		case deal.StatusCompleted:
+			done <- nil
+			return
+		case deal.StatusCancelled, deal.StatusErrored:
+			done <- fmt.Errorf("retrieval: %v, %v", deal.Statuses[state.Status], state.Message)
+			return
+		}
+	})
+	session := &Session{
 		blockstore: e.Blockstore,
 		reqTopic:   e.reqTopic,
 		net:        e.net,
+		root:       root,
+		retriever:  cl,
+		addr:       e.SelfAddress,
+		ctx:        ctx,
+		done:       done,
+		unsub:      unsubscribe,
 		responses:  make(map[peer.ID]QueryResponse),
 		res:        make(chan peer.ID),
 	}
+	err := e.net.SetDelegate(session)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
 }
 
 // Retrieve creates a new session and calls retrieve on specified root cid
 // you do need an address to pay retrieval to
 // TODO: improve this method is not super useful as is
 func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID, addr address.Address) error {
-	defAddr, err := e.wallet.DefaultAddress()
+	session, err := e.Session(ctx, root)
 	if err != nil {
 		return err
 	}
-	session := &Session{
-		blockstore: e.Blockstore,
-		reqTopic:   e.reqTopic,
-		net:        e.net,
-		retriever:  e.Retrieval.Client(),
-		addr:       defAddr,
-		responses:  make(map[peer.ID]QueryResponse),
-		res:        make(chan peer.ID),
-	}
-	return session.Retrieve(ctx, root, peerID, addr)
+	return session.Retrieve(ctx, peerID, addr)
 }
 
 // Close the Hop exchange
+// TODO: shutdown gracefully
 func (e *Exchange) Close() error {
-	e.fAPI.Close()
+	// e.fAPI.Close()
+	// e.dataTransfer.Stop(context.TODO())
+	// e.Host.Close()
 	return nil
 }
 
@@ -257,6 +279,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
 			if err != nil {
 				fmt.Println("Error", err)
+				continue
 			}
 			e.sendQueryResponse(qs, QueryResponseAvailable, uint64(size))
 		}
