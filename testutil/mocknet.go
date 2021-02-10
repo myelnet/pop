@@ -182,7 +182,7 @@ const unixfsChunkSize uint64 = 1 << 10
 const unixfsLinksPerLevel = 1024
 
 func (tn *TestNode) LoadUnixFSFileToStore(ctx context.Context, t *testing.T, dirPath string) (ipld.Link, []byte) {
-	fpath, err := filepath.Abs(filepath.Join(thisDir(t), "..", dirPath))
+	fpath, err := filepath.Abs(filepath.Join(ThisDir(t), "..", dirPath))
 	require.NoError(t, err)
 
 	f, err := os.Open(fpath)
@@ -292,7 +292,7 @@ func (tn *TestNode) GetGraphSize(ctx context.Context, root cid.Cid, sel ipld.Nod
 	return size, nil
 }
 
-func thisDir(t *testing.T) string {
+func ThisDir(t *testing.T) string {
 	_, fname, _, ok := runtime.Caller(1)
 	require.True(t, ok)
 	return path.Dir(fname)

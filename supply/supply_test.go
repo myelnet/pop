@@ -50,14 +50,20 @@ func TestSendAddRequest(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	done := make(chan bool, 1)
+	receivers := make(chan peer.ID, 6)
+	done := make(chan error)
 	unsubscribe := supply.SubscribeToEvents(func(event Event) {
 		require.Equal(t, rootCid, event.PayloadCID)
-		done <- true
+		receivers <- event.Provider
+		if len(receivers)+1 == cap(receivers) {
+			done <- nil
+		}
+
 	})
 	defer unsubscribe()
 
-	supply.SendAddRequest(rootCid, uint64(len(origBytes)))
+	err = supply.SendAddRequest(rootCid, uint64(len(origBytes)))
+	require.NoError(t, err)
 
 	select {
 	case <-ctx.Done():
@@ -90,19 +96,6 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 
 	supply := New(ctx, n1.Host, n1.Dt)
 
-	done := make(chan bool, 1)
-	unsubscribe := supply.SubscribeToEvents(func(event Event) {
-		require.Equal(t, rootCid, event.PayloadCID)
-		done <- true
-	})
-	defer unsubscribe()
-
-	supply.SendAddRequest(rootCid, uint64(len(origBytes)))
-
-	select {
-	case <-ctx.Done():
-		t.Error("requests incomplete")
-	case <-done:
-	}
-
+	err := supply.SendAddRequest(rootCid, uint64(len(origBytes)))
+	require.NoError(t, err)
 }
