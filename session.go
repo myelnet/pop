@@ -18,7 +18,6 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/go-hop-exchange/retrieval"
-	"github.com/myelnet/go-hop-exchange/retrieval/client"
 	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 )
 
@@ -29,10 +28,16 @@ type Session struct {
 	net        RetrievalMarketNetwork
 	retriever  *retrieval.Client
 	addr       address.Address
-	responses  map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
-	res        chan peer.ID              // First response we get
-	started    bool                      // If we found a satisfying response and we started retrieving
-	lk         sync.Mutex
+	root       cid.Cid
+	sel        iprime.Node
+	ctx        context.Context
+	done       chan error
+	unsub      retrieval.Unsubscribe
+
+	mu        sync.Mutex                // mutex to protext the following fields
+	responses map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
+	res       chan peer.ID              // First response we get
+	started   bool                      // If we found a satisfying response and we started retrieving
 }
 
 // HandleQueryStream for direct provider queries
@@ -46,74 +51,67 @@ func (s *Session) HandleQueryStream(stream RetrievalQueryStream) {
 		return
 	}
 
-	s.lk.Lock()
-	defer s.lk.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	s.responses[stream.OtherPeer()] = response
+
 	if !s.started {
-		s.res <- stream.OtherPeer()
+		s.Retrieve(s.ctx, stream.OtherPeer(), response.PaymentAddress)
 	}
 }
 
-// GetBlock from the first provider
+// GetBlock from the local blockstore. Not really used for anything but to comply with
+// exchange session interface
 func (s *Session) GetBlock(ctx context.Context, k cid.Cid) (blocks.Block, error) {
 	return s.blockstore.Get(k)
 }
 
 // GetBlocks from one or multiple providers
+// currently we only support a single root cid but may support multiple requests eventually
 func (s *Session) GetBlocks(ctx context.Context, ks []cid.Cid) (<-chan blocks.Block, error) {
 	out := make(chan blocks.Block)
+
+	go func(k cid.Cid) {
+		select {
+		case err := <-s.Done():
+			if err != nil {
+				return
+			}
+			block, err := s.blockstore.Get(k)
+			if err != nil {
+				fmt.Println("Failed to get synced block from store", err)
+				return
+			}
+			out <- block
+		case <-ctx.Done():
+			return
+		}
+
+	}(ks[0])
+
+	return out, s.SyncBlocks(ctx)
+
+}
+
+// SyncBlocks will trigger a retrieval without returning the blocks
+// It simply publishes a gossip message and only when providers reply will
+// we trigger a retrieval
+func (s *Session) SyncBlocks(ctx context.Context) error {
 	m := Query{
-		PayloadCID:  ks[0],
+		PayloadCID:  s.root,
 		QueryParams: QueryParams{},
 	}
 
 	buf := new(bytes.Buffer)
 	if err := m.MarshalCBOR(buf); err != nil {
-		return out, err
+		return err
 	}
 
 	if err := s.reqTopic.Publish(ctx, buf.Bytes()); err != nil {
-		return out, err
+		return err
 	}
-
-	go s.responseLoop(ctx, m.PayloadCID, out)
-
-	return out, nil
-}
-
-func (s *Session) responseLoop(ctx context.Context, root cid.Cid, out chan blocks.Block) {
-	for {
-		select {
-		case pid := <-s.res:
-
-			s.lk.Lock()
-
-			response := s.responses[pid]
-
-			s.lk.Unlock()
-
-			// We can decide here some extra logic to reject the response
-			// For now we always accept the first one
-			err := s.Retrieve(ctx, root, pid, response.PaymentAddress)
-			if err != nil {
-				// Maybe retry?
-				fmt.Println("Failed to retrieve, err")
-				continue
-			}
-			// This is kinda dumb
-			block, err := s.blockstore.Get(root)
-			if err != nil {
-				fmt.Println("Failed to get synced block from store", err)
-				continue
-			}
-
-			out <- block
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
+	return nil
 }
 
 // AllSelector to get all the nodes for now. TODO` support custom selectors
@@ -124,18 +122,7 @@ func AllSelector() iprime.Node {
 }
 
 // Retrieve an entire dag from the root.
-func (s *Session) Retrieve(ctx context.Context, root cid.Cid, sender peer.ID, addr address.Address) error {
-
-	done := make(chan deal.ClientState, 1)
-	unsubscribe := s.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
-		switch state.Status {
-		case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
-			done <- state
-			return
-		}
-	})
-	defer unsubscribe()
-
+func (s *Session) Retrieve(ctx context.Context, sender peer.ID, addr address.Address) error {
 	// TODO: price should be determined based on provider proposal
 	pricePerByte := big.Zero()
 	paymentInterval := uint64(10000)
@@ -144,16 +131,20 @@ func (s *Session) Retrieve(ctx context.Context, root cid.Cid, sender peer.ID, ad
 	params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
 	expectedTotal := big.Zero()
 
-	_, err = s.retriever.Retrieve(ctx, root, params, expectedTotal, sender, s.addr, addr, nil)
+	_, err = s.retriever.Retrieve(ctx, s.root, params, expectedTotal, sender, s.addr, addr, nil)
 	if err != nil {
 		return err
 	}
+	return nil
+}
 
-	select {
-	case state := <-done:
-		if state.Status == deal.StatusCompleted {
-			return nil
-		}
-		return fmt.Errorf("Retrieval error: %v, %v", deal.Statuses[state.Status], state.Message)
-	}
+// Done returns a channel that receives any resulting error from the latest operation
+func (s *Session) Done() <-chan error {
+	return s.done
+}
+
+// Close removes any listeners and stream handlers related to a session
+func (s *Session) Close() {
+	s.unsub()
+	s.net.StopHandlingRequests()
 }

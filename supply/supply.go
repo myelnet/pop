@@ -30,13 +30,13 @@ type Supply struct {
 	net *Network
 	man *Manifest
 	ctx context.Context
+	// New content subscriber to know when we've sent the content to new providers
+	subscribers *pubsub.PubSub
 
-	lk sync.Mutex
+	mu sync.Mutex // Protects the following fields
 	// Keep track of which of our peers may have a block
 	// Not use for anything else than debugging currently but may be useful eventualy
 	providerPeers map[cid.Cid]*peer.Set
-	// New content subscriber to know when we've sent the content to new providers
-	subscribers *pubsub.PubSub
 }
 
 // New instance of the SupplyManager
@@ -62,37 +62,42 @@ func New(
 	}
 
 	// listen for datatransfer events to identify the peers who pulled the content
-	s.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		if channelState.Status() == datatransfer.Completed {
-			s.lk.Lock()
-			defer s.lk.Unlock()
-
-			root := channelState.BaseCID()
-
-			set, ok := s.providerPeers[root]
-			if !ok {
-				return
-			}
-			rec := channelState.Recipient()
-			if rec != h.ID() {
-				set.Add(rec)
-			}
-			// Notify subscribers
-			// TODO: publish error event
-			s.subscribers.Publish(Event{
-				PayloadCID: root,
-				Providers:  set.Peers(),
-			})
-		}
-	})
+	s.dt.SubscribeToEvents(s.notifyProvidersReceived)
 
 	return s
 }
 
+func (s *Supply) notifyProvidersReceived(event datatransfer.Event, chState datatransfer.ChannelState) {
+	if chState.Status() == datatransfer.Completed {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		root := chState.BaseCID()
+
+		// We should already have a peer set for that cid
+		// if not this data transfer may be unrelated
+		set, ok := s.providerPeers[root]
+		if !ok {
+			return
+		}
+		// The recipient is the provider who received our content
+		rec := chState.Recipient()
+		if rec != s.h.ID() {
+			set.Add(rec)
+		}
+		// Notify subscribers
+		// TODO: publish error event
+		s.subscribers.Publish(Event{
+			PayloadCID: root,
+			Provider:   rec,
+		})
+	}
+}
+
 // ProviderPeersForContent gets the known providers for a given content id
 func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
-	s.lk.Lock()
-	defer s.lk.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	pset, ok := s.providerPeers[c]
 	if !ok {
 		return nil, fmt.Errorf("content not tracked")
@@ -102,9 +107,9 @@ func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
 
 // SendAddRequest to the network until we have propagated the content to enough peers
 func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) error {
-	s.lk.Lock()
+	s.mu.Lock()
 	s.providerPeers[payload] = peer.NewSet()
-	s.lk.Unlock()
+	s.mu.Unlock()
 	// Select the providers we want to send to
 	providers, err := s.selectProviders()
 	if err != nil {
@@ -170,7 +175,7 @@ type Unsubscribe func()
 // TODO: different event types etc
 type Event struct {
 	PayloadCID cid.Cid
-	Providers  []peer.ID
+	Provider   peer.ID
 }
 
 // EventDispatcher converts our pubsub signature to our callback signature
