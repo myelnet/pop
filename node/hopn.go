@@ -2,22 +2,42 @@ package node
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"sync"
 
+	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-datastore"
 	badgerds "github.com/ipfs/go-ds-badger"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	chunk "github.com/ipfs/go-ipfs-chunker"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
+	files "github.com/ipfs/go-ipfs-files"
+	ipldformat "github.com/ipfs/go-ipld-format"
+	"github.com/ipfs/go-merkledag"
+	"github.com/ipfs/go-unixfs/importer/balanced"
+	"github.com/ipfs/go-unixfs/importer/helpers"
+	"github.com/ipld/go-ipld-prime"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
 	ma "github.com/multiformats/go-multiaddr"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/rs/zerolog/log"
 )
+
+const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
+const unixfsChunkSize uint64 = 1 << 10
+const unixfsLinksPerLevel = 1024
 
 // IPFSNode is the IPFS API
 type IPFSNode interface {
 	Ping(ip string)
+	Add(context.Context, *AddArgs)
 }
 
 // Options determines configurations for the IPFS node
@@ -31,6 +51,8 @@ type Options struct {
 type node struct {
 	host host.Host
 	ds   datastore.Batching
+	bs   blockstore.Blockstore
+	dag  ipldformat.DAGService
 
 	mu     sync.Mutex
 	notify func(Notify)
@@ -48,10 +70,74 @@ func (nd *node) send(n Notify) {
 	}
 }
 
-func (n *node) Ping(param string) {
-	n.send(Notify{PingResult: &PingResult{
-		ListenAddr: ma.Join(n.host.Addrs()...).String(),
+// Ping the node for sanity check more than anything
+func (nd *node) Ping(param string) {
+	nd.send(Notify{PingResult: &PingResult{
+		ListenAddr: ma.Join(nd.host.Addrs()...).String(),
 	}})
+}
+
+// Add a file to the IPFS unixfs dag
+func (nd *node) Add(ctx context.Context, args *AddArgs) {
+
+	link, err := nd.loadFileToBlockstore(ctx, args.Path)
+	root := link.(cidlink.Link).Cid
+	if err != nil {
+		nd.send(Notify{
+			AddResult: &AddResult{
+				Err: err.Error(),
+			},
+		})
+		return
+	}
+	nd.send(Notify{
+		AddResult: &AddResult{
+			Cid: root.String(),
+		}})
+}
+
+func (nd *node) loadFileToBlockstore(ctx context.Context, path string) (ipld.Link, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("unable to open file: %v", err)
+	}
+
+	var buf bytes.Buffer
+	tr := io.TeeReader(f, &buf)
+	file := files.NewReaderFile(tr)
+
+	// import to UnixFS
+	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
+
+	prefix, err := merkledag.PrefixForCidVersion(1)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create cid prefix: %v", err)
+	}
+	prefix.MhType = DefaultHashFunction
+
+	params := helpers.DagBuilderParams{
+		Maxlinks:   unixfsLinksPerLevel,
+		RawLeaves:  true,
+		CidBuilder: prefix,
+		Dagserv:    bufferedDS,
+	}
+
+	db, err := params.New(chunk.NewSizeSplitter(file, int64(unixfsChunkSize)))
+	if err != nil {
+		return nil, fmt.Errorf("unable to init chunker: %v", err)
+	}
+
+	n, err := balanced.Layout(db)
+	if err != nil {
+		return nil, fmt.Errorf("unable to chunk file: %v", err)
+	}
+
+	err = bufferedDS.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("unable to commit blocks to store: %v", err)
+	}
+
+	return cidlink.Link{Cid: n.Cid()}, nil
 }
 
 type server struct {
@@ -119,7 +205,7 @@ func Run(ctx context.Context, opts Options) error {
 	// listen, err := socket.Listen(socketPath, port)
 	listen, err := SocketListen(opts.SocketPath)
 	if err != nil {
-		return fmt.Errorf("safesocket.Listen: %v", err)
+		return fmt.Errorf("SocketListen: %v", err)
 	}
 
 	go func() {
@@ -136,17 +222,19 @@ func Run(ctx context.Context, opts Options) error {
 	dsopts.SyncWrites = false
 	dsopts.Truncate = true
 
-	ds, err := badgerds.NewDatastore(opts.RepoPath, &dsopts)
+	nd.ds, err = badgerds.NewDatastore(opts.RepoPath, &dsopts)
 	if err != nil {
 		return err
 	}
-	nd.ds = ds
 
-	h, err := libp2p.New(ctx)
+	nd.bs = blockstore.NewBlockstore(nd.ds)
+
+	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
+
+	nd.host, err = libp2p.New(ctx)
 	if err != nil {
 		return err
 	}
-	nd.host = h
 
 	log.Info().Interface("addrs", nd.host.Addrs()).Msg("Node started libp2p")
 

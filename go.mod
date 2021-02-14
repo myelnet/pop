@@ -55,6 +55,7 @@ require (
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/multiformats/go-multiaddr v0.3.1
+	github.com/multiformats/go-multihash v0.0.14
 	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/peterbourgon/ff v1.7.0
 	github.com/peterbourgon/ff/v2 v2.0.0

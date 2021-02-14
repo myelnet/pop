@@ -17,18 +17,29 @@ type PingArgs struct {
 	IP string
 }
 
+type AddArgs struct {
+	Path string
+}
+
 // Command is a message sent from a client to the daemon
 type Command struct {
 	Ping *PingArgs
+	Add  *AddArgs
 }
 
 type PingResult struct {
 	ListenAddr string
 }
 
+type AddResult struct {
+	Cid string
+	Err string
+}
+
 // Notify is a message sent from the daemon to the client
 type Notify struct {
 	PingResult *PingResult
+	AddResult  *AddResult
 }
 
 // CommandServer receives commands on the daemon side and executes them
@@ -58,6 +69,10 @@ func (cs *CommandServer) GotMsgBytes(ctx context.Context, b []byte) error {
 func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	if c := cmd.Ping; c != nil {
 		cs.n.Ping(c.IP)
+		return nil
+	}
+	if c := cmd.Add; c != nil {
+		cs.n.Add(ctx, c)
 		return nil
 	}
 	return fmt.Errorf("CommandServer: no command specified")
@@ -116,6 +131,10 @@ func (cc *CommandClient) send(cmd Command) {
 
 func (cc *CommandClient) Ping(ip string) {
 	cc.send(Command{Ping: &PingArgs{IP: ip}})
+}
+
+func (cc *CommandClient) Add(args *AddArgs) {
+	cc.send(Command{Add: args})
 }
 
 func (cc *CommandClient) SetNotifyCallback(fn func(Notify)) {

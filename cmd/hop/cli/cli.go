@@ -2,26 +2,17 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"flag"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
-)
-
-var (
-	ErrTokenNotFound = errors.New("no token found")
-	ErrNoTokenOnOS   = errors.New("no token on " + runtime.GOOS)
 )
 
 // Run runs the CLI. The args do not include the binary name.
@@ -35,13 +26,14 @@ func Run(args []string) error {
 	rootCmd := &ffcli.Command{
 		Name:       "hop",
 		ShortUsage: "hop subcommand [flags]",
-		ShortHelp:  "The easiest, fastes way to exchange content with IPFS.",
+		ShortHelp:  "Content delivery network for the web3.0.",
 		LongHelp: strings.TrimSpace(`
 This CLI is still under active development. Commands and flags will
 change in the future.
 `),
 		Subcommands: []*ffcli.Command{
 			pingCmd,
+			addCmd,
 		},
 		FlagSet: rootfs,
 		Exec:    func(context.Context, []string) error { return flag.ErrHelp },
@@ -56,53 +48,6 @@ change in the future.
 		return nil
 	}
 	return err
-}
-
-var pingCmd = &ffcli.Command{
-	Name:       "ping",
-	ShortUsage: "ping",
-	ShortHelp:  "Ping the daemon to see if it's active",
-	LongHelp: strings.TrimSpace(`
-Here is some more information about this command
-
-`),
-	Exec: runPing,
-}
-
-func runPing(ctx context.Context, args []string) error {
-	c, cc, ctx, cancel := connect(ctx)
-	defer cancel()
-
-	prc := make(chan *node.PingResult, 1)
-	cc.SetNotifyCallback(func(n node.Notify) {
-
-		if pr := n.PingResult; pr != nil {
-			prc <- pr
-		}
-	})
-	go receive(ctx, cc, c)
-
-	anyPong := false
-	cc.Ping("any")
-	timer := time.NewTimer(5 * time.Second)
-	select {
-	case <-timer.C:
-		fmt.Printf("timeout waiting for ping reply\n")
-	case pr := <-prc:
-		timer.Stop()
-
-		anyPong = true
-		log.Info().Interface("addrs", pr.ListenAddr).Msg("pong")
-
-		time.Sleep(time.Second)
-
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	if !anyPong {
-		return fmt.Errorf("no reply")
-	}
-	return nil
 }
 
 func connect(ctx context.Context) (net.Conn, *node.CommandClient, context.Context, context.CancelFunc) {
