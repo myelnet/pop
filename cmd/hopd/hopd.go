@@ -56,7 +56,8 @@ func run() error {
 	}()
 
 	opts := node.Options{
-		RepoPath: rpath,
+		RepoPath:   rpath,
+		SocketPath: "hopd.sock",
 	}
 
 	err = node.Run(ctx, opts)

@@ -53,8 +53,11 @@ require (
 	github.com/libp2p/go-libp2p-record v0.1.3 // indirect
 	github.com/libp2p/go-libp2p-testing v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
+	github.com/mitchellh/go-homedir v1.1.0
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/onsi/ginkgo v1.14.0 // indirect
+	github.com/peterbourgon/ff v1.7.0
+	github.com/peterbourgon/ff/v2 v2.0.0
 	github.com/prometheus/common v0.10.0
 	github.com/rs/zerolog v1.20.0
 	github.com/sirupsen/logrus v1.6.0 // indirect
