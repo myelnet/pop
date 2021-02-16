@@ -34,6 +34,7 @@ change in the future.
 		Subcommands: []*ffcli.Command{
 			pingCmd,
 			addCmd,
+			getCmd,
 		},
 		FlagSet: rootfs,
 		Exec:    func(context.Context, []string) error { return flag.ErrHelp },

@@ -13,33 +13,54 @@ import (
 
 var jsonEscapedZero = []byte(`\u0000`)
 
+// PingArgs get passed to the Ping command
 type PingArgs struct {
 	IP string
 }
 
+// AddArgs get passed to the Add command
 type AddArgs struct {
 	Path string
+}
+
+// GetArgs get passed to the Get command
+type GetArgs struct {
+	Cid     string
+	Sel     string
+	Out     string
+	Timeout int
 }
 
 // Command is a message sent from a client to the daemon
 type Command struct {
 	Ping *PingArgs
 	Add  *AddArgs
+	Get  *GetArgs
 }
 
+// PingResult is sent in the notify message to give us the info we requested
 type PingResult struct {
 	ListenAddr string
 }
 
+// AddResult gives us feedback on the result of the Add request
 type AddResult struct {
 	Cid string
 	Err string
+}
+
+// GetResult gives us feedback on the result of the Get request
+type GetResult struct {
+	DealID     string
+	TotalSpent string
+	Err        string
 }
 
 // Notify is a message sent from the daemon to the client
 type Notify struct {
 	PingResult *PingResult
 	AddResult  *AddResult
+	GetResult  *GetResult
 }
 
 // CommandServer receives commands on the daemon side and executes them
@@ -73,6 +94,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Add; c != nil {
 		cs.n.Add(ctx, c)
+		return nil
+	}
+	if c := cmd.Get; c != nil {
+		cs.n.Get(ctx, c)
 		return nil
 	}
 	return fmt.Errorf("CommandServer: no command specified")
@@ -135,6 +160,10 @@ func (cc *CommandClient) Ping(ip string) {
 
 func (cc *CommandClient) Add(args *AddArgs) {
 	cc.send(Command{Add: args})
+}
+
+func (cc *CommandClient) Get(args *GetArgs) {
+	cc.send(Command{Get: args})
 }
 
 func (cc *CommandClient) SetNotifyCallback(fn func(Notify)) {

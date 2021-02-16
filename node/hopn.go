@@ -1,18 +1,22 @@
 package node
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/ipfs/go-blockservice"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	badgerds "github.com/ipfs/go-ds-badger"
+	"github.com/ipfs/go-graphsync"
+	gsimpl "github.com/ipfs/go-graphsync/impl"
+	gsnet "github.com/ipfs/go-graphsync/network"
+	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
@@ -25,8 +29,11 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/rs/zerolog/log"
 )
 
@@ -38,6 +45,7 @@ const unixfsLinksPerLevel = 1024
 type IPFSNode interface {
 	Ping(ip string)
 	Add(context.Context, *AddArgs)
+	Get(context.Context, *GetArgs)
 }
 
 // Options determines configurations for the IPFS node
@@ -53,9 +61,64 @@ type node struct {
 	ds   datastore.Batching
 	bs   blockstore.Blockstore
 	dag  ipldformat.DAGService
+	gs   graphsync.GraphExchange
+	ps   *pubsub.PubSub
+	exch *hop.Exchange
 
 	mu     sync.Mutex
 	notify func(Notify)
+}
+
+// New puts together all the components of the ipfs node
+func New(ctx context.Context, opts Options) (*node, error) {
+	var err error
+	nd := &node{}
+
+	dsopts := badgerds.DefaultOptions
+	dsopts.SyncWrites = false
+	dsopts.Truncate = true
+
+	nd.ds, err = badgerds.NewDatastore(opts.RepoPath, &dsopts)
+	if err != nil {
+		return nil, err
+	}
+
+	nd.bs = blockstore.NewBlockstore(nd.ds)
+
+	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
+
+	nd.host, err = libp2p.New(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	nd.ps, err = pubsub.NewGossipSub(ctx, nd.host)
+	if err != nil {
+		return nil, err
+	}
+
+	nd.gs = gsimpl.New(ctx,
+		gsnet.NewFromLibp2pHost(nd.host),
+		storeutil.LoaderForBlockstore(nd.bs),
+		storeutil.StorerForBlockstore(nd.bs),
+	)
+
+	nd.exch, err = hop.NewExchange(ctx,
+		hop.WithBlockstore(nd.bs),
+		hop.WithPubSub(nd.ps),
+		hop.WithHost(nd.host),
+		hop.WithDatastore(nd.ds),
+		hop.WithGraphSync(nd.gs),
+		hop.WithRepoPath(opts.RepoPath),
+		// TODO: keystore
+		hop.WithKeystore(wallet.NewMemKeystore()),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return nd, nil
+
 }
 
 func (nd *node) send(n Notify) {
@@ -140,125 +203,52 @@ func (nd *node) loadFileToBlockstore(ctx context.Context, path string) (ipld.Lin
 	return cidlink.Link{Cid: n.Cid()}, nil
 }
 
-type server struct {
-	node *node
-
-	csMu sync.Mutex // lock order: bsMu, then mu
-	cs   *CommandServer
-
-	mu      sync.Mutex
-	clients map[net.Conn]bool
-}
-
-func (s *server) serveConn(ctx context.Context, c net.Conn) {
-	br := bufio.NewReader(c)
-
-	s.addConn(c)
-	defer s.removeAndCloseConn(c)
-
-	for ctx.Err() == nil {
-		msg, err := ReadMsg(br)
-		if err != nil {
-			log.Error().Err(err).Msg("ReadMsg")
+func (nd *node) Get(ctx context.Context, args *GetArgs) {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
+	defer cancel()
+	sendErr := func(err error) {
+		nd.send(Notify{
+			GetResult: &GetResult{
+				Err: err.Error(),
+			}})
+	}
+	root, err := cid.Parse(args.Cid)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	// TODO handle different predefined selectors
+	session, err := nd.exch.Session(ctx, root)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	err = session.SyncBlocks(ctx)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	for {
+		select {
+		case deal := <-session.StartedTransfer():
+			nd.send(Notify{
+				GetResult: &GetResult{
+					DealID: deal.String(),
+				},
+			})
+			continue
+		case err := <-session.Done():
+			if err != nil {
+				sendErr(err)
+				return
+			}
+			nd.send(Notify{
+				GetResult: &GetResult{},
+			})
+			return
+		case <-ctx.Done():
+			sendErr(ctx.Err())
 			return
 		}
-		s.csMu.Lock()
-		if err := s.cs.GotMsgBytes(ctx, msg); err != nil {
-			log.Error().Err(err).Msg("GotMsgBytes")
-		}
-		s.csMu.Unlock()
-
 	}
-}
-
-func (s *server) addConn(c net.Conn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.clients == nil {
-		s.clients = map[net.Conn]bool{}
-	}
-
-	s.clients[c] = true
-}
-
-func (s *server) removeAndCloseConn(c net.Conn) {
-	s.mu.Lock()
-	delete(s.clients, c)
-	s.mu.Unlock()
-	c.Close()
-}
-
-func (s *server) writeToClients(b []byte) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for c := range s.clients {
-		WriteMsg(c, b)
-	}
-}
-
-// Run runs a hop enabled IPFS node
-func Run(ctx context.Context, opts Options) error {
-	done := make(chan struct{})
-	defer close(done)
-
-	// listen, err := socket.Listen(socketPath, port)
-	listen, err := SocketListen(opts.SocketPath)
-	if err != nil {
-		return fmt.Errorf("SocketListen: %v", err)
-	}
-
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-done:
-		}
-		listen.Close()
-	}()
-
-	nd := &node{}
-
-	dsopts := badgerds.DefaultOptions
-	dsopts.SyncWrites = false
-	dsopts.Truncate = true
-
-	nd.ds, err = badgerds.NewDatastore(opts.RepoPath, &dsopts)
-	if err != nil {
-		return err
-	}
-
-	nd.bs = blockstore.NewBlockstore(nd.ds)
-
-	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
-
-	nd.host, err = libp2p.New(ctx)
-	if err != nil {
-		return err
-	}
-
-	log.Info().Interface("addrs", nd.host.Addrs()).Msg("Node started libp2p")
-
-	server := &server{
-		node: nd,
-	}
-
-	server.cs = NewCommandServer(nd, server.writeToClients)
-
-	nd.notify = server.cs.send
-
-	for i := 1; ctx.Err() == nil; i++ {
-		c, err := listen.Accept()
-
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Error().Err(err).Msg("listen.Accept")
-				// backOff
-			}
-			continue
-		}
-
-		go server.serveConn(ctx, c)
-	}
-
-	return ctx.Err()
 }
