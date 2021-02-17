@@ -40,7 +40,8 @@ type Command struct {
 
 // PingResult is sent in the notify message to give us the info we requested
 type PingResult struct {
-	ListenAddr string
+	ListenAddrs []string
+	Peers       []string
 }
 
 // AddResult gives us feedback on the result of the Add request
