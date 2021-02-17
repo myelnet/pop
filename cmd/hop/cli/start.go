@@ -11,7 +11,6 @@ import (
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,7 +32,12 @@ The 'hop start' command starts an IPFS daemon service.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp", true, "create a temporary datastore for testing")
-		fs.StringVar(&startArgs.peer, "peer", "", "bootstrap peer to discover others")
+		fs.StringVar(
+			&startArgs.peer,
+			"peer",
+			"/ip4/3.22.169.56/tcp/4001/ipfs/12D3KooWBUvfXFNJiAisGo1N8Jx8HBbMPKkZtCNepyXZKKz8Z1Qs",
+			"bootstrap peer to discover others",
+		)
 
 		return fs
 	})(),
@@ -41,7 +45,6 @@ The 'hop start' command starts an IPFS daemon service.
 
 func runStart(ctx context.Context, args []string) error {
 	var err error
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	rpath := ""
 	if startArgs.temp {
@@ -67,8 +70,9 @@ func runStart(ctx context.Context, args []string) error {
 	}()
 
 	opts := node.Options{
-		RepoPath:   rpath,
-		SocketPath: "hopd.sock",
+		RepoPath:      rpath,
+		SocketPath:    "hopd.sock",
+		BootstrapPeer: startArgs.peer,
 	}
 
 	err = node.Run(ctx, opts)

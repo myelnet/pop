@@ -29,6 +29,8 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
+	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
@@ -54,6 +56,8 @@ type Options struct {
 	RepoPath string
 	// SocketPath is the unix socket path to listen on
 	SocketPath string
+	// BootstrapPeers is a peer address to connect to for discovering other peers
+	BootstrapPeers []string
 }
 
 type node struct {
@@ -116,6 +120,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+	go nd.bootstrap(ctx, opts.BootstrapPeers)
 
 	return nd, nil
 
@@ -135,8 +140,18 @@ func (nd *node) send(n Notify) {
 
 // Ping the node for sanity check more than anything
 func (nd *node) Ping(param string) {
+	peers := nd.connPeers()
+	var pstr []string
+	for _, p := range peers {
+		pstr = append(pstr, p.String())
+	}
+	var addrs []string
+	for _, a := range nd.host.Addrs() {
+		addrs = append(addrs, a.String())
+	}
 	nd.send(Notify{PingResult: &PingResult{
-		ListenAddr: ma.Join(nd.host.Addrs()...).String(),
+		ListenAddrs: addrs,
+		Peers:       pstr,
 	}})
 }
 
@@ -251,4 +266,53 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			return
 		}
 	}
+}
+
+func (nd *node) bootstrap(ctx context.Context, bpeers []string) error {
+	var peers []peer.AddrInfo
+	for _, addrStr := range bpeers {
+		addr, err := ma.NewMultiaddr(addrStr)
+		if err != nil {
+			continue
+		}
+		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+		if err != nil {
+			continue
+		}
+		peers = append(peers, *addrInfo)
+	}
+
+	var wg sync.WaitGroup
+	peerInfos := make(map[peer.ID]*peerstore.PeerInfo, len(peers))
+	for _, pii := range peers {
+		pi, ok := peerInfos[pii.ID]
+		if !ok {
+			pi = &peerstore.PeerInfo{ID: pii.ID}
+			peerInfos[pi.ID] = pi
+		}
+		pi.Addrs = append(pi.Addrs, pii.Addrs...)
+	}
+
+	wg.Add(len(peerInfos))
+	for _, peerInfo := range peerInfos {
+		go func(peerInfo *peerstore.PeerInfo) {
+			defer wg.Done()
+			err := nd.host.Connect(ctx, *peerInfo)
+			if err != nil {
+				fmt.Printf("failed to connect to %s: %s\n", peerInfo.ID, err)
+			}
+		}(peerInfo)
+	}
+	wg.Wait()
+	return nil
+}
+
+func (nd *node) connPeers() []peer.ID {
+	conns := nd.host.Network().Conns()
+	var out []peer.ID
+	for _, c := range conns {
+		pid := c.RemotePeer()
+		out = append(out, pid)
+	}
+	return out
 }
