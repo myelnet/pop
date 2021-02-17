@@ -28,10 +28,14 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
+	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
@@ -91,7 +95,28 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
 
-	nd.host, err = libp2p.New(ctx)
+	gater, err := conngater.NewBasicConnectionGater(nd.ds)
+	if err != nil {
+		return nil, err
+	}
+
+	nd.host, err = libp2p.New(
+		ctx,
+		libp2p.ConnectionManager(connmgr.NewConnManager(
+			20,             // Lowwater
+			60,             // HighWater,
+			20*time.Second, // GracePeriod
+		)),
+		libp2p.ConnectionGater(gater),
+		libp2p.DisableRelay(),
+		// Attempt to open ports using uPNP for NATed hosts.
+		libp2p.NATPortMap(),
+		libp2p.EnableNATService(),
+		// Let this host use the DHT to find other hosts
+		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
+			return dht.New(ctx, h)
+		}),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +139,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		hop.WithDatastore(nd.ds),
 		hop.WithGraphSync(nd.gs),
 		hop.WithRepoPath(opts.RepoPath),
-		// TODO: keystore
+		// TODO: secure keystore
 		hop.WithKeystore(wallet.NewMemKeystore()),
 	)
 	if err != nil {

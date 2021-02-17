@@ -70,9 +70,9 @@ func runStart(ctx context.Context, args []string) error {
 	}()
 
 	opts := node.Options{
-		RepoPath:      rpath,
-		SocketPath:    "hopd.sock",
-		BootstrapPeer: startArgs.peer,
+		RepoPath:       rpath,
+		SocketPath:     "hopd.sock",
+		BootstrapPeers: []string{startArgs.peer},
 	}
 
 	err = node.Run(ctx, opts)
