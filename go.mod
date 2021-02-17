@@ -28,6 +28,7 @@ require (
 	github.com/ipfs/go-blockservice v0.1.4
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-datastore v0.4.5
+	github.com/ipfs/go-ds-badger v0.2.3
 	github.com/ipfs/go-graphsync v0.6.0
 	github.com/ipfs/go-ipfs-blockstore v1.0.3
 	github.com/ipfs/go-ipfs-blocksutil v0.0.1
@@ -52,9 +53,14 @@ require (
 	github.com/libp2p/go-libp2p-record v0.1.3 // indirect
 	github.com/libp2p/go-libp2p-testing v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
+	github.com/mitchellh/go-homedir v1.1.0
 	github.com/multiformats/go-multiaddr v0.3.1
+	github.com/multiformats/go-multihash v0.0.14
 	github.com/onsi/ginkgo v1.14.0 // indirect
+	github.com/peterbourgon/ff v1.7.0
+	github.com/peterbourgon/ff/v2 v2.0.0
 	github.com/prometheus/common v0.10.0
+	github.com/rs/zerolog v1.20.0
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/stretchr/testify v1.6.1
 	github.com/supranational/blst v0.3.2
