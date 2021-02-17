@@ -120,11 +120,20 @@ func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) error {
 }
 
 func (s *Supply) selectProviders() ([]peer.ID, error) {
-	// Get the current connected peers
-	// TODO: select only peers who support our request protocol
 	var peers []peer.ID
-	for _, pid := range s.h.Peerstore().Peers() {
+	// Get the current connected peers
+	for _, pconn := range s.h.Network().Conns() {
+		pid := pconn.RemotePeer()
+		// Make sure we don't add ourselves
 		if pid != s.h.ID() {
+			// Make sure our peer supports the retrieval dispatch protocol
+			supported, err := s.h.Peerstore().SupportsProtocols(
+				pid,
+				string(AddRequestProtocolID),
+			)
+			if err != nil || len(supported) == 0 {
+				continue
+			}
 			peers = append(peers, pid)
 		}
 	}

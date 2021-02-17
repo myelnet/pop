@@ -45,7 +45,7 @@ func runPing(ctx context.Context, args []string) error {
 		timer.Stop()
 
 		anyPong = true
-		log.Info().Interface("addrs", pr.ListenAddr).Msg("pong")
+		log.Info().Strs("addrs", pr.ListenAddrs).Strs("peers", pr.Peers).Msg("pong")
 
 		time.Sleep(time.Second)
 

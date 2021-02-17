@@ -12,6 +12,7 @@ import (
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -20,6 +21,7 @@ func Run(args []string) error {
 	if len(args) == 1 && (args[0] == "-V" || args[0] == "--version") {
 		args = []string{"version"}
 	}
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	rootfs := flag.NewFlagSet("hop", flag.ExitOnError)
 

@@ -28,8 +28,14 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
+	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
@@ -54,6 +60,8 @@ type Options struct {
 	RepoPath string
 	// SocketPath is the unix socket path to listen on
 	SocketPath string
+	// BootstrapPeers is a peer address to connect to for discovering other peers
+	BootstrapPeers []string
 }
 
 type node struct {
@@ -87,7 +95,28 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
 
-	nd.host, err = libp2p.New(ctx)
+	gater, err := conngater.NewBasicConnectionGater(nd.ds)
+	if err != nil {
+		return nil, err
+	}
+
+	nd.host, err = libp2p.New(
+		ctx,
+		libp2p.ConnectionManager(connmgr.NewConnManager(
+			20,             // Lowwater
+			60,             // HighWater,
+			20*time.Second, // GracePeriod
+		)),
+		libp2p.ConnectionGater(gater),
+		libp2p.DisableRelay(),
+		// Attempt to open ports using uPNP for NATed hosts.
+		libp2p.NATPortMap(),
+		libp2p.EnableNATService(),
+		// Let this host use the DHT to find other hosts
+		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
+			return dht.New(ctx, h)
+		}),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -110,12 +139,13 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		hop.WithDatastore(nd.ds),
 		hop.WithGraphSync(nd.gs),
 		hop.WithRepoPath(opts.RepoPath),
-		// TODO: keystore
+		// TODO: secure keystore
 		hop.WithKeystore(wallet.NewMemKeystore()),
 	)
 	if err != nil {
 		return nil, err
 	}
+	go nd.bootstrap(ctx, opts.BootstrapPeers)
 
 	return nd, nil
 
@@ -135,8 +165,18 @@ func (nd *node) send(n Notify) {
 
 // Ping the node for sanity check more than anything
 func (nd *node) Ping(param string) {
+	peers := nd.connPeers()
+	var pstr []string
+	for _, p := range peers {
+		pstr = append(pstr, p.String())
+	}
+	var addrs []string
+	for _, a := range nd.host.Addrs() {
+		addrs = append(addrs, a.String())
+	}
 	nd.send(Notify{PingResult: &PingResult{
-		ListenAddr: ma.Join(nd.host.Addrs()...).String(),
+		ListenAddrs: addrs,
+		Peers:       pstr,
 	}})
 }
 
@@ -251,4 +291,53 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			return
 		}
 	}
+}
+
+func (nd *node) bootstrap(ctx context.Context, bpeers []string) error {
+	var peers []peer.AddrInfo
+	for _, addrStr := range bpeers {
+		addr, err := ma.NewMultiaddr(addrStr)
+		if err != nil {
+			continue
+		}
+		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+		if err != nil {
+			continue
+		}
+		peers = append(peers, *addrInfo)
+	}
+
+	var wg sync.WaitGroup
+	peerInfos := make(map[peer.ID]*peerstore.PeerInfo, len(peers))
+	for _, pii := range peers {
+		pi, ok := peerInfos[pii.ID]
+		if !ok {
+			pi = &peerstore.PeerInfo{ID: pii.ID}
+			peerInfos[pi.ID] = pi
+		}
+		pi.Addrs = append(pi.Addrs, pii.Addrs...)
+	}
+
+	wg.Add(len(peerInfos))
+	for _, peerInfo := range peerInfos {
+		go func(peerInfo *peerstore.PeerInfo) {
+			defer wg.Done()
+			err := nd.host.Connect(ctx, *peerInfo)
+			if err != nil {
+				fmt.Printf("failed to connect to %s: %s\n", peerInfo.ID, err)
+			}
+		}(peerInfo)
+	}
+	wg.Wait()
+	return nil
+}
+
+func (nd *node) connPeers() []peer.ID {
+	conns := nd.host.Network().Conns()
+	var out []peer.ID
+	for _, c := range conns {
+		pid := c.RemotePeer()
+		out = append(out, pid)
+	}
+	return out
 }
