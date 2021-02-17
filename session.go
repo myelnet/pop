@@ -23,21 +23,21 @@ import (
 
 // Session to exchange multiple blocks with a set of connected peers
 type Session struct {
-	blockstore blockstore.Blockstore
-	reqTopic   *pubsub.Topic
-	net        RetrievalMarketNetwork
-	retriever  *retrieval.Client
-	addr       address.Address
-	root       cid.Cid
-	sel        iprime.Node
-	ctx        context.Context
-	done       chan error
-	unsub      retrieval.Unsubscribe
+	blockstore      blockstore.Blockstore
+	reqTopic        *pubsub.Topic
+	net             RetrievalMarketNetwork
+	retriever       *retrieval.Client
+	addr            address.Address
+	root            cid.Cid
+	sel             iprime.Node
+	ctx             context.Context
+	done            chan error
+	startedTransfer chan deal.ID
+	unsub           retrieval.Unsubscribe
 
 	mu        sync.Mutex                // mutex to protext the following fields
 	responses map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
 	res       chan peer.ID              // First response we get
-	started   bool                      // If we found a satisfying response and we started retrieving
 }
 
 // HandleQueryStream for direct provider queries
@@ -56,7 +56,9 @@ func (s *Session) HandleQueryStream(stream RetrievalQueryStream) {
 
 	s.responses[stream.OtherPeer()] = response
 
-	if !s.started {
+	select {
+	case <-s.startedTransfer:
+	default:
 		s.Retrieve(s.ctx, stream.OtherPeer(), response.PaymentAddress)
 	}
 }
@@ -131,16 +133,24 @@ func (s *Session) Retrieve(ctx context.Context, sender peer.ID, addr address.Add
 	params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
 	expectedTotal := big.Zero()
 
-	_, err = s.retriever.Retrieve(ctx, s.root, params, expectedTotal, sender, s.addr, addr, nil)
+	id, err := s.retriever.Retrieve(ctx, s.root, params, expectedTotal, sender, s.addr, addr, nil)
 	if err != nil {
 		return err
 	}
+	// notify we started a transfer
+	s.startedTransfer <- id
+
 	return nil
 }
 
 // Done returns a channel that receives any resulting error from the latest operation
 func (s *Session) Done() <-chan error {
 	return s.done
+}
+
+// StartedTransfer returns a channel that will be closed when we start retrieving the content
+func (s *Session) StartedTransfer() <-chan deal.ID {
+	return s.startedTransfer
 }
 
 // Close removes any listeners and stream handlers related to a session
