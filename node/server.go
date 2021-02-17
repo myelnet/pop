@@ -14,7 +14,7 @@ import (
 type server struct {
 	node *node
 
-	csMu sync.Mutex // lock order: bsMu, then mu
+	csMu sync.Mutex // lock order: csMu, then mu
 	cs   *CommandServer
 
 	mu      sync.Mutex

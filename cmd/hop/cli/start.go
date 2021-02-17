@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -6,41 +6,52 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
-var args struct {
+var startArgs struct {
 	temp bool
+	peer string
 }
 
-func main() {
+var startCmd = &ffcli.Command{
+	Name:       "start",
+	ShortUsage: "start",
+	ShortHelp:  "Starts an IPFS daemon",
+	LongHelp: strings.TrimSpace(`
 
-	flag.BoolVar(&args.temp, "temp", true, "create a temporary datastore for testing")
+The 'hop start' command starts an IPFS daemon service.
 
-	flag.Parse()
+`),
+	Exec: runStart,
+	FlagSet: (func() *flag.FlagSet {
+		fs := flag.NewFlagSet("start", flag.ExitOnError)
+		fs.BoolVar(&startArgs.temp, "temp", true, "create a temporary datastore for testing")
+		fs.StringVar(&startArgs.peer, "peer", "", "bootstrap peer to discover others")
 
-	if err := run(); err != nil {
-		os.Exit(1)
-	}
+		return fs
+	})(),
 }
 
-func run() error {
+func runStart(ctx context.Context, args []string) error {
 	var err error
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	rpath := ""
-	if args.temp {
+	if startArgs.temp {
 		rpath, err = ioutil.TempDir("", "repo")
 		if err != nil {
 			return err
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)

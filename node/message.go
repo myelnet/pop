@@ -181,7 +181,7 @@ func ReadMsg(r io.Reader) ([]byte, error) {
 	}
 	n := binary.LittleEndian.Uint32(cb)
 	if n > MaxMessageSize {
-		return nil, fmt.Errorf("ReadMsg: message too large: %v bytes", n)
+		return nil, fmt.Errorf("ReadMsg: message too large: %d bytes", n)
 	}
 	b := make([]byte, n)
 	nn, err := io.ReadFull(r, b)
@@ -189,7 +189,7 @@ func ReadMsg(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if nn != int(n) {
-		return nil, fmt.Errorf("ReadMsg: expected %v bytes, got %v", n, nn)
+		return nil, fmt.Errorf("ReadMsg: expected %d bytes, got %d", n, nn)
 	}
 	return b, nil
 }
@@ -198,7 +198,7 @@ func WriteMsg(w io.Writer, b []byte) error {
 
 	cb := make([]byte, 4)
 	if len(b) > MaxMessageSize {
-		return fmt.Errorf("WriteMsg: message too large: %v bytes", len(b))
+		return fmt.Errorf("WriteMsg: message too large: %d bytes", len(b))
 	}
 	binary.LittleEndian.PutUint32(cb, uint32(len(b)))
 	n, err := w.Write(cb)
@@ -206,14 +206,14 @@ func WriteMsg(w io.Writer, b []byte) error {
 		return err
 	}
 	if n != 4 {
-		return fmt.Errorf("WriteMsg: short write: %v bytes (wanted 4)", n)
+		return fmt.Errorf("WriteMsg: short write: %d bytes (wanted 4)", n)
 	}
 	n, err = w.Write(b)
 	if err != nil {
 		return err
 	}
 	if n != len(b) {
-		return fmt.Errorf("WriteMsg: short write: %v bytes (wanted %v)", n, len(b))
+		return fmt.Errorf("WriteMsg: short write: %d bytes (wanted %d)", n, len(b))
 	}
 	return nil
 }
