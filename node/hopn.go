@@ -24,6 +24,7 @@ import (
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
+	unixfile "github.com/ipfs/go-unixfs/file"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-ipld-prime"
@@ -293,6 +294,23 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			if err != nil {
 				sendErr(err)
 				return
+			}
+			if args.Out != "" {
+				n, err := nd.dag.Get(ctx, root)
+				if err != nil {
+					sendErr(err)
+					return
+				}
+				file, err := unixfile.NewUnixfsFile(ctx, nd.dag, n)
+				if err != nil {
+					sendErr(err)
+					return
+				}
+				err = files.WriteTo(file, args.Out)
+				if err != nil {
+					sendErr(err)
+					return
+				}
 			}
 			nd.send(Notify{
 				GetResult: &GetResult{},

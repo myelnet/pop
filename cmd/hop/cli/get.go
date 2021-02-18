@@ -68,13 +68,13 @@ func runGet(ctx context.Context, args []string) error {
 				return errors.New(gr.Err)
 			}
 			if gr.DealID != "" {
-				fmt.Printf("Started retrieval deal %s\n", gr.DealID)
+				fmt.Printf("started retrieval deal %s\n", gr.DealID)
 				continue
 			}
 			now := time.Now()
 			delay := now.Sub(at)
 			// TODO: print latency and other metadata
-			fmt.Printf("Get operation completed in %v\n", delay.Seconds())
+			fmt.Printf("get operation completed in %v\n", delay.Seconds())
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("Get operation timed out")
