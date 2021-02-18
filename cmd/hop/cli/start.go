@@ -35,7 +35,7 @@ The 'hop start' command starts an IPFS daemon service.
 		fs.StringVar(
 			&startArgs.peer,
 			"peer",
-			"/ip4/3.22.169.56/tcp/4001/ipfs/12D3KooWBUvfXFNJiAisGo1N8Jx8HBbMPKkZtCNepyXZKKz8Z1Qs",
+			"/ip4/3.22.169.56/tcp/4001/ipfs/12D3KooWQzS81gjFLMEoa9cvrEMAP3564CP1p8Ce5ZZvV9nsy9Uz",
 			"bootstrap peer to discover others",
 		)
 
