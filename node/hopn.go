@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -256,6 +257,17 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 	if err != nil {
 		sendErr(err)
 		return
+	}
+	if args.Verbose {
+		unsub := nd.exch.DataTransfer().SubscribeToEvents(
+			func(event datatransfer.Event, state datatransfer.ChannelState) {
+				log.Info().
+					Str("event", datatransfer.Events[event.Code]).
+					Str("status", datatransfer.Statuses[state.Status()]).
+					Msg("Retrieving")
+			},
+		)
+		defer unsub()
 	}
 	// TODO handle different predefined selectors
 	session, err := nd.exch.Session(ctx, root)
