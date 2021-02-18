@@ -20,7 +20,6 @@ require (
 	github.com/filecoin-project/specs-actors/v2 v2.3.4
 	github.com/filecoin-project/specs-actors/v3 v3.0.0
 	github.com/gabriel-vasile/mimetype v1.1.2
-	github.com/google/gopacket v1.1.18 // indirect
 	github.com/google/uuid v1.1.2
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
 	github.com/hannahhoward/go-pubsub v0.0.0-20200423002714-8d62886cc36e
@@ -45,7 +44,6 @@ require (
 	github.com/ipfs/go-unixfs v0.2.4
 	github.com/ipld/go-ipld-prime v0.5.1-0.20201021195245-109253e8a018
 	github.com/ipld/go-ipld-prime-proto v0.1.0
-	github.com/jbenet/goprocess v0.1.4
 	github.com/jpillora/backoff v1.0.0
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-connmgr v0.2.4
@@ -55,14 +53,11 @@ require (
 	github.com/libp2p/go-libp2p-peer v0.2.0
 	github.com/libp2p/go-libp2p-peerstore v0.2.6
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
-	github.com/libp2p/go-libp2p-record v0.1.3 // indirect
 	github.com/libp2p/go-libp2p-testing v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
-	github.com/mitchellh/go-homedir v1.1.0
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/multiformats/go-multihash v0.0.14
 	github.com/onsi/ginkgo v1.14.0 // indirect
-	github.com/peterbourgon/ff v1.7.0
 	github.com/peterbourgon/ff/v2 v2.0.0
 	github.com/prometheus/common v0.10.0
 	github.com/rs/zerolog v1.20.0
@@ -80,5 +75,4 @@ require (
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974 // indirect
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
-	google.golang.org/grpc v1.31.1
 )
