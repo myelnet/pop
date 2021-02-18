@@ -270,16 +270,21 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		)
 		defer unsub()
 	}
-	// TODO handle different predefined selectors
-	session, err := nd.exch.Session(ctx, root)
+	err = nd.get(ctx, root, args)
 	if err != nil {
 		sendErr(err)
-		return
+	}
+}
+
+func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
+	// TODO handle different predefined selectors
+	session, err := nd.exch.Session(ctx, c)
+	if err != nil {
+		return err
 	}
 	err = session.SyncBlocks(ctx)
 	if err != nil {
-		sendErr(err)
-		return
+		return err
 	}
 	for {
 		select {
@@ -292,33 +297,28 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			continue
 		case err := <-session.Done():
 			if err != nil {
-				sendErr(err)
-				return
+				return err
 			}
 			if args.Out != "" {
-				n, err := nd.dag.Get(ctx, root)
+				n, err := nd.dag.Get(ctx, c)
 				if err != nil {
-					sendErr(err)
-					return
+					return err
 				}
 				file, err := unixfile.NewUnixfsFile(ctx, nd.dag, n)
 				if err != nil {
-					sendErr(err)
-					return
+					return err
 				}
 				err = files.WriteTo(file, args.Out)
 				if err != nil {
-					sendErr(err)
-					return
+					return err
 				}
 			}
 			nd.send(Notify{
 				GetResult: &GetResult{},
 			})
-			return
+			return nil
 		case <-ctx.Done():
-			sendErr(ctx.Err())
-			return
+			return ctx.Err()
 		}
 	}
 }
