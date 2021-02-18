@@ -29,6 +29,7 @@ type GetArgs struct {
 	Sel     string
 	Out     string
 	Timeout int
+	Verbose bool
 }
 
 // Command is a message sent from a client to the daemon

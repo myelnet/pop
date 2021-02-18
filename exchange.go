@@ -217,17 +217,18 @@ func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) 
 		}
 	})
 	session := &Session{
-		blockstore: e.Blockstore,
-		reqTopic:   e.reqTopic,
-		net:        e.net,
-		root:       root,
-		retriever:  cl,
-		addr:       e.SelfAddress,
-		ctx:        ctx,
-		done:       done,
-		unsub:      unsubscribe,
-		responses:  make(map[peer.ID]QueryResponse),
-		res:        make(chan peer.ID),
+		blockstore:      e.Blockstore,
+		reqTopic:        e.reqTopic,
+		net:             e.net,
+		root:            root,
+		retriever:       cl,
+		addr:            e.SelfAddress,
+		ctx:             ctx,
+		done:            done,
+		unsub:           unsubscribe,
+		startedTransfer: make(chan deal.ID),
+		responses:       make(map[peer.ID]QueryResponse),
+		res:             make(chan peer.ID),
 	}
 	err := e.net.SetDelegate(session)
 	if err != nil {

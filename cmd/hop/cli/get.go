@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
@@ -15,6 +16,7 @@ var getArgs struct {
 	selector string
 	output   string
 	timeout  int
+	verbose  bool
 }
 
 var getCmd = &ffcli.Command{
@@ -34,6 +36,7 @@ data to disk.
 		fs.StringVar(&getArgs.selector, "selector", "all", "select blocks to retrieve for a root cid")
 		fs.StringVar(&getArgs.output, "output", "", "write the file to the path")
 		fs.IntVar(&getArgs.timeout, "timeout", 5, "timeout before the request should be cancelled by the node (in minutes)")
+		fs.BoolVar(&getArgs.verbose, "verbose", false, "print the state transitions")
 		return fs
 	})(),
 }
@@ -55,7 +58,9 @@ func runGet(ctx context.Context, args []string) error {
 		Timeout: getArgs.timeout,
 		Sel:     getArgs.selector,
 		Out:     getArgs.output,
+		Verbose: getArgs.verbose,
 	})
+	at := time.Now()
 	for {
 		select {
 		case gr := <-grc:
@@ -66,8 +71,10 @@ func runGet(ctx context.Context, args []string) error {
 				fmt.Printf("Started retrieval deal %s\n", gr.DealID)
 				continue
 			}
+			now := time.Now()
+			delay := now.Sub(at)
 			// TODO: print latency and other metadata
-			fmt.Printf("Get operation completed!")
+			fmt.Printf("Get operation completed in %v\n", delay.Seconds())
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("Get operation timed out")
