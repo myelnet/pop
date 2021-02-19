@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -55,13 +54,9 @@ change in the future.
 }
 
 func connect(ctx context.Context) (net.Conn, *node.CommandClient, context.Context, context.CancelFunc) {
-	home, err := os.UserHomeDir()
+	c, err := node.SocketConnect()
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to get home dir")
-	}
-	c, err := net.Dial("unix", filepath.Join(home, "hopd.sock"))
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect")
+		log.Fatal().Msg("Unable to connect")
 	}
 
 	clientToServer := func(b []byte) {

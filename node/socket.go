@@ -11,10 +11,21 @@ import (
 )
 
 // Shameless copy of tailscale safesocket implementation
-// TODO: handle windows if this works well
 
-// SocketListen returns a listener on unix socket
+// SocketListen returns a listener on unix socket or tcp connect
 func SocketListen(path string) (net.Listener, error) {
+	return tcpListen(2001)
+}
+
+func tcpListen(port uint16) (net.Listener, error) {
+	pipe, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return nil, err
+	}
+	return pipe, nil
+}
+
+func unixListen(path string) (net.Listener, error) {
 	c, err := net.Dial("unix", path)
 	if err == nil {
 		c.Close()
@@ -54,4 +65,26 @@ func socketPermissionsForOS() os.FileMode {
 	}
 
 	return 0600
+}
+
+// SocketConnect can connect to a tcp or unix socket
+func SocketConnect() (net.Conn, error) {
+	return tcpConnect()
+}
+
+func tcpConnect() (net.Conn, error) {
+	return net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", 2001))
+}
+
+func unixConnect() (net.Conn, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	c, err := net.Dial("unix", filepath.Join(home, "hopd.sock"))
+	if err != nil {
+		return nil, err
+	}
+
+	return c, nil
 }
