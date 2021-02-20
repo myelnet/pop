@@ -29,6 +29,13 @@ and more at the prototype stage so feel free to open an issue if you have any su
 
 ## Install
 
+As a cli:
+
+clone the repo then run:
+```
+$ make install
+```
+
 As a library:
 
 ```
@@ -38,6 +45,12 @@ $ go get github.com/myelnet/go-hop-exchange
 As an IPFS plugin:
 
 [Please follow the instructions in the plugin repo](https://github.com/myelnet/go-ipfs-hop-plugin)
+
+## cli Usage
+
+### `hop start`
+
+Starts an ipfs daemon ready to provide content
 
 ## Library Usage
 
