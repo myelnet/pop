@@ -1,10 +1,8 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -41,6 +39,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/rs/zerolog/log"
 )
@@ -185,38 +184,87 @@ func (nd *node) Ping(param string) {
 // Add a file to the IPFS unixfs dag
 func (nd *node) Add(ctx context.Context, args *AddArgs) {
 
-	link, err := nd.loadFileToBlockstore(ctx, args.Path)
-	root := link.(cidlink.Link).Cid
-	if err != nil {
+	sendErr := func(err error) {
 		nd.send(Notify{
 			AddResult: &AddResult{
 				Err: err.Error(),
 			},
 		})
+	}
+
+	link, err := nd.loadFilesToBlockstore(ctx, args.Path)
+	root := link.(cidlink.Link).Cid
+	if err != nil {
+		sendErr(err)
 		return
 	}
 	nd.send(Notify{
 		AddResult: &AddResult{
 			Cid: root.String(),
 		}})
+
+	if args.Dispatch {
+		// TODO: adjust timeout?
+		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
+		defer cancel()
+
+		recipients := make(chan peer.ID)
+		unsub := nd.exch.Supply().SubscribeToEvents(func(event supply.Event) {
+			recipients <- event.Provider
+		})
+		defer unsub()
+		err := nd.exch.Announce(root)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		for {
+			select {
+			// Right now we only wait for 1 peer to receive the content but we should wait for
+			// a set amount of peers
+			case p := <-recipients:
+				nd.send(Notify{
+					AddResult: &AddResult{
+						Cache: p.String(),
+					},
+				})
+				return
+			case <-ctx.Done():
+				sendErr(ctx.Err())
+				return
+			}
+		}
+	}
 }
 
-func (nd *node) loadFileToBlockstore(ctx context.Context, path string) (ipld.Link, error) {
-	f, err := os.Open(path)
+func (nd *node) loadFilesToBlockstore(ctx context.Context, path string) (ipld.Link, error) {
+
+	st, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("unable to open file: %v", err)
+		return nil, fmt.Errorf("unable to open file: %w", err)
+	}
+	file, err := files.NewSerialFile(path, false, st)
+	if err != nil {
+		return nil, fmt.Errorf("NewSerialFile: %w", err)
 	}
 
-	var buf bytes.Buffer
-	tr := io.TeeReader(f, &buf)
-	file := files.NewReaderFile(tr)
+	switch f := file.(type) {
+	case files.Directory:
+		return nd.addDir(ctx, path, f)
+	case files.File:
+		return nd.addFile(ctx, path, f)
+	default:
+		return nil, fmt.Errorf("unknown file type")
+	}
+}
 
-	// import to UnixFS
+func (nd *node) addFile(ctx context.Context, path string, file files.File) (ipld.Link, error) {
+
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
 
 	prefix, err := merkledag.PrefixForCidVersion(1)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create cid prefix: %v", err)
+		return nil, fmt.Errorf("unable to create cid prefix: %w", err)
 	}
 	prefix.MhType = DefaultHashFunction
 
@@ -229,20 +277,23 @@ func (nd *node) loadFileToBlockstore(ctx context.Context, path string) (ipld.Lin
 
 	db, err := params.New(chunk.NewSizeSplitter(file, int64(unixfsChunkSize)))
 	if err != nil {
-		return nil, fmt.Errorf("unable to init chunker: %v", err)
+		return nil, fmt.Errorf("unable to init chunker: %w", err)
 	}
 
 	n, err := balanced.Layout(db)
 	if err != nil {
-		return nil, fmt.Errorf("unable to chunk file: %v", err)
+		return nil, fmt.Errorf("unable to chunk file: %w", err)
 	}
 
 	err = bufferedDS.Commit()
 	if err != nil {
-		return nil, fmt.Errorf("unable to commit blocks to store: %v", err)
+		return nil, fmt.Errorf("unable to commit blocks to store: %w", err)
 	}
-
 	return cidlink.Link{Cid: n.Cid()}, nil
+}
+
+func (nd *node) addDir(ctx context.Context, path string, dir files.Directory) (ipld.Link, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (nd *node) Get(ctx context.Context, args *GetArgs) {
