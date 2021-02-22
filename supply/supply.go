@@ -139,7 +139,7 @@ func (s *Supply) selectProviders() ([]peer.ID, error) {
 	}
 
 	if len(peers) == 0 {
-		return nil, nil // ErrNoPeers is quite noisy so will disable until we find a more elegant way
+		return nil, ErrNoPeers
 	}
 	// TODO: Allow configurating the amount of peers we want to notify
 	max := 6

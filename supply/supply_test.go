@@ -97,5 +97,5 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 	supply := New(ctx, n1.Host, n1.Dt)
 
 	err := supply.SendAddRequest(rootCid, uint64(len(origBytes)))
-	require.NoError(t, err)
+	require.EqualError(t, err, ErrNoPeers.Error())
 }

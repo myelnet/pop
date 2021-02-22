@@ -20,7 +20,8 @@ type PingArgs struct {
 
 // AddArgs get passed to the Add command
 type AddArgs struct {
-	Path string
+	Path     string
+	Dispatch bool
 }
 
 // GetArgs get passed to the Get command
@@ -47,8 +48,9 @@ type PingResult struct {
 
 // AddResult gives us feedback on the result of the Add request
 type AddResult struct {
-	Cid string
-	Err string
+	Cid   string
+	Cache string
+	Err   string
 }
 
 // GetResult gives us feedback on the result of the Get request
