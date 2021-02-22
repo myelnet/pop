@@ -84,7 +84,7 @@ func TestExchangeDirect(t *testing.T) {
 				}
 			})
 
-			err := client.Announce(rootCid)
+			err := client.Dispatch(rootCid)
 			require.NoError(t, err)
 
 			select {
@@ -128,7 +128,7 @@ func TestExchangeDirect(t *testing.T) {
 }
 
 func TestExchangeViaDAG(t *testing.T) {
-	t.Skip() //This test is so flaky it's not even funny
+	t.Skip() //This won't work reliably until the dag service gets reworked to support graphsync type operations
 	bgCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)

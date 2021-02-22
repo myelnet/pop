@@ -177,11 +177,11 @@ func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 // HasBlock to stay consistent with Bitswap anounces a new block to our peers
 // the name is a bit ambiguous, not to be confused with checking if a block is cached locally
 func (e *Exchange) HasBlock(bl blocks.Block) error {
-	return e.Announce(bl.Cid())
+	return e.Dispatch(bl.Cid())
 }
 
-// Announce new content to the network
-func (e *Exchange) Announce(c cid.Cid) error {
+// Dispatch new content to the network
+func (e *Exchange) Dispatch(c cid.Cid) error {
 	size, err := e.Blockstore.GetSize(c)
 	if err != nil {
 		return err

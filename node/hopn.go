@@ -213,7 +213,7 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 			recipients <- event.Provider
 		})
 		defer unsub()
-		err := nd.exch.Announce(root)
+		err := nd.exch.Dispatch(root)
 		if err != nil {
 			sendErr(err)
 			return

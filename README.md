@@ -9,16 +9,17 @@
 	<br>
 </h1>
 
-> An IPFS bytes exchange to allow any IPFS node to become a Filecoin retrieval provider
-> and retrieve content from Filecoin
+> An IPFS bytes exchange to improve speed and reliability of Filecoin retrievals without
+> heavy hardware requirements or compromising on decentralization
 
 ## Highlights
 
 - IPFS exchange interface like Bitswap
-- Turn any IPFS node into a Filecoin retrieval provider (YES, that means you will earn FIL when we launch on mainnet!)
-- New content is dispatched via Gossipsub and stored if enough space is available
-- IPFS Plugin to wrap the default Bitswap implementation and fetch blocks from Filecoin if not available on the public IPFS network
-- Upload and retrieve directly from Filecoin if not secondary providers cache the content (Coming Soon)
+- Use IPFS while providing content for retrievals on Filecoin (YES, that means you will earn FIL when we launch on mainnet!)
+- New content to cache is dispatched via Gossipsub and stored by available providers
+- Currently gossip based content routing though will be pluggable with other solutions
+- Simple API abstracting away Filecoin deal operations
+- Upload and retrieve directly from a Filecoin sotrage miner if no secondary providers cache the content (Coming Soon)
 
 ## Background
 
@@ -46,11 +47,31 @@ As an IPFS plugin:
 
 [Please follow the instructions in the plugin repo](https://github.com/myelnet/go-ipfs-hop-plugin)
 
-## cli Usage
+## CLI Usage
 
 ### `hop start`
 
 Starts an ipfs daemon ready to provide content
+
+### `hop add /absolute/path/to/file`
+
+Chunks a file with the unixfs dag and adds it to the local blockstore
+
+- `-dispatch`: Dispatch the content to any available cache providers
+
+### `hop get <cid>`
+
+Retrieves the content from the network
+
+- `-out <export-path>`: Write the file to the given path in addition to the blockstore
+
+Content can also be retrieved from the browser by going to `localhost:2001/ipfs/<cid>`.
+
+### `hop ping`
+
+Check if the daemon is running and get a list of connected providers
+
+- `hop ping <peer-id>`: ping the given provider to get latency and verify connectivity.
 
 ## Library Usage
 
@@ -101,24 +122,28 @@ dag := dag.NewDAGService(n.blocks)
 and will charge 0 price per byte to client requests for content it serves. This is mostly
 for testing purposes.
 
-3. When getting from the DAG it will automatically query the network
+3. Start a new sessions for a content id to find the providers and sync the blocks to the blockstore
 
 ```go
-var dag ipld.DAGService
-var ctx context.Context
 var root cid.Cid
 
-node, err := dag.Get(ctx, root)
+session, err := exch.Session(ctx, root)
+
+err = session.SyncBlocks(ctx)
+
+select {
+case err := <-session.Done():
+case <-ctx.Done():
+}
 ```
 
 4. Clients can anounce a new deal they made so the content is propagated to providers
-this is also called when adding a block with `dag.Add`.
 
 ```go
 var ctx context.Context
 var root cid.Cid
 
-err := exch.Announce(ctx, root)
+err := exch.Dispatch(ctx, root)
 ```
 
 5. We're also exposing convenience methods to transfer funds or import keys to the underlying wallet
