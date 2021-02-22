@@ -46,16 +46,30 @@ func runAdd(ctx context.Context, args []string) error {
 	go receive(ctx, cc, c)
 
 	cc.Add(&node.AddArgs{
-		Path: args[0],
+		Path:     args[0],
+		Dispatch: addArgs.dispatch,
 	})
-	select {
-	case ar := <-arc:
-		if ar.Err != "" {
-			return errors.New(ar.Err)
+	for {
+		select {
+		case ar := <-arc:
+			if ar.Err != "" {
+				return errors.New(ar.Err)
+			}
+			if ar.Cid != "" {
+				fmt.Printf("%v\n", ar.Cid)
+				if addArgs.dispatch {
+					// Let's wait for any feedback from the dispatch
+					continue
+				}
+
+			}
+			if ar.Cache != "" {
+				fmt.Printf("cached by peer %s\n", ar.Cache)
+				// TODO: wait for a given amount of caches to receive the content
+			}
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		fmt.Printf("%v\n", ar.Cid)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
