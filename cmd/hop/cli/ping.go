@@ -13,10 +13,12 @@ import (
 
 var pingCmd = &ffcli.Command{
 	Name:       "ping",
-	ShortUsage: "ping",
-	ShortHelp:  "Ping the daemon to see if it's active",
+	ShortUsage: "ping <peer-id?>",
+	ShortHelp:  "Ping the local daemon or a given peer",
 	LongHelp: strings.TrimSpace(`
-Here is some more information about this command
+
+The 'hop ping' command is a multipurpose ping request used mostly for debugging.
+It can be used to check info about the local running daemon, a connected provider or even a storage miner.
 
 `),
 	Exec: runPing,
@@ -36,7 +38,12 @@ func runPing(ctx context.Context, args []string) error {
 	go receive(ctx, cc, c)
 
 	anyPong := false
-	cc.Ping("any")
+
+	var addr string
+	if len(args) > 0 {
+		addr = args[0]
+	}
+	cc.Ping(addr)
 	timer := time.NewTimer(5 * time.Second)
 	select {
 	case <-timer.C:
@@ -45,9 +52,15 @@ func runPing(ctx context.Context, args []string) error {
 		timer.Stop()
 
 		anyPong = true
-		log.Info().Strs("addrs", pr.ListenAddrs).Strs("peers", pr.Peers).Msg("pong")
-
-		time.Sleep(time.Second)
+		if pr.Err != "" {
+			return fmt.Errorf(pr.Err)
+		}
+		log.Info().
+			Str("ID", pr.ID).
+			Strs("addrs", pr.Addrs).
+			Strs("peers", pr.Peers).
+			Float64("latencySeconds", pr.LatencySeconds).
+			Msg("pong")
 
 	case <-ctx.Done():
 		return ctx.Err()

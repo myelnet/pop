@@ -22,6 +22,7 @@ type LotusAPI struct {
 		StateReadState        func(context.Context, address.Address, TipSetKey) (*ActorState, error)
 		StateNetworkVersion   func(context.Context, TipSetKey) (network.Version, error)
 		ChainReadObj          func(context.Context, cid.Cid) ([]byte, error)
+		StateMinerInfo        func(context.Context, address.Address, TipSetKey) (MinerInfo, error)
 	}
 	closer jsonrpc.ClientCloser
 }
@@ -77,4 +78,8 @@ func (a *LotusAPI) StateNetworkVersion(ctx context.Context, tsk TipSetKey) (netw
 
 func (a *LotusAPI) ChainReadObj(ctx context.Context, c cid.Cid) ([]byte, error) {
 	return a.Methods.ChainReadObj(ctx, c)
+}
+
+func (a *LotusAPI) StateMinerInfo(ctx context.Context, addr address.Address, tsk TipSetKey) (MinerInfo, error) {
+	return a.Methods.StateMinerInfo(ctx, addr, tsk)
 }

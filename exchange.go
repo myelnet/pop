@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -24,6 +25,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/payments"
 	"github.com/myelnet/go-hop-exchange/retrieval"
@@ -237,23 +240,9 @@ func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) 
 	return session, nil
 }
 
-// Retrieve creates a new session and calls retrieve on specified root cid
-// you do need an address to pay retrieval to
-// TODO: improve this method is not super useful as is
-func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID, addr address.Address) error {
-	session, err := e.Session(ctx, root)
-	if err != nil {
-		return err
-	}
-	return session.Retrieve(ctx, peerID, addr)
-}
-
 // Close the Hop exchange
-// TODO: shutdown gracefully
+// not used, cancelling the context should be enough to close everything
 func (e *Exchange) Close() error {
-	// e.fAPI.Close()
-	// e.dataTransfer.Stop(context.TODO())
-	// e.Host.Close()
 	return nil
 }
 
@@ -308,11 +297,6 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 	}
 }
 
-// Wallet returns the wallet instance funding the exchange
-func (e *Exchange) Wallet() wallet.Driver {
-	return e.wallet
-}
-
 // NewDataTransfer packages together all the things needed for a new manager to work
 func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
 	// Create a special key for persisting the datatransfer manager state
@@ -343,6 +327,11 @@ func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchang
 	}
 }
 
+// Wallet returns the wallet instance funding the exchange
+func (e *Exchange) Wallet() wallet.Driver {
+	return e.wallet
+}
+
 // DataTransfer gives access to the datatransfer manager instance powering all the transfers for the exchange
 func (e *Exchange) DataTransfer() datatransfer.Manager {
 	return e.dataTransfer
@@ -352,3 +341,68 @@ func (e *Exchange) DataTransfer() datatransfer.Manager {
 func (e *Exchange) Supply() supply.Manager {
 	return e.supply
 }
+
+// Ping checks if we can retrieve from a given provider
+func (e *Exchange) Ping(ctx context.Context, addr address.Address) (*peer.AddrInfo, time.Duration, error) {
+	// TODO: handle different kinds of addresses
+	miner, err := e.fAPI.StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, 0, err
+	}
+	multiaddrs := make([]ma.Multiaddr, 0, len(miner.Multiaddrs))
+	for _, a := range miner.Multiaddrs {
+		maddr, err := ma.NewMultiaddrBytes(a)
+		if err != nil {
+			return nil, 0, err
+		}
+		multiaddrs = append(multiaddrs, maddr)
+	}
+	if miner.PeerId == nil {
+		return nil, 0, fmt.Errorf("no peer id available")
+	}
+	pi := &peer.AddrInfo{
+		ID:    *miner.PeerId,
+		Addrs: multiaddrs,
+	}
+	e.net.AddAddrs(pi.ID, pi.Addrs)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	pings := ping.Ping(ctx, e.Host, pi.ID)
+
+	select {
+	case res := <-pings:
+		return pi, res.RTT, res.Error
+	case <-ctx.Done():
+		return pi, 0, ctx.Err()
+	}
+}
+
+// func (e *Exchange) Query(ctx context.Context, pid peer.ID) error {
+// 	root, err := cid.Decode("QmReKydppK9szymbU9H8hfnz9fcrnQC34xDku7v8mbu19x")
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	s, err := e.net.NewQueryStream(pid)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer s.Close()
+
+// 	err = s.WriteQuery(Query{
+// 		PayloadCID:  root,
+// 		QueryParams: QueryParams{},
+// 	})
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	res, err := s.ReadQueryResponse()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	fmt.Println("received response with price:", res.PieceRetrievalPrice())
+// 	return nil
+// }

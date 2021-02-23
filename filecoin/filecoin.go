@@ -21,6 +21,7 @@ type API interface {
 	StateReadState(context.Context, address.Address, TipSetKey) (*ActorState, error)
 	StateNetworkVersion(context.Context, TipSetKey) (network.Version, error)
 	ChainReadObj(context.Context, cid.Cid) ([]byte, error)
+	StateMinerInfo(context.Context, address.Address, TipSetKey) (MinerInfo, error)
 	Close()
 }
 

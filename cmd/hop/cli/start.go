@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"flag"
 	"io/ioutil"
 	"os"
@@ -15,8 +16,10 @@ import (
 )
 
 var startArgs struct {
-	temp bool
-	peer string
+	temp        bool
+	peer        string
+	filEndpoint string
+	filToken    string
 }
 
 var startCmd = &ffcli.Command{
@@ -38,6 +41,8 @@ The 'hop start' command starts an IPFS daemon service.
 			"/ip4/3.22.169.56/tcp/4001/ipfs/12D3KooWQzS81gjFLMEoa9cvrEMAP3564CP1p8Ce5ZZvV9nsy9Uz",
 			"bootstrap peer to discover others",
 		)
+		fs.StringVar(&startArgs.filEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
+		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
 
 		return fs
 	})(),
@@ -69,10 +74,17 @@ func runStart(ctx context.Context, args []string) error {
 		}
 	}()
 
+	var filToken string
+	if startArgs.filToken != "" {
+		filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.filToken))
+	}
+
 	opts := node.Options{
 		RepoPath:       rpath,
 		SocketPath:     "hopd.sock",
 		BootstrapPeers: []string{startArgs.peer},
+		FilEndpoint:    startArgs.filEndpoint,
+		FilToken:       filToken,
 	}
 
 	err = node.Run(ctx, opts)

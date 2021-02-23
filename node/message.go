@@ -15,7 +15,7 @@ var jsonEscapedZero = []byte(`\u0000`)
 
 // PingArgs get passed to the Ping command
 type PingArgs struct {
-	IP string
+	Addr string
 }
 
 // AddArgs get passed to the Add command
@@ -42,8 +42,11 @@ type Command struct {
 
 // PingResult is sent in the notify message to give us the info we requested
 type PingResult struct {
-	ListenAddrs []string
-	Peers       []string
+	ID             string   // Host's peer ID
+	Addrs          []string // Addresses the host is listening on
+	Peers          []string // Peers currently connected to the node (local daemon only)
+	LatencySeconds float64
+	Err            string
 }
 
 // AddResult gives us feedback on the result of the Add request
@@ -93,7 +96,7 @@ func (cs *CommandServer) GotMsgBytes(ctx context.Context, b []byte) error {
 
 func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	if c := cmd.Ping; c != nil {
-		cs.n.Ping(c.IP)
+		cs.n.Ping(ctx, c.Addr)
 		return nil
 	}
 	if c := cmd.Add; c != nil {
@@ -158,8 +161,8 @@ func (cc *CommandClient) send(cmd Command) {
 	cc.sendCommandMsg(b)
 }
 
-func (cc *CommandClient) Ping(ip string) {
-	cc.send(Command{Ping: &PingArgs{IP: ip}})
+func (cc *CommandClient) Ping(addr string) {
+	cc.send(Command{Ping: &PingArgs{Addr: addr}})
 }
 
 func (cc *CommandClient) Add(args *AddArgs) {

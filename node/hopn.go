@@ -3,10 +3,12 @@ package node
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -50,7 +52,7 @@ const unixfsLinksPerLevel = 1024
 
 // IPFSNode is the IPFS API
 type IPFSNode interface {
-	Ping(ip string)
+	Ping(context.Context, string)
 	Add(context.Context, *AddArgs)
 	Get(context.Context, *GetArgs)
 }
@@ -63,6 +65,10 @@ type Options struct {
 	SocketPath string
 	// BootstrapPeers is a peer address to connect to for discovering other peers
 	BootstrapPeers []string
+	// FilEndpoint is the websocket url for accessing a remote filecoin api
+	FilEndpoint string
+	// FilToken is the authorization token to access the filecoin api
+	FilToken string
 }
 
 type node struct {
@@ -142,6 +148,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		hop.WithRepoPath(opts.RepoPath),
 		// TODO: secure keystore
 		hop.WithKeystore(wallet.NewMemKeystore()),
+		hop.WithFilecoinAPI(opts.FilEndpoint, http.Header{
+			"Authorization": []string{fmt.Sprintf("Basic %s", opts.FilToken)},
+		}),
 	)
 	if err != nil {
 		return nil, err
@@ -165,19 +174,47 @@ func (nd *node) send(n Notify) {
 }
 
 // Ping the node for sanity check more than anything
-func (nd *node) Ping(param string) {
-	peers := nd.connPeers()
-	var pstr []string
-	for _, p := range peers {
-		pstr = append(pstr, p.String())
+func (nd *node) Ping(ctx context.Context, who string) {
+	sendErr := func(err error) {
+		nd.send(Notify{PingResult: &PingResult{
+			Err: err.Error(),
+		}})
 	}
-	var addrs []string
-	for _, a := range nd.host.Addrs() {
-		addrs = append(addrs, a.String())
+	// Ping local node if no address is passed
+	if who == "" {
+		peers := nd.connPeers()
+		var pstr []string
+		for _, p := range peers {
+			pstr = append(pstr, p.String())
+		}
+		var addrs []string
+		for _, a := range nd.host.Addrs() {
+			addrs = append(addrs, a.String())
+		}
+		nd.send(Notify{PingResult: &PingResult{
+			ID:    nd.host.ID().String(),
+			Addrs: addrs,
+			Peers: pstr,
+		}})
+	}
+	addr, err := address.NewFromString(who)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	info, lat, err := nd.exch.Ping(ctx, addr)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	strs := make([]string, 0, len(info.Addrs))
+	for _, a := range info.Addrs {
+		strs = append(strs, a.String())
 	}
 	nd.send(Notify{PingResult: &PingResult{
-		ListenAddrs: addrs,
-		Peers:       pstr,
+		ID:             info.ID.String(),
+		Addrs:          strs,
+		LatencySeconds: lat.Seconds(),
 	}})
 }
 

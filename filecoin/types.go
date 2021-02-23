@@ -16,6 +16,7 @@ import (
 	proof2 "github.com/filecoin-project/specs-actors/v2/actors/runtime/proof"
 	block "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/minio/blake2b-simd"
 	"github.com/prometheus/common/log"
 )
@@ -117,6 +118,19 @@ func NewTipSet(blks []*BlockHeader) (*TipSet, error) {
 	return &ts, nil
 }
 
+// The length of a block header CID in bytes.
+var blockHeaderCIDLen int
+
+func init() {
+	// hash a large string of zeros so we don't estimate based on inlined CIDs.
+	var buf [256]byte
+	c, err := abi.CidBuilder.Sum(buf[:])
+	if err != nil {
+		panic(err)
+	}
+	blockHeaderCIDLen = len(c.Bytes())
+}
+
 // A TipSetKey is an immutable collection of CIDs forming a unique key for a tipset.
 // The CIDs are assumed to be distinct and in canonical order. Two keys with the same
 // CIDs in a different order are not considered equal.
@@ -130,6 +144,54 @@ type TipSetKey struct {
 }
 
 var EmptyTSK = TipSetKey{}
+
+// Cids returns a slice of the CIDs comprising this key.
+func (k TipSetKey) Cids() []cid.Cid {
+	cids, err := decodeKey([]byte(k.value))
+	if err != nil {
+		panic("invalid tipset key: " + err.Error())
+	}
+	return cids
+}
+
+func (k TipSetKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(k.Cids())
+}
+
+func (k *TipSetKey) UnmarshalJSON(b []byte) error {
+	var cids []cid.Cid
+	if err := json.Unmarshal(b, &cids); err != nil {
+		return err
+	}
+	k.value = string(encodeKey(cids))
+	return nil
+}
+
+func encodeKey(cids []cid.Cid) []byte {
+	buffer := new(bytes.Buffer)
+	for _, c := range cids {
+		// bytes.Buffer.Write() err is documented to be always nil.
+		_, _ = buffer.Write(c.Bytes())
+	}
+	return buffer.Bytes()
+}
+
+func decodeKey(encoded []byte) ([]cid.Cid, error) {
+	// To avoid reallocation of the underlying array, estimate the number of CIDs to be extracted
+	// by dividing the encoded length by the expected CID length.
+	estimatedCount := len(encoded) / blockHeaderCIDLen
+	cids := make([]cid.Cid, 0, estimatedCount)
+	nextIdx := 0
+	for nextIdx < len(encoded) {
+		nr, c, err := cid.CidFromBytes(encoded[nextIdx:])
+		if err != nil {
+			return nil, err
+		}
+		cids = append(cids, c)
+		nextIdx += nr
+	}
+	return cids, nil
+}
 
 type Ticket struct {
 	VRFProof []byte
@@ -482,4 +544,19 @@ func ParseFIL(s string) (FIL, error) {
 	}
 
 	return FIL{r.Num()}, nil
+}
+
+// MinerInfo formats information about a Filecoin storage miner we ask a lotus api for
+type MinerInfo struct {
+	Owner                      address.Address   // Must be an ID-address.
+	Worker                     address.Address   // Must be an ID-address.
+	NewWorker                  address.Address   // Must be an ID-address.
+	ControlAddresses           []address.Address // Must be an ID-addresses.
+	WorkerChangeEpoch          abi.ChainEpoch
+	PeerId                     *peer.ID
+	Multiaddrs                 []abi.Multiaddrs
+	WindowPoStProofType        abi.RegisteredPoStProof
+	SectorSize                 abi.SectorSize
+	WindowPoStPartitionSectors uint64
+	ConsensusFaultElapsed      abi.ChainEpoch
 }
