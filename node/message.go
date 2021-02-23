@@ -31,6 +31,7 @@ type GetArgs struct {
 	Out     string
 	Timeout int
 	Verbose bool
+	Miner   string
 }
 
 // Command is a message sent from a client to the daemon

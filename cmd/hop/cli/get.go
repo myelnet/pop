@@ -17,6 +17,7 @@ var getArgs struct {
 	output   string
 	timeout  int
 	verbose  bool
+	miner    string
 }
 
 var getCmd = &ffcli.Command{
@@ -27,7 +28,7 @@ var getCmd = &ffcli.Command{
 
 The 'hop get' command retrieves blocks with a given root cid and an optional selector
 (defaults retrieves all the linked blocks). Passing an output flag with a path will write the
-data to disk.
+data to disk. Adding a miner flag will fallback to miner if content is not available on the secondary market.
 
 `),
 	Exec: runGet,
@@ -37,6 +38,7 @@ data to disk.
 		fs.StringVar(&getArgs.output, "output", "", "write the file to the path")
 		fs.IntVar(&getArgs.timeout, "timeout", 5, "timeout before the request should be cancelled by the node (in minutes)")
 		fs.BoolVar(&getArgs.verbose, "verbose", false, "print the state transitions")
+		fs.StringVar(&getArgs.miner, "miner", "", "ask storage miner and use as fallback if network does not have the content")
 		return fs
 	})(),
 }
@@ -59,6 +61,7 @@ func runGet(ctx context.Context, args []string) error {
 		Sel:     getArgs.selector,
 		Out:     getArgs.output,
 		Verbose: getArgs.verbose,
+		Miner:   getArgs.miner,
 	})
 	at := time.Now()
 	for {

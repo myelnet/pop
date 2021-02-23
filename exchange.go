@@ -12,6 +12,7 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
@@ -220,22 +221,15 @@ func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) 
 		}
 	})
 	session := &Session{
-		blockstore:      e.Blockstore,
-		reqTopic:        e.reqTopic,
-		net:             e.net,
-		root:            root,
-		retriever:       cl,
-		addr:            e.SelfAddress,
-		ctx:             ctx,
-		done:            done,
-		unsub:           unsubscribe,
-		startedTransfer: make(chan deal.ID),
-		responses:       make(map[peer.ID]QueryResponse),
-		res:             make(chan peer.ID),
-	}
-	err := e.net.SetDelegate(session)
-	if err != nil {
-		return nil, err
+		blockstore: e.Blockstore,
+		reqTopic:   e.reqTopic,
+		net:        e.net,
+		root:       root,
+		retriever:  cl,
+		clientAddr: e.SelfAddress,
+		ctx:        ctx,
+		done:       done,
+		unsub:      unsubscribe,
 	}
 	return session, nil
 }
@@ -278,7 +272,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 
 func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryResponseStatus, size uint64) {
 	ask := &Ask{
-		PricePerByte:            DefaultPricePerByte,
+		PricePerByte:            big.Zero(),
 		PaymentInterval:         DefaultPaymentInterval,
 		PaymentIntervalIncrease: DefaultPaymentIntervalIncrease,
 	}
@@ -378,31 +372,3 @@ func (e *Exchange) Ping(ctx context.Context, addr address.Address) (*peer.AddrIn
 		return pi, 0, ctx.Err()
 	}
 }
-
-// func (e *Exchange) Query(ctx context.Context, pid peer.ID) error {
-// 	root, err := cid.Decode("QmReKydppK9szymbU9H8hfnz9fcrnQC34xDku7v8mbu19x")
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	s, err := e.net.NewQueryStream(pid)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer s.Close()
-
-// 	err = s.WriteQuery(Query{
-// 		PayloadCID:  root,
-// 		QueryParams: QueryParams{},
-// 	})
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	res, err := s.ReadQueryResponse()
-// 	if err != nil {
-// 		return err
-// 	}
-// 	fmt.Println("received response with price:", res.PieceRetrievalPrice())
-// 	return nil
-// }

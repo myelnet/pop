@@ -366,23 +366,52 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
+
 	session, err := nd.exch.Session(ctx, c)
 	if err != nil {
 		return err
 	}
-	err = session.SyncBlocks(ctx)
+	var offer *hop.Offer
+	if args.Miner != "" {
+		miner, err := address.NewFromString(args.Miner)
+		if err != nil {
+			return err
+		}
+		info, _, err := nd.exch.Ping(ctx, miner)
+		if err != nil {
+			// Maybe fall back to a discovery session?
+			return err
+		}
+
+		offer, err = session.QueryMiner(ctx, info.ID)
+		if err != nil {
+			return err
+		}
+	}
+	if offer == nil {
+		offer, err = session.QueryGossip(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	err = session.SyncBlocks(ctx, offer)
 	if err != nil {
 		return err
 	}
+
+	did, err := session.DealID()
+	if err != nil {
+		return err
+	}
+
+	nd.send(Notify{
+		GetResult: &GetResult{
+			DealID: did.String(),
+		},
+	})
+
 	for {
 		select {
-		case deal := <-session.StartedTransfer():
-			nd.send(Notify{
-				GetResult: &GetResult{
-					DealID: deal.String(),
-				},
-			})
-			continue
 		case err := <-session.Done():
 			if err != nil {
 				return err

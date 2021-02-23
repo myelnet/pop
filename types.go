@@ -8,7 +8,7 @@ import (
 	"github.com/ipfs/go-cid"
 )
 
-//go:generate cbor-gen-for Provision QueryResponse Query QueryParams Ask StorageDataTransferVoucher
+//go:generate cbor-gen-for --map-encoding Provision QueryResponse Query QueryParams Ask StorageDataTransferVoucher
 
 // Provision is a message describing new content a provider can decide to store or not
 type Provision struct {

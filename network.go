@@ -79,7 +79,6 @@ func (qs *queryStream) ReadQuery() (Query, error) {
 	var q Query
 
 	if err := q.UnmarshalCBOR(qs.buffered); err != nil {
-		fmt.Printf("Unable to unmarshall Query: %v", err)
 		return Query{}, err
 
 	}
@@ -95,7 +94,6 @@ func (qs *queryStream) ReadQueryResponse() (QueryResponse, error) {
 	var resp QueryResponse
 
 	if err := resp.UnmarshalCBOR(qs.buffered); err != nil {
-		fmt.Printf("Unable to unmarshall QueryResponse: %v", err)
 		return QueryResponse{}, err
 	}
 
@@ -175,7 +173,6 @@ func (impl *libp2pRetrievalMarketNetwork) NewQueryStream(id peer.ID) (RetrievalQ
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(s.Protocol())
 	buffered := bufio.NewReaderSize(s, 16)
 	return &queryStream{p: id, rw: s, buffered: buffered}, nil
 }
