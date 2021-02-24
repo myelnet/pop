@@ -11,6 +11,7 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
@@ -24,6 +25,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/payments"
 	"github.com/myelnet/go-hop-exchange/retrieval"
@@ -217,43 +219,22 @@ func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) 
 		}
 	})
 	session := &Session{
-		blockstore:      e.Blockstore,
-		reqTopic:        e.reqTopic,
-		net:             e.net,
-		root:            root,
-		retriever:       cl,
-		addr:            e.SelfAddress,
-		ctx:             ctx,
-		done:            done,
-		unsub:           unsubscribe,
-		startedTransfer: make(chan deal.ID),
-		responses:       make(map[peer.ID]QueryResponse),
-		res:             make(chan peer.ID),
-	}
-	err := e.net.SetDelegate(session)
-	if err != nil {
-		return nil, err
+		blockstore: e.Blockstore,
+		reqTopic:   e.reqTopic,
+		net:        e.net,
+		root:       root,
+		retriever:  cl,
+		clientAddr: e.SelfAddress,
+		ctx:        ctx,
+		done:       done,
+		unsub:      unsubscribe,
 	}
 	return session, nil
 }
 
-// Retrieve creates a new session and calls retrieve on specified root cid
-// you do need an address to pay retrieval to
-// TODO: improve this method is not super useful as is
-func (e *Exchange) Retrieve(ctx context.Context, root cid.Cid, peerID peer.ID, addr address.Address) error {
-	session, err := e.Session(ctx, root)
-	if err != nil {
-		return err
-	}
-	return session.Retrieve(ctx, peerID, addr)
-}
-
 // Close the Hop exchange
-// TODO: shutdown gracefully
+// not used, cancelling the context should be enough to close everything
 func (e *Exchange) Close() error {
-	// e.fAPI.Close()
-	// e.dataTransfer.Stop(context.TODO())
-	// e.Host.Close()
 	return nil
 }
 
@@ -289,7 +270,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 
 func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryResponseStatus, size uint64) {
 	ask := &Ask{
-		PricePerByte:            DefaultPricePerByte,
+		PricePerByte:            big.Zero(),
 		PaymentInterval:         DefaultPaymentInterval,
 		PaymentIntervalIncrease: DefaultPaymentIntervalIncrease,
 	}
@@ -306,11 +287,6 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 		fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
 		return
 	}
-}
-
-// Wallet returns the wallet instance funding the exchange
-func (e *Exchange) Wallet() wallet.Driver {
-	return e.wallet
 }
 
 // NewDataTransfer packages together all the things needed for a new manager to work
@@ -343,6 +319,11 @@ func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchang
 	}
 }
 
+// Wallet returns the wallet instance funding the exchange
+func (e *Exchange) Wallet() wallet.Driver {
+	return e.wallet
+}
+
 // DataTransfer gives access to the datatransfer manager instance powering all the transfers for the exchange
 func (e *Exchange) DataTransfer() datatransfer.Manager {
 	return e.dataTransfer
@@ -351,4 +332,32 @@ func (e *Exchange) DataTransfer() datatransfer.Manager {
 // Supply exposes the supply manager
 func (e *Exchange) Supply() supply.Manager {
 	return e.supply
+}
+
+// StoragePeerInfo resolves a Filecoin address to find the peer info and add to our address book
+func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
+	miner, err := e.fAPI.StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	multiaddrs := make([]ma.Multiaddr, 0, len(miner.Multiaddrs))
+	for _, a := range miner.Multiaddrs {
+		maddr, err := ma.NewMultiaddrBytes(a)
+		if err != nil {
+			return nil, err
+		}
+		multiaddrs = append(multiaddrs, maddr)
+	}
+	if miner.PeerId == nil {
+		return nil, fmt.Errorf("no peer id available")
+	}
+	if len(miner.Multiaddrs) == 0 {
+		return nil, fmt.Errorf("no peer address available")
+	}
+	pi := peer.AddrInfo{
+		ID:    *miner.PeerId,
+		Addrs: multiaddrs,
+	}
+	e.net.AddAddrs(pi.ID, pi.Addrs)
+	return &pi, nil
 }
