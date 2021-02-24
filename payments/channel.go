@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/filecoin-project/go-address"
@@ -354,9 +356,46 @@ func (ch *channel) mpoolPush(ctx context.Context, msg *filecoin.Message) (*filec
 	}
 
 	if _, err := ch.api.MpoolPush(ctx, smsg); err != nil {
+		if strings.Contains(err.Error(), "already in mpool, increase GasPremium") {
+			// incGas picks up the suggested gas premium from the error message and tries to push
+			// a new message to the pool with that amount
+			return ch.increaseGas(ctx, msg, err.Error())
+		}
 		return nil, fmt.Errorf("MpoolPush failed with error: %v", err)
 	}
 
+	return smsg, nil
+}
+
+func (ch *channel) increaseGas(ctx context.Context, msg *filecoin.Message, rec string) (*filecoin.SignedMessage, error) {
+	r := regexp.MustCompile(`to (\d+)`)
+	match := r.FindStringSubmatch(rec)
+	if len(match) != 2 {
+		return nil, fmt.Errorf("failed to match new gas price")
+	}
+	prem, err := big.FromString(match[1])
+	if err != nil {
+		return nil, err
+	}
+	msg.GasPremium = prem
+	mbl, err := msg.ToStorageBlock()
+	if err != nil {
+		return nil, err
+	}
+
+	sig, err := ch.wal.Sign(ctx, msg.From, mbl.Cid().Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	smsg := &filecoin.SignedMessage{
+		Message:   *msg,
+		Signature: *sig,
+	}
+
+	if _, err := ch.api.MpoolPush(ctx, smsg); err != nil {
+		return nil, fmt.Errorf("MpoolPush failed with error: %v", err)
+	}
 	return smsg, nil
 }
 
@@ -370,7 +409,7 @@ func (ch *channel) mutateChannelInfo(channelID string, mutate func(*ChannelInfo)
 	// we record to the store that we're going to send a message, send
 	// the message, and then record that the message was sent.
 	if err != nil {
-		fmt.Printf("Error reading channel info from store: %s", err)
+		fmt.Printf("Error reading channel info from store: %s\n", err)
 		return
 	}
 
@@ -393,7 +432,6 @@ func (ch *channel) waitForPaychCreateMsg(channelID string, mcid cid.Cid) {
 func (ch *channel) waitPaychCreateMsg(channelID string, mcid cid.Cid) error {
 	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(5))
 	if err != nil {
-		fmt.Printf("wait msg: %v", err)
 		return err
 	}
 
