@@ -40,6 +40,7 @@ import (
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
@@ -205,33 +206,51 @@ func (nd *node) Ping(ctx context.Context, who string) {
 			Peers: pstr,
 		}})
 	}
-	var loc hop.Location
+
 	addr, err := address.NewFromString(who)
-	if err != nil {
-		pid, err := peer.Decode(who)
+	if err == nil {
+		info, err := nd.exch.StoragePeerInfo(ctx, addr)
 		if err != nil {
 			sendErr(err)
 			return
-		} else {
-			loc = hop.LocationFromPeerID(pid)
 		}
-	} else {
-		loc = hop.LocationFromAddress(addr)
-	}
-	info, lat, err := nd.exch.Ping(ctx, loc)
-	if err != nil {
-		sendErr(fmt.Errorf("exch.Ping: %w", err))
+		nd.ping(ctx, *info, sendErr)
 		return
 	}
-	strs := make([]string, 0, len(info.Addrs))
-	for _, a := range info.Addrs {
+	pid, err := peer.Decode(who)
+	if err == nil {
+		nd.ping(ctx, nd.host.Peerstore().PeerInfo(pid), sendErr)
+		return
+	}
+	sendErr(fmt.Errorf("must be a valid id address or peer id"))
+}
+
+func (nd *node) ping(ctx context.Context, pi peer.AddrInfo, sendErr func(error)) {
+	strs := make([]string, 0, len(pi.Addrs))
+	for _, a := range pi.Addrs {
 		strs = append(strs, a.String())
 	}
-	nd.send(Notify{PingResult: &PingResult{
-		ID:             info.ID.String(),
-		Addrs:          strs,
-		LatencySeconds: lat.Seconds(),
-	}})
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	pings := ping.Ping(ctx, nd.host, pi.ID)
+
+	select {
+	case res := <-pings:
+		if res.Error != nil {
+			sendErr(res.Error)
+			return
+		}
+		nd.send(Notify{PingResult: &PingResult{
+			ID:             pi.ID.String(),
+			Addrs:          strs,
+			LatencySeconds: res.RTT.Seconds(),
+		}})
+
+	case <-ctx.Done():
+		sendErr(ctx.Err())
+	}
 }
 
 // Add a file to the IPFS unixfs dag
@@ -393,7 +412,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		if err != nil {
 			return err
 		}
-		info, _, err := nd.exch.Ping(ctx, hop.LocationFromAddress(miner))
+		info, err := nd.exch.StoragePeerInfo(ctx, miner)
 		if err != nil {
 			// Maybe fall back to a discovery session?
 			return err

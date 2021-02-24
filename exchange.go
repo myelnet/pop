@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -26,7 +25,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/payments"
@@ -336,74 +334,30 @@ func (e *Exchange) Supply() supply.Manager {
 	return e.supply
 }
 
-// Location encapsulates different identifiers which can be used to connect with a peer
-type Location interface {
-	PeerID() *peer.ID
-	Address() *address.Address
-}
-
-type loc struct {
-	p *peer.ID
-	a *address.Address
-}
-
-func (l *loc) PeerID() *peer.ID {
-	return l.p
-}
-
-func (l *loc) Address() *address.Address {
-	return l.a
-}
-
-func LocationFromPeerID(p peer.ID) Location {
-	return &loc{p: &p}
-}
-
-func LocationFromAddress(a address.Address) Location {
-	return &loc{a: &a}
-}
-
-// Ping checks if we can retrieve from a given provider
-func (e *Exchange) Ping(ctx context.Context, loc Location) (*peer.AddrInfo, time.Duration, error) {
-	// TODO: handle different kinds of addresses
-	var pi peer.AddrInfo
-	if loc.PeerID() != nil {
-		pi = e.Host.Peerstore().PeerInfo(*loc.PeerID())
-	} else {
-		miner, err := e.fAPI.StateMinerInfo(ctx, *loc.Address(), filecoin.EmptyTSK)
+// StoragePeerInfo resolves a Filecoin address to find the peer info and add to our address book
+func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
+	miner, err := e.fAPI.StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	multiaddrs := make([]ma.Multiaddr, 0, len(miner.Multiaddrs))
+	for _, a := range miner.Multiaddrs {
+		maddr, err := ma.NewMultiaddrBytes(a)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
-		multiaddrs := make([]ma.Multiaddr, 0, len(miner.Multiaddrs))
-		for _, a := range miner.Multiaddrs {
-			maddr, err := ma.NewMultiaddrBytes(a)
-			if err != nil {
-				return nil, 0, err
-			}
-			multiaddrs = append(multiaddrs, maddr)
-		}
-		if miner.PeerId == nil {
-			return nil, 0, fmt.Errorf("no peer id available")
-		}
-		if len(miner.Multiaddrs) == 0 {
-			return nil, 0, fmt.Errorf("no peer address available")
-		}
-		pi = peer.AddrInfo{
-			ID:    *miner.PeerId,
-			Addrs: multiaddrs,
-		}
-		e.net.AddAddrs(pi.ID, pi.Addrs)
+		multiaddrs = append(multiaddrs, maddr)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	pings := ping.Ping(ctx, e.Host, pi.ID)
-
-	select {
-	case res := <-pings:
-		return &pi, res.RTT, res.Error
-	case <-ctx.Done():
-		return &pi, 0, ctx.Err()
+	if miner.PeerId == nil {
+		return nil, fmt.Errorf("no peer id available")
 	}
+	if len(miner.Multiaddrs) == 0 {
+		return nil, fmt.Errorf("no peer address available")
+	}
+	pi := peer.AddrInfo{
+		ID:    *miner.PeerId,
+		Addrs: multiaddrs,
+	}
+	e.net.AddAddrs(pi.ID, pi.Addrs)
+	return &pi, nil
 }

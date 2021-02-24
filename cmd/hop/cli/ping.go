@@ -44,7 +44,7 @@ func runPing(ctx context.Context, args []string) error {
 		addr = args[0]
 	}
 	cc.Ping(addr)
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(10 * time.Second)
 	select {
 	case <-timer.C:
 		fmt.Printf("timeout waiting for ping reply\n")
