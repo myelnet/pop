@@ -214,18 +214,24 @@ func (nd *node) Ping(ctx context.Context, who string) {
 			sendErr(err)
 			return
 		}
-		nd.ping(ctx, *info, sendErr)
+		err = nd.ping(ctx, *info)
+		if err != nil {
+			sendErr(err)
+		}
 		return
 	}
 	pid, err := peer.Decode(who)
 	if err == nil {
-		nd.ping(ctx, nd.host.Peerstore().PeerInfo(pid), sendErr)
+		err = nd.ping(ctx, nd.host.Peerstore().PeerInfo(pid))
+		if err != nil {
+			sendErr(err)
+		}
 		return
 	}
 	sendErr(fmt.Errorf("must be a valid id address or peer id"))
 }
 
-func (nd *node) ping(ctx context.Context, pi peer.AddrInfo, sendErr func(error)) {
+func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	strs := make([]string, 0, len(pi.Addrs))
 	for _, a := range pi.Addrs {
 		strs = append(strs, a.String())
@@ -239,17 +245,16 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo, sendErr func(error))
 	select {
 	case res := <-pings:
 		if res.Error != nil {
-			sendErr(res.Error)
-			return
+			return res.Error
 		}
 		nd.send(Notify{PingResult: &PingResult{
 			ID:             pi.ID.String(),
 			Addrs:          strs,
 			LatencySeconds: res.RTT.Seconds(),
 		}})
-
+		return nil
 	case <-ctx.Done():
-		sendErr(ctx.Err())
+		return ctx.Err()
 	}
 }
 
