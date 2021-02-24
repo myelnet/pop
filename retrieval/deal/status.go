@@ -109,36 +109,42 @@ const (
 	// the deal price per byte is zero (if it's not zero the provider asks
 	// for final payment after sending the last blocks).
 	StatusClientWaitingForLastBlocks
+
+	// StatusPaymentChannelAddingInitialFunds means that a payment channel
+	// exists from an earlier deal between client and provider, but we need
+	// to add funds to the channel for this particular deal
+	StatusPaymentChannelAddingInitialFunds
 )
 
 // Statuses maps deal status to a human readable representation
 var Statuses = map[Status]string{
-	StatusNew:                          "DealStatusNew",
-	StatusUnsealing:                    "DealStatusUnsealing",
-	StatusUnsealed:                     "DealStatusUnsealed",
-	StatusWaitForAcceptance:            "DealStatusWaitForAcceptance",
-	StatusPaymentChannelCreating:       "DealStatusPaymentChannelCreating",
-	StatusPaymentChannelAddingFunds:    "DealStatusPaymentChannelAddingFunds",
-	StatusAccepted:                     "DealStatusAccepted",
-	StatusFundsNeededUnseal:            "DealStatusFundsNeededUnseal",
-	StatusFailing:                      "DealStatusFailing",
-	StatusRejected:                     "DealStatusRejected",
-	StatusFundsNeeded:                  "DealStatusFundsNeeded",
-	StatusSendFunds:                    "DealStatusSendFunds",
-	StatusSendFundsLastPayment:         "DealStatusSendFundsLastPayment",
-	StatusOngoing:                      "DealStatusOngoing",
-	StatusFundsNeededLastPayment:       "DealStatusFundsNeededLastPayment",
-	StatusCompleted:                    "DealStatusCompleted",
-	StatusDealNotFound:                 "DealStatusDealNotFound",
-	StatusErrored:                      "DealStatusErrored",
-	StatusBlocksComplete:               "DealStatusBlocksComplete",
-	StatusFinalizing:                   "DealStatusFinalizing",
-	StatusCompleting:                   "DealStatusCompleting",
-	StatusCheckComplete:                "DealStatusCheckComplete",
-	StatusCheckFunds:                   "DealStatusCheckFunds",
-	StatusInsufficientFunds:            "DealStatusInsufficientFunds",
-	StatusPaymentChannelAllocatingLane: "DealStatusPaymentChannelAllocatingLane",
-	StatusCancelling:                   "DealStatusCancelling",
-	StatusCancelled:                    "DealStatusCancelled",
-	StatusClientWaitingForLastBlocks:   "DealStatusWaitingForLastBlocks",
+	StatusNew:                              "DealStatusNew",
+	StatusUnsealing:                        "DealStatusUnsealing",
+	StatusUnsealed:                         "DealStatusUnsealed",
+	StatusWaitForAcceptance:                "DealStatusWaitForAcceptance",
+	StatusPaymentChannelCreating:           "DealStatusPaymentChannelCreating",
+	StatusPaymentChannelAddingFunds:        "DealStatusPaymentChannelAddingFunds",
+	StatusAccepted:                         "DealStatusAccepted",
+	StatusFundsNeededUnseal:                "DealStatusFundsNeededUnseal",
+	StatusFailing:                          "DealStatusFailing",
+	StatusRejected:                         "DealStatusRejected",
+	StatusFundsNeeded:                      "DealStatusFundsNeeded",
+	StatusSendFunds:                        "DealStatusSendFunds",
+	StatusSendFundsLastPayment:             "DealStatusSendFundsLastPayment",
+	StatusOngoing:                          "DealStatusOngoing",
+	StatusFundsNeededLastPayment:           "DealStatusFundsNeededLastPayment",
+	StatusCompleted:                        "DealStatusCompleted",
+	StatusDealNotFound:                     "DealStatusDealNotFound",
+	StatusErrored:                          "DealStatusErrored",
+	StatusBlocksComplete:                   "DealStatusBlocksComplete",
+	StatusFinalizing:                       "DealStatusFinalizing",
+	StatusCompleting:                       "DealStatusCompleting",
+	StatusCheckComplete:                    "DealStatusCheckComplete",
+	StatusCheckFunds:                       "DealStatusCheckFunds",
+	StatusInsufficientFunds:                "DealStatusInsufficientFunds",
+	StatusPaymentChannelAllocatingLane:     "DealStatusPaymentChannelAllocatingLane",
+	StatusCancelling:                       "DealStatusCancelling",
+	StatusCancelled:                        "DealStatusCancelled",
+	StatusClientWaitingForLastBlocks:       "DealStatusWaitingForLastBlocks",
+	StatusPaymentChannelAddingInitialFunds: "DealStatusPaymentChannelAddingInitialFunds",
 }

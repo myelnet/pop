@@ -106,8 +106,12 @@ var FSMEvents = fsm.Events{
 			return nil
 		}),
 	fsm.Event(EventPaymentChannelAddingFunds).
-		FromMany(deal.StatusAccepted).To(deal.StatusPaymentChannelAllocatingLane).
-		FromMany(deal.StatusCheckFunds).To(deal.StatusPaymentChannelAddingFunds).
+		// If the deal has just been accepted, we are adding the initial funds
+		// to the payment channel
+		From(deal.StatusAccepted).To(deal.StatusPaymentChannelAddingInitialFunds).
+		// If the deal was already ongoing, and ran out of funds, we are
+		// topping up funds in the payment channel
+		From(deal.StatusCheckFunds).To(deal.StatusPaymentChannelAddingFunds).
 		Action(func(ds *deal.ClientState, msgCID cid.Cid, payCh address.Address) error {
 			ds.WaitMsgCID = &msgCID
 			if ds.PaymentInfo == nil {
@@ -118,7 +122,16 @@ var FSMEvents = fsm.Events{
 			return nil
 		}),
 	fsm.Event(EventPaymentChannelReady).
+		// If the payment channel between client and provider was being created
+		// for the first time, or if the payment channel had already been
+		// created for an earlier deal but the initial funding for this deal
+		// was being added, then we still need to allocate a payment channel
+		// lane
 		From(deal.StatusPaymentChannelCreating).To(deal.StatusPaymentChannelAllocatingLane).
+		From(deal.StatusPaymentChannelAddingInitialFunds).To(deal.StatusPaymentChannelAllocatingLane).
+		// If the payment channel ran out of funds and needed to be topped up,
+		// then the payment channel lane already exists so just move straight
+		// to the ongoing state
 		From(deal.StatusPaymentChannelAddingFunds).To(deal.StatusOngoing).
 		From(deal.StatusCheckFunds).To(deal.StatusOngoing).
 		Action(func(ds *deal.ClientState, payCh address.Address) error {
@@ -330,20 +343,21 @@ var FinalityStates = []fsm.StateKey{
 
 // StateEntryFuncs are the handlers for different states in a retrieval client
 var StateEntryFuncs = fsm.StateEntryFuncs{
-	deal.StatusNew:                          ProposeDeal,
-	deal.StatusAccepted:                     SetupPaymentChannelStart,
-	deal.StatusPaymentChannelCreating:       WaitPaymentChannelReady,
-	deal.StatusPaymentChannelAllocatingLane: AllocateLane,
-	deal.StatusOngoing:                      Ongoing,
-	deal.StatusFundsNeeded:                  ProcessPaymentRequested,
-	deal.StatusFundsNeededLastPayment:       ProcessPaymentRequested,
-	deal.StatusSendFunds:                    SendFunds,
-	deal.StatusSendFundsLastPayment:         SendFunds,
-	deal.StatusCheckFunds:                   CheckFunds,
-	deal.StatusPaymentChannelAddingFunds:    WaitPaymentChannelReady,
-	deal.StatusFailing:                      CancelDeal,
-	deal.StatusCancelling:                   CancelDeal,
-	deal.StatusCheckComplete:                CheckComplete,
+	deal.StatusNew:                              ProposeDeal,
+	deal.StatusAccepted:                         SetupPaymentChannelStart,
+	deal.StatusPaymentChannelCreating:           WaitPaymentChannelReady,
+	deal.StatusPaymentChannelAddingInitialFunds: WaitPaymentChannelReady,
+	deal.StatusPaymentChannelAllocatingLane:     AllocateLane,
+	deal.StatusOngoing:                          Ongoing,
+	deal.StatusFundsNeeded:                      ProcessPaymentRequested,
+	deal.StatusFundsNeededLastPayment:           ProcessPaymentRequested,
+	deal.StatusSendFunds:                        SendFunds,
+	deal.StatusSendFundsLastPayment:             SendFunds,
+	deal.StatusCheckFunds:                       CheckFunds,
+	deal.StatusPaymentChannelAddingFunds:        WaitPaymentChannelReady,
+	deal.StatusFailing:                          CancelDeal,
+	deal.StatusCancelling:                       CancelDeal,
+	deal.StatusCheckComplete:                    CheckComplete,
 }
 
 // DealEnvironment is a bridge to the environment a client deal is executing in.
