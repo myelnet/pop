@@ -6,10 +6,11 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/specs-actors/actors/builtin"
-	init0 "github.com/filecoin-project/specs-actors/actors/builtin/init"
-	"github.com/filecoin-project/specs-actors/actors/builtin/paych"
-	builtin2 "github.com/filecoin-project/specs-actors/v2/actors/builtin"
+
+	"github.com/filecoin-project/specs-actors/v2/actors/builtin"
+	init2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/init"
+	"github.com/filecoin-project/specs-actors/v2/actors/builtin/paych"
+
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
@@ -31,7 +32,7 @@ func (m message) Create(to address.Address, initialAmount abi.TokenAmount) (*fil
 	if err != nil {
 		return nil, err
 	}
-	enc, err := SerializeParams(&init0.ExecParams{
+	enc, err := SerializeParams(&init2.ExecParams{
 		CodeCID:           builtin.PaymentChannelActorCodeID,
 		ConstructorParams: params,
 	})
@@ -40,7 +41,7 @@ func (m message) Create(to address.Address, initialAmount abi.TokenAmount) (*fil
 	}
 
 	return &fil.Message{
-		To:     builtin2.InitActorAddr,
+		To:     builtin.InitActorAddr,
 		From:   m.from,
 		Value:  initialAmount,
 		Method: builtin.MethodsInit.Exec,

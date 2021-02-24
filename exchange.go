@@ -354,6 +354,9 @@ func (e *Exchange) Ping(ctx context.Context, addr address.Address) (*peer.AddrIn
 	if miner.PeerId == nil {
 		return nil, 0, fmt.Errorf("no peer id available")
 	}
+	if len(miner.Multiaddrs) == 0 {
+		return nil, 0, fmt.Errorf("no peer address available")
+	}
 	pi := &peer.AddrInfo{
 		ID:    *miner.PeerId,
 		Addrs: multiaddrs,

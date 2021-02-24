@@ -59,9 +59,13 @@ type AddResult struct {
 
 // GetResult gives us feedback on the result of the Get request
 type GetResult struct {
-	DealID     string
-	TotalSpent string
-	Err        string
+	DealID       string
+	TotalSpent   string
+	TotalPrice   string
+	PieceSize    string
+	PricePerByte string
+	UnsealPrice  string
+	Err          string
 }
 
 // Notify is a message sent from the daemon to the client

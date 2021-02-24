@@ -216,3 +216,8 @@ func (s *Session) Close() {
 	s.unsub()
 	s.net.StopHandlingRequests()
 }
+
+// SetAddress to use for funding the retriebal
+func (s *Session) SetAddress(addr address.Address) {
+	s.clientAddr = addr
+}

@@ -546,6 +546,23 @@ func ParseFIL(s string) (FIL, error) {
 	return FIL{r.Num()}, nil
 }
 
+var byteSizeUnits = []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB"}
+
+// SizeStr formats byte sizes in humand readble format
+func SizeStr(bi BigInt) string {
+	r := new(big.Rat).SetInt(bi.Int)
+	den := big.NewRat(1, 1024)
+
+	var i int
+	for f, _ := r.Float64(); f >= 1024 && i+1 < len(byteSizeUnits); f, _ = r.Float64() {
+		i++
+		r = r.Mul(r, den)
+	}
+
+	f, _ := r.Float64()
+	return fmt.Sprintf("%.4g %s", f, byteSizeUnits[i])
+}
+
 // MinerInfo formats information about a Filecoin storage miner we ask a lotus api for
 type MinerInfo struct {
 	Owner                      address.Address   // Must be an ID-address.

@@ -20,6 +20,7 @@ var startArgs struct {
 	peer        string
 	filEndpoint string
 	filToken    string
+	privKeyPath string
 }
 
 var startCmd = &ffcli.Command{
@@ -43,6 +44,7 @@ The 'hop start' command starts an IPFS daemon service.
 		)
 		fs.StringVar(&startArgs.filEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
+		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 
 		return fs
 	})(),
@@ -79,12 +81,23 @@ func runStart(ctx context.Context, args []string) error {
 		filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.filToken))
 	}
 
+	var privKey string
+	if startArgs.privKeyPath != "" {
+		fdata, err := ioutil.ReadFile(startArgs.privKeyPath)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read private key")
+		} else {
+			privKey = strings.TrimSpace(string(fdata))
+		}
+	}
+
 	opts := node.Options{
 		RepoPath:       rpath,
 		SocketPath:     "hopd.sock",
 		BootstrapPeers: []string{startArgs.peer},
 		FilEndpoint:    startArgs.filEndpoint,
 		FilToken:       filToken,
+		PrivKey:        privKey,
 	}
 
 	err = node.Run(ctx, opts)

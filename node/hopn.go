@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -41,6 +43,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/rs/zerolog/log"
@@ -69,6 +72,8 @@ type Options struct {
 	FilEndpoint string
 	// FilToken is the authorization token to access the filecoin api
 	FilToken string
+	// PrivKey is a hex encoded private key to use for default address
+	PrivKey string
 }
 
 type node struct {
@@ -155,6 +160,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opts.PrivKey != "" {
+		nd.importAddress(opts.PrivKey)
+	}
 	go nd.bootstrap(ctx, opts.BootstrapPeers)
 
 	return nd, nil
@@ -204,7 +212,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 	}
 	info, lat, err := nd.exch.Ping(ctx, addr)
 	if err != nil {
-		sendErr(err)
+		sendErr(fmt.Errorf("exch.Ping: %w", err))
 		return
 	}
 	strs := make([]string, 0, len(info.Addrs))
@@ -406,7 +414,11 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 
 	nd.send(Notify{
 		GetResult: &GetResult{
-			DealID: did.String(),
+			DealID:       did.String(),
+			TotalPrice:   filecoin.FIL(offer.Response.PieceRetrievalPrice()).Short(),
+			PricePerByte: filecoin.FIL(offer.Response.MinPricePerByte).Short(),
+			UnsealPrice:  filecoin.FIL(offer.Response.UnsealPrice).Short(),
+			PieceSize:    filecoin.SizeStr(filecoin.NewInt(offer.Response.Size)),
 		},
 	})
 
@@ -487,4 +499,31 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
+}
+
+// importAddress from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (nd *node) importAddress(pk string) {
+	var iki wallet.KeyInfo
+	data, err := hex.DecodeString(pk)
+	if err != nil {
+		log.Error().Err(err).Msg("hex.DecodeString(opts.PrivKey)")
+	}
+	if err := json.Unmarshal(data, &iki); err != nil {
+		log.Error().Err(err).Msg("json.Unmarshal(PrivKey)")
+	}
+
+	addr, err := nd.exch.Wallet().ImportKey(context.TODO(), &iki)
+	if err != nil {
+		log.Error().Err(err).Msg("Wallet.ImportKey")
+	} else {
+		log.Info().Str("address", addr.String()).Msg("imported private key")
+		err := nd.exch.Wallet().SetDefaultAddress(addr)
+		if err != nil {
+			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
+		}
+		// TODO: this could be nicer
+		nd.exch.SelfAddress = addr
+	}
 }

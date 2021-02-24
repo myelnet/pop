@@ -10,6 +10,7 @@ import (
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/rs/zerolog/log"
 )
 
 var getArgs struct {
@@ -36,7 +37,7 @@ data to disk. Adding a miner flag will fallback to miner if content is not avail
 		fs := flag.NewFlagSet("get", flag.ExitOnError)
 		fs.StringVar(&getArgs.selector, "selector", "all", "select blocks to retrieve for a root cid")
 		fs.StringVar(&getArgs.output, "output", "", "write the file to the path")
-		fs.IntVar(&getArgs.timeout, "timeout", 5, "timeout before the request should be cancelled by the node (in minutes)")
+		fs.IntVar(&getArgs.timeout, "timeout", 60, "timeout before the request should be cancelled by the node (in minutes)")
 		fs.BoolVar(&getArgs.verbose, "verbose", false, "print the state transitions")
 		fs.StringVar(&getArgs.miner, "miner", "", "ask storage miner and use as fallback if network does not have the content")
 		return fs
@@ -71,7 +72,13 @@ func runGet(ctx context.Context, args []string) error {
 				return errors.New(gr.Err)
 			}
 			if gr.DealID != "" {
-				fmt.Printf("started retrieval deal %s\n", gr.DealID)
+				log.Info().
+					Str("dealID", gr.DealID).
+					Str("TotalPrice", gr.TotalPrice).
+					Str("PricePerByte", gr.PricePerByte).
+					Str("UnsealPrice", gr.UnsealPrice).
+					Str("PieceSize", gr.PieceSize).
+					Msg("started retrieval deal")
 				continue
 			}
 			now := time.Now()

@@ -92,7 +92,12 @@ func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
 		// data transfer events for progress do not affect deal state
 		err := deals.Send(dealProposal.ID, retrievalEvent, params...)
 		if err != nil {
-			fmt.Printf("processing dt client event %s: %v\n", datatransfer.Events[event.Code], err)
+			fmt.Printf(
+				"processing dt client event %s for state %s: %v\n",
+				datatransfer.Events[event.Code],
+				datatransfer.Statuses[channelState.Status()],
+				err,
+			)
 		}
 	}
 }
