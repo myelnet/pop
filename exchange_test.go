@@ -109,9 +109,12 @@ func TestExchangeDirect(t *testing.T) {
 			// Now we fetch it again from our providers
 			session, err := client.Session(ctx, rootCid)
 			require.NoError(t, err)
-			// defer session.Close()
+			defer session.Close()
 
-			err = session.SyncBlocks(ctx)
+			offer, err := session.QueryGossip(ctx)
+			require.NoError(t, err)
+
+			err = session.SyncBlocks(ctx, offer)
 			require.NoError(t, err)
 
 			select {

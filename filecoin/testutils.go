@@ -72,6 +72,10 @@ func (m *MockLotusAPI) ChainReadObj(ctx context.Context, c cid.Cid) ([]byte, err
 	return m.obj, nil
 }
 
+func (m *MockLotusAPI) StateMinerInfo(ctx context.Context, addr address.Address, tsk TipSetKey) (MinerInfo, error) {
+	return MinerInfo{}, nil
+}
+
 func (m *MockLotusAPI) Close() {}
 
 // Set lotus data

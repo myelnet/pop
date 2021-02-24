@@ -19,8 +19,13 @@ import (
 // Let's try to stay compatible with lotus nodes so we can retrieve from lotus
 // providers too
 
-// QueryProtocolID when we found our potential providers and we negociate terms of the deal
-const QueryProtocolID = protocol.ID("/myel/hop/query/1.0")
+// FilQueryProtocolID is the protocol for querying information about retrieval
+// deal parameters from Filecoin storage miners
+const FilQueryProtocolID = protocol.ID("/fil/retrieval/qry/1.0.0")
+
+// HopQueryProtocolID is the protocol for exchanging information about retrieval
+// deal parameters from retrieval providers
+const HopQueryProtocolID = protocol.ID("/myel/hop/query/1.0")
 
 // These are the required interfaces that must be implemented to send and receive data
 // for retrieval queries and deals.
@@ -74,7 +79,6 @@ func (qs *queryStream) ReadQuery() (Query, error) {
 	var q Query
 
 	if err := q.UnmarshalCBOR(qs.buffered); err != nil {
-		fmt.Printf("Unable to unmarshall Query: %v", err)
 		return Query{}, err
 
 	}
@@ -90,7 +94,6 @@ func (qs *queryStream) ReadQueryResponse() (QueryResponse, error) {
 	var resp QueryResponse
 
 	if err := resp.UnmarshalCBOR(qs.buffered); err != nil {
-		fmt.Printf("Unable to unmarshall QueryResponse: %v", err)
 		return QueryResponse{}, err
 	}
 
@@ -141,7 +144,8 @@ func NewFromLibp2pHost(h host.Host, options ...Option) RetrievalMarketNetwork {
 		minAttemptDuration:    defaultMinAttemptDuration,
 		maxAttemptDuration:    defaultMaxAttemptDuration,
 		supportedProtocols: []protocol.ID{
-			QueryProtocolID,
+			FilQueryProtocolID,
+			HopQueryProtocolID,
 		},
 	}
 	for _, option := range options {

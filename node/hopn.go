@@ -2,11 +2,15 @@ package node
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -36,9 +40,11 @@ import (
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/rs/zerolog/log"
@@ -50,7 +56,7 @@ const unixfsLinksPerLevel = 1024
 
 // IPFSNode is the IPFS API
 type IPFSNode interface {
-	Ping(ip string)
+	Ping(context.Context, string)
 	Add(context.Context, *AddArgs)
 	Get(context.Context, *GetArgs)
 }
@@ -63,6 +69,12 @@ type Options struct {
 	SocketPath string
 	// BootstrapPeers is a peer address to connect to for discovering other peers
 	BootstrapPeers []string
+	// FilEndpoint is the websocket url for accessing a remote filecoin api
+	FilEndpoint string
+	// FilToken is the authorization token to access the filecoin api
+	FilToken string
+	// PrivKey is a hex encoded private key to use for default address
+	PrivKey string
 }
 
 type node struct {
@@ -142,9 +154,15 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		hop.WithRepoPath(opts.RepoPath),
 		// TODO: secure keystore
 		hop.WithKeystore(wallet.NewMemKeystore()),
+		hop.WithFilecoinAPI(opts.FilEndpoint, http.Header{
+			"Authorization": []string{fmt.Sprintf("Basic %s", opts.FilToken)},
+		}),
 	)
 	if err != nil {
 		return nil, err
+	}
+	if opts.PrivKey != "" {
+		nd.importAddress(opts.PrivKey)
 	}
 	go nd.bootstrap(ctx, opts.BootstrapPeers)
 
@@ -165,20 +183,79 @@ func (nd *node) send(n Notify) {
 }
 
 // Ping the node for sanity check more than anything
-func (nd *node) Ping(param string) {
-	peers := nd.connPeers()
-	var pstr []string
-	for _, p := range peers {
-		pstr = append(pstr, p.String())
+func (nd *node) Ping(ctx context.Context, who string) {
+	sendErr := func(err error) {
+		nd.send(Notify{PingResult: &PingResult{
+			Err: err.Error(),
+		}})
 	}
-	var addrs []string
-	for _, a := range nd.host.Addrs() {
-		addrs = append(addrs, a.String())
+	// Ping local node if no address is passed
+	if who == "" {
+		peers := nd.connPeers()
+		var pstr []string
+		for _, p := range peers {
+			pstr = append(pstr, p.String())
+		}
+		var addrs []string
+		for _, a := range nd.host.Addrs() {
+			addrs = append(addrs, a.String())
+		}
+		nd.send(Notify{PingResult: &PingResult{
+			ID:    nd.host.ID().String(),
+			Addrs: addrs,
+			Peers: pstr,
+		}})
 	}
-	nd.send(Notify{PingResult: &PingResult{
-		ListenAddrs: addrs,
-		Peers:       pstr,
-	}})
+
+	addr, err := address.NewFromString(who)
+	if err == nil {
+		info, err := nd.exch.StoragePeerInfo(ctx, addr)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		err = nd.ping(ctx, *info)
+		if err != nil {
+			sendErr(err)
+		}
+		return
+	}
+	pid, err := peer.Decode(who)
+	if err == nil {
+		err = nd.ping(ctx, nd.host.Peerstore().PeerInfo(pid))
+		if err != nil {
+			sendErr(err)
+		}
+		return
+	}
+	sendErr(fmt.Errorf("must be a valid id address or peer id"))
+}
+
+func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
+	strs := make([]string, 0, len(pi.Addrs))
+	for _, a := range pi.Addrs {
+		strs = append(strs, a.String())
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	pings := ping.Ping(ctx, nd.host, pi.ID)
+
+	select {
+	case res := <-pings:
+		if res.Error != nil {
+			return res.Error
+		}
+		nd.send(Notify{PingResult: &PingResult{
+			ID:             pi.ID.String(),
+			Addrs:          strs,
+			LatencySeconds: res.RTT.Seconds(),
+		}})
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Add a file to the IPFS unixfs dag
@@ -329,23 +406,56 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
+
 	session, err := nd.exch.Session(ctx, c)
 	if err != nil {
 		return err
 	}
-	err = session.SyncBlocks(ctx)
+	var offer *hop.Offer
+	if args.Miner != "" {
+		miner, err := address.NewFromString(args.Miner)
+		if err != nil {
+			return err
+		}
+		info, err := nd.exch.StoragePeerInfo(ctx, miner)
+		if err != nil {
+			// Maybe fall back to a discovery session?
+			return err
+		}
+
+		offer, err = session.QueryMiner(ctx, info.ID)
+		if err != nil {
+			return err
+		}
+	}
+	if offer == nil {
+		offer, err = session.QueryGossip(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	err = session.SyncBlocks(ctx, offer)
 	if err != nil {
 		return err
 	}
+
+	did, err := session.DealID()
+	if err != nil {
+		return err
+	}
+
+	nd.send(Notify{
+		GetResult: &GetResult{
+			DealID:       did.String(),
+			TotalPrice:   filecoin.FIL(offer.Response.PieceRetrievalPrice()).Short(),
+			PricePerByte: filecoin.FIL(offer.Response.MinPricePerByte).Short(),
+			UnsealPrice:  filecoin.FIL(offer.Response.UnsealPrice).Short(),
+			PieceSize:    filecoin.SizeStr(filecoin.NewInt(offer.Response.Size)),
+		},
+	})
+
 	for {
 		select {
-		case deal := <-session.StartedTransfer():
-			nd.send(Notify{
-				GetResult: &GetResult{
-					DealID: deal.String(),
-				},
-			})
-			continue
 		case err := <-session.Done():
 			if err != nil {
 				return err
@@ -421,4 +531,31 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
+}
+
+// importAddress from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (nd *node) importAddress(pk string) {
+	var iki wallet.KeyInfo
+	data, err := hex.DecodeString(pk)
+	if err != nil {
+		log.Error().Err(err).Msg("hex.DecodeString(opts.PrivKey)")
+	}
+	if err := json.Unmarshal(data, &iki); err != nil {
+		log.Error().Err(err).Msg("json.Unmarshal(PrivKey)")
+	}
+
+	addr, err := nd.exch.Wallet().ImportKey(context.TODO(), &iki)
+	if err != nil {
+		log.Error().Err(err).Msg("Wallet.ImportKey")
+	} else {
+		log.Info().Str("address", addr.String()).Msg("imported private key")
+		err := nd.exch.Wallet().SetDefaultAddress(addr)
+		if err != nil {
+			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
+		}
+		// TODO: this could be nicer
+		nd.exch.SelfAddress = addr
+	}
 }
