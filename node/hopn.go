@@ -205,12 +205,20 @@ func (nd *node) Ping(ctx context.Context, who string) {
 			Peers: pstr,
 		}})
 	}
+	var loc hop.Location
 	addr, err := address.NewFromString(who)
 	if err != nil {
-		sendErr(err)
-		return
+		pid, err := peer.Decode(who)
+		if err != nil {
+			sendErr(err)
+			return
+		} else {
+			loc = hop.LocationFromPeerID(pid)
+		}
+	} else {
+		loc = hop.LocationFromAddress(addr)
 	}
-	info, lat, err := nd.exch.Ping(ctx, addr)
+	info, lat, err := nd.exch.Ping(ctx, loc)
 	if err != nil {
 		sendErr(fmt.Errorf("exch.Ping: %w", err))
 		return
@@ -385,7 +393,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		if err != nil {
 			return err
 		}
-		info, _, err := nd.exch.Ping(ctx, miner)
+		info, _, err := nd.exch.Ping(ctx, hop.LocationFromAddress(miner))
 		if err != nil {
 			// Maybe fall back to a discovery session?
 			return err
