@@ -13,13 +13,11 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-storedcounter"
-	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	pin "github.com/ipfs/go-ipfs-pinner"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -34,8 +32,6 @@ import (
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
-
-var _ exchange.SessionExchange = (*Exchange)(nil)
 
 // RequestTopic listens for peers looking for content blocks
 const RequestTopic = "/myel/hop/request/1.0"
@@ -142,46 +138,6 @@ type Exchange struct {
 	fEndpoint *filecoin.APIEndpoint // optional
 }
 
-// GetBlock gets a single block from a blocks channel
-func (e *Exchange) GetBlock(p context.Context, k cid.Cid) (blocks.Block, error) {
-	ctx, cancel := context.WithCancel(p)
-	defer cancel()
-
-	promise, err := e.GetBlocks(ctx, []cid.Cid{k})
-	if err != nil {
-		return nil, err
-	}
-	select {
-	case block, ok := <-promise:
-		if !ok {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-				return nil, fmt.Errorf("promise channel was closed")
-			}
-		}
-		return block, nil
-	case <-p.Done():
-		return nil, p.Err()
-	}
-}
-
-// GetBlocks creates a new session before getting a stream of blocks
-func (e *Exchange) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
-	session, err := e.Session(ctx, keys[0])
-	if err != nil {
-		return nil, err
-	}
-	return session.GetBlocks(ctx, keys)
-}
-
-// HasBlock to stay consistent with Bitswap anounces a new block to our peers
-// the name is a bit ambiguous, not to be confused with checking if a block is cached locally
-func (e *Exchange) HasBlock(bl blocks.Block) error {
-	return e.Dispatch(bl.Cid())
-}
-
 // Dispatch new content to the network
 func (e *Exchange) Dispatch(c cid.Cid) error {
 	size, err := e.Blockstore.GetSize(c)
@@ -191,19 +147,8 @@ func (e *Exchange) Dispatch(c cid.Cid) error {
 	return e.supply.SendAddRequest(c, uint64(size))
 }
 
-// IsOnline just to respect the exchange interface
-func (e *Exchange) IsOnline() bool {
-	return true
-}
-
-// NewSession creates a Hop session for streaming blocks
-func (e *Exchange) NewSession(ctx context.Context) exchange.Fetcher {
-	session, _ := e.Session(ctx, cid.Undef)
-	return session
-}
-
-// Session returns a new sync session
-func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) {
+// NewSession returns a new retrieval session
+func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, error) {
 	// Track when the session is completed
 	done := make(chan error)
 	// Subscribe to client events to send to the channel
@@ -230,12 +175,6 @@ func (e *Exchange) Session(ctx context.Context, root cid.Cid) (*Session, error) 
 		unsub:      unsubscribe,
 	}
 	return session, nil
-}
-
-// Close the Hop exchange
-// not used, cancelling the context should be enough to close everything
-func (e *Exchange) Close() error {
-	return nil
 }
 
 // requestLoop runs by default in the background when the Hop client is initialized
@@ -289,36 +228,6 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 	}
 }
 
-// NewDataTransfer packages together all the things needed for a new manager to work
-func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
-	// Create a special key for persisting the datatransfer manager state
-	dtDs := namespace.Wrap(ds, datastore.NewKey(dsprefix+"-datatransfer"))
-	// Setup datatransfer network
-	dtNet := dtnet.NewFromLibp2pHost(h)
-	// Setup graphsync transport
-	tp := gstransport.NewTransport(h.ID(), gs)
-	// Make a special key for stored counter
-	key := datastore.NewKey(dsprefix + "-counter")
-	// persist ids for new transfers
-	storedCounter := storedcounter.New(ds, key)
-	// Build the manager
-	dt, err := dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
-	if err != nil {
-		return nil, err
-	}
-	ready := make(chan error, 1)
-	dt.OnReady(func(err error) {
-		ready <- err
-	})
-	dt.Start(ctx)
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case err := <-ready:
-		return dt, err
-	}
-}
-
 // Wallet returns the wallet instance funding the exchange
 func (e *Exchange) Wallet() wallet.Driver {
 	return e.wallet
@@ -360,4 +269,34 @@ func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*
 	}
 	e.net.AddAddrs(pi.ID, pi.Addrs)
 	return &pi, nil
+}
+
+// NewDataTransfer packages together all the things needed for a new manager to work
+func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
+	// Create a special key for persisting the datatransfer manager state
+	dtDs := namespace.Wrap(ds, datastore.NewKey(dsprefix+"-datatransfer"))
+	// Setup datatransfer network
+	dtNet := dtnet.NewFromLibp2pHost(h)
+	// Setup graphsync transport
+	tp := gstransport.NewTransport(h.ID(), gs)
+	// Make a special key for stored counter
+	key := datastore.NewKey(dsprefix + "-counter")
+	// persist ids for new transfers
+	storedCounter := storedcounter.New(ds, key)
+	// Build the manager
+	dt, err := dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
+	if err != nil {
+		return nil, err
+	}
+	ready := make(chan error, 1)
+	dt.OnReady(func(err error) {
+		ready <- err
+	})
+	dt.Start(ctx)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-ready:
+		return dt, err
+	}
 }

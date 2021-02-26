@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-address"
-	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	iprime "github.com/ipld/go-ipld-prime"
@@ -119,44 +118,6 @@ func (s *Session) QueryGossip(ctx context.Context) (*Offer, error) {
 			return nil, ctx.Err()
 		}
 	}
-}
-
-// GetBlock from the local blockstore. Not really used for anything but to comply with
-// exchange session interface
-func (s *Session) GetBlock(ctx context.Context, k cid.Cid) (blocks.Block, error) {
-	return s.blockstore.Get(k)
-}
-
-// GetBlocks from one or multiple providers
-// currently we only support a single root cid but may support multiple requests eventually
-func (s *Session) GetBlocks(ctx context.Context, ks []cid.Cid) (<-chan blocks.Block, error) {
-	out := make(chan blocks.Block)
-
-	go func(k cid.Cid) {
-		select {
-		case err := <-s.Done():
-			if err != nil {
-				return
-			}
-			block, err := s.blockstore.Get(k)
-			if err != nil {
-				fmt.Println("Failed to get synced block from store", err)
-				return
-			}
-			out <- block
-		case <-ctx.Done():
-			return
-		}
-
-	}(ks[0])
-
-	offer, err := s.QueryGossip(ctx)
-	if err != nil {
-		return out, err
-	}
-
-	return out, s.SyncBlocks(ctx, offer)
-
 }
 
 // SyncBlocks will trigger a retrieval without returning the blocks
