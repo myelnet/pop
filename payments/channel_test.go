@@ -22,6 +22,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/go-hop-exchange/filecoin"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
@@ -69,7 +70,7 @@ func TestChannel(t *testing.T) {
 	}
 	api.SetActor(act)
 
-	ks := wallet.NewMemKeystore()
+	ks := keystore.NewMemKeystore()
 
 	w := wallet.NewIPFS(ks, api)
 
@@ -254,7 +255,7 @@ func TestLoadActorState(t *testing.T) {
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 	defer cancel()
 
-	ks := wallet.NewMemKeystore()
+	ks := keystore.NewMemKeystore()
 
 	api := fil.NewMockLotusAPI()
 
