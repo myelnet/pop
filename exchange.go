@@ -7,18 +7,10 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
-	dtnet "github.com/filecoin-project/go-data-transfer/network"
-	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/big"
-	"github.com/filecoin-project/go-storedcounter"
 	cid "github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
-	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	pin "github.com/ipfs/go-ipfs-pinner"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -37,51 +29,48 @@ import (
 const RequestTopic = "/myel/hop/request/1.0"
 
 // NewExchange creates a Hop exchange struct
-func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchange, error) {
+func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	var err error
-	ex := &Exchange{}
-
-	// For ease of customizing all the exchange components
-	for _, option := range options {
-		err := option(ex)
-		if err != nil {
-			return nil, err
-		}
+	ex := &Exchange{
+		h:  set.Host,
+		ps: set.PubSub,
+		bs: set.Blockstore,
 	}
+
 	// Start our lotus api if we have an endpoint.
-	// TODO: add a Type to fEndpoint so we can config what type of implementation we want
-	// to connect to. Should be fine for now.
-	if ex.fEndpoint != nil {
-		ex.fAPI, err = filecoin.NewLotusRPC(ctx, ex.fEndpoint.Address, ex.fEndpoint.Header)
+	if set.FilecoinRPCEndpoint != "" {
+		ex.fAPI, err = filecoin.NewLotusRPC(ctx, set.FilecoinRPCEndpoint, set.FilecoinRPCHeader)
 		if err != nil {
 			return nil, err
 		}
 	}
 	// Set wallet from IPFS Keystore, we should make this more generic eventually
-	ex.wallet = wallet.NewIPFS(ex.Keystore, ex.fAPI)
+	ex.wallet = wallet.NewIPFS(set.Keystore, ex.fAPI)
 	// Make a new default key to be sure we have an address where to receive our payments
-	ex.SelfAddress, err = ex.wallet.NewKey(ctx, wallet.KTSecp256k1)
-	if err != nil {
-		return nil, err
+	if ex.wallet.DefaultAddress() == address.Undef {
+		_, err = ex.wallet.NewKey(ctx, wallet.KTSecp256k1)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Setup the messaging protocol for communicating retrieval deals
-	ex.net = NewFromLibp2pHost(ex.Host)
+	ex.net = NewFromLibp2pHost(ex.h)
 
 	// Retrieval data transfer setup
-	ex.dataTransfer, err = NewDataTransfer(ctx, ex.Host, ex.GraphSync, ex.Datastore, "retrieval", ex.cidListDir)
+	ex.dataTransfer, err = NewDataTransfer(ctx, ex.h, set.GraphSync, set.Datastore, "retrieval", set.RepoPath)
 	if err != nil {
 		return nil, err
 	}
-	ex.multiStore, err = multistore.NewMultiDstore(ex.Datastore)
+	ex.multiStore, err = multistore.NewMultiDstore(set.Datastore)
 	if err != nil {
 		return nil, err
 	}
 	// Add a special adaptor to use the blockstore with cbor encoding
-	cborblocks := cbor.NewCborStore(ex.Blockstore)
+	cborblocks := cbor.NewCborStore(set.Blockstore)
 	// Create our payment manager
-	paym := payments.New(ctx, ex.fAPI, ex.wallet, ex.Datastore, cborblocks)
+	paym := payments.New(ctx, ex.fAPI, ex.wallet, set.Datastore, cborblocks)
 	// Create our retrieval manager
-	ex.Retrieval, err = retrieval.New(ctx, ex.multiStore, ex.Datastore, paym, ex.dataTransfer, ex.Host.ID())
+	ex.retrieval, err = retrieval.New(ctx, ex.multiStore, set.Datastore, paym, ex.dataTransfer, ex.h.ID())
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +78,7 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
 	// Gossip sub subscription for incoming content queries
-	topic, err := ex.PubSub.Join(RequestTopic)
+	topic, err := ex.ps.Join(RequestTopic)
 	if err != nil {
 		return nil, err
 	}
@@ -106,26 +95,19 @@ func NewExchange(ctx context.Context, options ...func(*Exchange) error) (*Exchan
 	// TODO: validate AddRequest
 	ex.dataTransfer.RegisterVoucherType(&supply.AddRequest{}, &UnifiedRequestValidator{})
 
-	ex.supply = supply.New(ctx, ex.Host, ex.dataTransfer)
+	ex.supply = supply.New(ctx, ex.h, ex.dataTransfer)
 
 	return ex, nil
 }
 
 // Exchange is a gossip based exchange for retrieving blocks from Filecoin
 type Exchange struct {
-	// TODO: prob should move these to an Option struct and select what we need
-	Datastore   datastore.Batching
-	Blockstore  blockstore.Blockstore
-	SelfAddress address.Address
-	Host        host.Host
-	PubSub      *pubsub.PubSub
-	GraphSync   graphsync.GraphExchange
-	Pinner      pin.Pinner
-	Keystore    wallet.Keystore
-	Retrieval   retrieval.Manager
-
+	h            host.Host
+	bs           blockstore.Blockstore
 	multiStore   *multistore.MultiStore
+	retrieval    retrieval.Manager
 	supply       supply.Manager
+	ps           *pubsub.PubSub
 	provTopic    *pubsub.Topic
 	reqSub       *pubsub.Subscription
 	reqTopic     *pubsub.Topic
@@ -133,14 +115,12 @@ type Exchange struct {
 	dataTransfer datatransfer.Manager
 	wallet       wallet.Driver
 	cidListDir   string
-	// filecoin api
-	fAPI      filecoin.API
-	fEndpoint *filecoin.APIEndpoint // optional
+	fAPI         filecoin.API
 }
 
-// Dispatch new content to the network
+// Dispatch new content to cache providers
 func (e *Exchange) Dispatch(c cid.Cid) error {
-	size, err := e.Blockstore.GetSize(c)
+	size, err := e.bs.GetSize(c)
 	if err != nil {
 		return err
 	}
@@ -152,7 +132,7 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 	// Track when the session is completed
 	done := make(chan error)
 	// Subscribe to client events to send to the channel
-	cl := e.Retrieval.Client()
+	cl := e.retrieval.Client()
 	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
 		case deal.StatusCompleted:
@@ -164,12 +144,12 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 		}
 	})
 	session := &Session{
-		blockstore: e.Blockstore,
+		blockstore: e.bs,
 		reqTopic:   e.reqTopic,
 		net:        e.net,
 		root:       root,
 		retriever:  cl,
-		clientAddr: e.SelfAddress,
+		clientAddr: e.wallet.DefaultAddress(),
 		ctx:        ctx,
 		done:       done,
 		unsub:      unsubscribe,
@@ -185,7 +165,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		if msg.ReceivedFrom == e.Host.ID() {
+		if msg.ReceivedFrom == e.h.ID() {
 			continue
 		}
 		m := new(Query)
@@ -193,7 +173,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 			continue
 		}
 		// GetSize is both a way of checking if we have the block and returning its size
-		size, err := e.Blockstore.GetSize(m.PayloadCID)
+		size, err := e.bs.GetSize(m.PayloadCID)
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && size > 0 {
@@ -217,7 +197,7 @@ func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryRe
 	answer := QueryResponse{
 		Status:                     status,
 		Size:                       size,
-		PaymentAddress:             e.SelfAddress,
+		PaymentAddress:             e.wallet.DefaultAddress(),
 		MinPricePerByte:            ask.PricePerByte,
 		MaxPaymentInterval:         ask.PaymentInterval,
 		MaxPaymentIntervalIncrease: ask.PaymentIntervalIncrease,
@@ -269,34 +249,4 @@ func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*
 	}
 	e.net.AddAddrs(pi.ID, pi.Addrs)
 	return &pi, nil
-}
-
-// NewDataTransfer packages together all the things needed for a new manager to work
-func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
-	// Create a special key for persisting the datatransfer manager state
-	dtDs := namespace.Wrap(ds, datastore.NewKey(dsprefix+"-datatransfer"))
-	// Setup datatransfer network
-	dtNet := dtnet.NewFromLibp2pHost(h)
-	// Setup graphsync transport
-	tp := gstransport.NewTransport(h.ID(), gs)
-	// Make a special key for stored counter
-	key := datastore.NewKey(dsprefix + "-counter")
-	// persist ids for new transfers
-	storedCounter := storedcounter.New(ds, key)
-	// Build the manager
-	dt, err := dtfimpl.NewDataTransfer(dtDs, dir, dtNet, tp, storedCounter)
-	if err != nil {
-		return nil, err
-	}
-	ready := make(chan error, 1)
-	dt.OnReady(func(err error) {
-		ready <- err
-	})
-	dt.Start(ctx)
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case err := <-ready:
-		return dt, err
-	}
 }

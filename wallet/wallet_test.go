@@ -78,21 +78,21 @@ func TestDefaultAddress(t *testing.T) {
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	require.NoError(t, err)
 
-	def, err := w.DefaultAddress()
+	def := w.DefaultAddress()
 	require.NoError(t, err)
 	require.Equal(t, addr1, def)
 
 	addr2, err := w.NewKey(ctx, KTSecp256k1)
 	require.NoError(t, err)
 
-	def, err = w.DefaultAddress()
+	def = w.DefaultAddress()
 	require.NoError(t, err)
 	require.Equal(t, addr1, def)
 
 	err = w.SetDefaultAddress(addr2)
 	require.NoError(t, err)
 
-	def, err = w.DefaultAddress()
+	def = w.DefaultAddress()
 	require.NoError(t, err)
 	require.Equal(t, addr2, def)
 

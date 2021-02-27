@@ -40,16 +40,17 @@ func TestExchangeDirect(t *testing.T) {
 				ps, err := pubsub.NewGossipSub(ctx, n.Host)
 				require.NoError(t, err)
 
-				exch, err := NewExchange(
-					bgCtx,
-					WithBlockstore(n.Bs),
-					WithPubSub(ps),
-					WithHost(n.Host),
-					WithDatastore(n.Ds),
-					WithGraphSync(n.Gs),
-					WithRepoPath(n.DTTmpDir),
-					WithKeystore(wallet.NewMemKeystore()),
-				)
+				settings := Settings{
+					Datastore:  n.Ds,
+					Blockstore: n.Bs,
+					Host:       n.Host,
+					PubSub:     ps,
+					GraphSync:  n.Gs,
+					RepoPath:   n.DTTmpDir,
+					Keystore:   wallet.NewMemKeystore(),
+				}
+
+				exch, err := NewExchange(bgCtx, settings)
 				require.NoError(t, err)
 
 				if i == 0 {

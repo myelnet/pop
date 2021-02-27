@@ -145,19 +145,22 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		storeutil.StorerForBlockstore(nd.bs),
 	)
 
-	nd.exch, err = hop.NewExchange(ctx,
-		hop.WithBlockstore(nd.bs),
-		hop.WithPubSub(nd.ps),
-		hop.WithHost(nd.host),
-		hop.WithDatastore(nd.ds),
-		hop.WithGraphSync(nd.gs),
-		hop.WithRepoPath(opts.RepoPath),
+	settings := hop.Settings{
+		Datastore:  nd.ds,
+		Blockstore: nd.bs,
+		Host:       nd.host,
+		PubSub:     nd.ps,
+		GraphSync:  nd.gs,
+		RepoPath:   opts.RepoPath,
 		// TODO: secure keystore
-		hop.WithKeystore(wallet.NewMemKeystore()),
-		hop.WithFilecoinAPI(opts.FilEndpoint, http.Header{
+		Keystore:            wallet.NewMemKeystore(),
+		FilecoinRPCEndpoint: opts.FilEndpoint,
+		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{fmt.Sprintf("Basic %s", opts.FilToken)},
-		}),
-	)
+		},
+	}
+
+	nd.exch, err = hop.NewExchange(ctx, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +410,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
 
-	session, err := nd.exch.Session(ctx, c)
+	session, err := nd.exch.NewSession(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -555,7 +558,5 @@ func (nd *node) importAddress(pk string) {
 		if err != nil {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
-		// TODO: this could be nicer
-		nd.exch.SelfAddress = addr
 	}
 }
