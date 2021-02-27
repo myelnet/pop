@@ -12,6 +12,7 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/crypto"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
@@ -165,7 +166,7 @@ type Signer interface {
 //Driver is a lightweight interface to control any available keychain and interact with blockchains
 type Driver interface {
 	NewKey(context.Context, KeyType) (address.Address, error)
-	DefaultAddress() (address.Address, error)
+	DefaultAddress() address.Address
 	SetDefaultAddress(address.Address) error
 	List() ([]address.Address, error)
 	ImportKey(context.Context, *KeyInfo) (address.Address, error)
@@ -177,21 +178,32 @@ type Driver interface {
 
 // IPFS wallet wraps an IPFS keystore
 type IPFS struct {
-	keystore Keystore
-	keys     map[address.Address]*Key // cache so we don't read from the Keystore too much
+	keystore keystore.Keystore
 	// API to interact with Filecoin chain
 	fAPI fil.API
 
-	lk sync.Mutex
+	lk          sync.Mutex
+	keys        map[address.Address]*Key // cache so we don't read from the Keystore too much
+	defaultAddr address.Address
 }
 
 // NewIPFS creates a new IPFS keystore based wallet implementing the Driver methods
-func NewIPFS(ks Keystore, f fil.API) Driver {
-	return &IPFS{
-		keystore: ks,
-		keys:     make(map[address.Address]*Key),
-		fAPI:     f,
+func NewIPFS(ks keystore.Keystore, f fil.API) Driver {
+	w := &IPFS{
+		keystore:    ks,
+		keys:        make(map[address.Address]*Key),
+		fAPI:        f,
+		defaultAddr: address.Undef,
 	}
+
+	// cache the default address if we have any
+	defAddr, err := w.getDefaultAddress()
+	if err != nil {
+		return w
+	}
+
+	w.defaultAddr = defAddr
+	return w
 }
 
 // NewKey generates a brand new key for the given type in our wallet and returns the address
@@ -223,23 +235,17 @@ func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) 
 	}
 	i.keys[k.Address] = k
 
-	_, err = i.keystore.Get(KDefault)
-	if err != nil {
-		if err.Error() != ErrNoSuchKey.Error() {
-			return address.Undef, err
-		}
+	if i.defaultAddr == address.Undef {
 		if err := i.keystore.Put(KDefault, k); err != nil {
 			return address.Undef, fmt.Errorf("failed to set new key as default: %v", err)
 		}
+		i.defaultAddr = k.Address
 	}
 	return k.Address, nil
 }
 
-// DefaultAddress of the wallet used for receiving payments as provider and paying when retrieving
-func (i *IPFS) DefaultAddress() (address.Address, error) {
-	i.lk.Lock()
-	defer i.lk.Unlock()
-
+// read default address from keystore
+func (i *IPFS) getDefaultAddress() (address.Address, error) {
 	k, err := i.keystore.Get(KDefault)
 	if err != nil {
 		return address.Undef, err
@@ -249,8 +255,15 @@ func (i *IPFS) DefaultAddress() (address.Address, error) {
 	if err != nil {
 		return address.Undef, err
 	}
-
 	return key.Address, nil
+}
+
+// DefaultAddress of the wallet used for receiving payments as provider and paying when retrieving
+func (i *IPFS) DefaultAddress() address.Address {
+	i.lk.Lock()
+	defer i.lk.Unlock()
+
+	return i.defaultAddr
 }
 
 // SetDefaultAddress for receiving and sending payments as provider or client
@@ -268,6 +281,7 @@ func (i *IPFS) SetDefaultAddress(addr address.Address) error {
 	if err := i.keystore.Put(KDefault, k); err != nil {
 		return err
 	}
+	i.defaultAddr = addr
 
 	return nil
 }
@@ -489,19 +503,4 @@ func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Ad
 	}
 
 	return nil
-}
-
-// Keystore interface from IPFS to avoid importing go-ipfs
-type Keystore interface {
-	// Has returns whether or not a key exists in the Keystore
-	Has(string) (bool, error)
-	// Put stores a key in the Keystore, if a key with the same name already exists, returns ErrKeyExists
-	Put(string, ci.PrivKey) error
-	// Get retrieves a key from the Keystore if it exists, and returns ErrNoSuchKey
-	// otherwise.
-	Get(string) (ci.PrivKey, error)
-	// Delete removes a key from the Keystore
-	Delete(string) error
-	// List returns a list of key identifier
-	List() ([]string, error)
 }

@@ -2,11 +2,14 @@ package node
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -24,6 +27,7 @@ import (
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	unixfile "github.com/ipfs/go-unixfs/file"
@@ -33,6 +37,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
+	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -53,6 +58,7 @@ import (
 const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsChunkSize uint64 = 1 << 10
 const unixfsLinksPerLevel = 1024
+const KLibp2pHost = "libp2p-host"
 
 // IPFSNode is the IPFS API
 type IPFSNode interface {
@@ -108,6 +114,16 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
 
+	ks, err := keystore.NewFSKeystore(filepath.Join(opts.RepoPath, "keystore"))
+	if err != nil {
+		return nil, err
+	}
+
+	priv, err := Libp2pKey(ks)
+	if err != nil {
+		return nil, err
+	}
+
 	gater, err := conngater.NewBasicConnectionGater(nd.ds)
 	if err != nil {
 		return nil, err
@@ -115,6 +131,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.host, err = libp2p.New(
 		ctx,
+		libp2p.Identity(priv),
 		libp2p.ConnectionManager(connmgr.NewConnManager(
 			20,             // Lowwater
 			60,             // HighWater,
@@ -145,19 +162,22 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		storeutil.StorerForBlockstore(nd.bs),
 	)
 
-	nd.exch, err = hop.NewExchange(ctx,
-		hop.WithBlockstore(nd.bs),
-		hop.WithPubSub(nd.ps),
-		hop.WithHost(nd.host),
-		hop.WithDatastore(nd.ds),
-		hop.WithGraphSync(nd.gs),
-		hop.WithRepoPath(opts.RepoPath),
+	settings := hop.Settings{
+		Datastore:  nd.ds,
+		Blockstore: nd.bs,
+		Host:       nd.host,
+		PubSub:     nd.ps,
+		GraphSync:  nd.gs,
+		RepoPath:   opts.RepoPath,
 		// TODO: secure keystore
-		hop.WithKeystore(wallet.NewMemKeystore()),
-		hop.WithFilecoinAPI(opts.FilEndpoint, http.Header{
+		Keystore:            ks,
+		FilecoinRPCEndpoint: opts.FilEndpoint,
+		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{fmt.Sprintf("Basic %s", opts.FilToken)},
-		}),
-	)
+		},
+	}
+
+	nd.exch, err = hop.NewExchange(ctx, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +427,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
 
-	session, err := nd.exch.Session(ctx, c)
+	session, err := nd.exch.NewSession(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -555,7 +575,24 @@ func (nd *node) importAddress(pk string) {
 		if err != nil {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
-		// TODO: this could be nicer
-		nd.exch.SelfAddress = addr
 	}
+}
+
+// Libp2pKey gets a libp2p host private key from the keystore if available or generates a new one
+func Libp2pKey(ks keystore.Keystore) (ci.PrivKey, error) {
+	k, err := ks.Get(KLibp2pHost)
+	if err == nil {
+		return k, nil
+	}
+	if !errors.Is(err, keystore.ErrNoSuchKey) {
+		return nil, err
+	}
+	pk, _, err := ci.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := ks.Put(KLibp2pHost, pk); err != nil {
+		return nil, err
+	}
+	return pk, nil
 }
