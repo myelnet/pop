@@ -16,9 +16,9 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/myelnet/go-hop-exchange/wallet"
 )
 
 // TODO: We should be able to customize these in the options
@@ -42,7 +42,7 @@ type Settings struct {
 	Host                host.Host
 	PubSub              *pubsub.PubSub
 	GraphSync           graphsync.GraphExchange
-	Keystore            wallet.Keystore
+	Keystore            keystore.Keystore
 	RepoPath            string
 	FilecoinRPCEndpoint string
 	FilecoinRPCHeader   http.Header

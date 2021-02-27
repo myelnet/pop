@@ -12,6 +12,7 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/crypto"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
@@ -177,7 +178,7 @@ type Driver interface {
 
 // IPFS wallet wraps an IPFS keystore
 type IPFS struct {
-	keystore Keystore
+	keystore keystore.Keystore
 	// API to interact with Filecoin chain
 	fAPI fil.API
 
@@ -187,7 +188,7 @@ type IPFS struct {
 }
 
 // NewIPFS creates a new IPFS keystore based wallet implementing the Driver methods
-func NewIPFS(ks Keystore, f fil.API) Driver {
+func NewIPFS(ks keystore.Keystore, f fil.API) Driver {
 	w := &IPFS{
 		keystore:    ks,
 		keys:        make(map[address.Address]*Key),
@@ -502,19 +503,4 @@ func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Ad
 	}
 
 	return nil
-}
-
-// Keystore interface from IPFS to avoid importing go-ipfs
-type Keystore interface {
-	// Has returns whether or not a key exists in the Keystore
-	Has(string) (bool, error)
-	// Put stores a key in the Keystore, if a key with the same name already exists, returns ErrKeyExists
-	Put(string, ci.PrivKey) error
-	// Get retrieves a key from the Keystore if it exists, and returns ErrNoSuchKey
-	// otherwise.
-	Get(string) (ci.PrivKey, error)
-	// Delete removes a key from the Keystore
-	Delete(string) error
-	// List returns a list of key identifier
-	List() ([]string, error)
 }

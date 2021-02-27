@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/go-hop-exchange/supply"
 	"github.com/myelnet/go-hop-exchange/testutil"
-	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,7 +47,7 @@ func TestExchangeDirect(t *testing.T) {
 					PubSub:     ps,
 					GraphSync:  n.Gs,
 					RepoPath:   n.DTTmpDir,
-					Keystore:   wallet.NewMemKeystore(),
+					Keystore:   keystore.NewMemKeystore(),
 				}
 
 				exch, err := NewExchange(bgCtx, settings)
