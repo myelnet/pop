@@ -172,7 +172,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Keystore:            ks,
 		FilecoinRPCEndpoint: opts.FilEndpoint,
 		FilecoinRPCHeader: http.Header{
-			"Authorization": []string{fmt.Sprintf("Bearer %s", opts.FilToken)},
+			"Authorization": []string{opts.FilToken},
 		},
 	}
 

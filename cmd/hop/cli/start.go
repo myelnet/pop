@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -15,11 +17,12 @@ import (
 )
 
 var startArgs struct {
-	temp        bool
-	peer        string
-	filEndpoint string
-	filToken    string
-	privKeyPath string
+	temp         bool
+	peer         string
+	filEndpoint  string
+	filToken     string
+	filTokenType string
+	privKeyPath  string
 }
 
 var startCmd = &ffcli.Command{
@@ -44,6 +47,7 @@ The 'hop start' command starts an IPFS daemon service.
 		fs.StringVar(&startArgs.filEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
+		fs.StringVar(&startArgs.filTokenType, "fil-token-type", "Bearer", "auth token type")
 
 		return fs
 	})(),
@@ -77,8 +81,13 @@ func runStart(ctx context.Context, args []string) error {
 
 	var filToken string
 	if startArgs.filToken != "" {
-		// filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.filToken))
-		filToken = startArgs.filToken
+		// Basic auth requires base64 encoding and Infura api provides unencoded strings
+		if startArgs.filTokenType == "Basic" {
+			filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.filToken))
+		} else {
+			filToken = startArgs.filToken
+		}
+		filToken = fmt.Sprintf("%s %s", startArgs.filTokenType, filToken)
 	}
 
 	var privKey string
