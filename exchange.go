@@ -172,17 +172,18 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
-		// GetSize is both a way of checking if we have the block and returning its size
-		size, err := e.bs.GetSize(m.PayloadCID)
+		// DAGStat is both a way of checking if we have the blocks and returning its size
+		// TODO: support selector in Query
+		stats, err := DAGStat(ctx, e.bs, m.PayloadCID, AllSelector())
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
-		if err == nil && size > 0 {
+		if err == nil && stats.Size > 0 {
 			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
 			if err != nil {
 				fmt.Println("Error", err)
 				continue
 			}
-			e.sendQueryResponse(qs, QueryResponseAvailable, uint64(size))
+			e.sendQueryResponse(qs, QueryResponseAvailable, uint64(stats.Size))
 		}
 	}
 }

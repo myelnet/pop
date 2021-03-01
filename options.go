@@ -1,7 +1,10 @@
 package hop
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,11 +15,18 @@ import (
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-storedcounter"
+	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-graphsync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	keystore "github.com/ipfs/go-ipfs-keystore"
+	"github.com/ipld/go-ipld-prime"
+	dagpb "github.com/ipld/go-ipld-prime-proto"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/ipld/go-ipld-prime/traversal"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -90,4 +100,59 @@ func mkCidListDir(rpath string) (string, error) {
 		return "", err
 	}
 	return p, nil
+}
+
+// DAGStatResult compiles stats about a DAG
+type DAGStatResult struct {
+	Size      int
+	NumBlocks int
+}
+
+// DAGStat returns stats about a selected part of a DAG given a cid and blockstore
+func DAGStat(ctx context.Context, bs blockstore.Blockstore, root cid.Cid, sel ipld.Node) (*DAGStatResult, error) {
+	res := &DAGStatResult{}
+	link := cidlink.Link{Cid: root}
+	nodeBuilder := dagpb.Type.PBNode.NewBuilder()
+	// We make a custom loader to intercept when each block is read during the traversal
+	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
+		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
+			c, ok := lnk.(cidlink.Link)
+			if !ok {
+				return nil, fmt.Errorf("incorrect Link Type")
+			}
+			block, err := bs.Get(c.Cid)
+			if err != nil {
+				return nil, err
+			}
+			reader := bytes.NewReader(block.RawData())
+			res.Size += reader.Len()
+			res.NumBlocks++
+			return reader, nil
+		}
+	}
+	// Load the root node
+	err := link.Load(ctx, ipld.LinkContext{}, nodeBuilder, makeLoader(bs))
+	if err != nil {
+		return res, fmt.Errorf("unable to load link: %v", err)
+	}
+	nd := nodeBuilder.Build()
+
+	s, err := selector.ParseSelector(sel)
+	if err != nil {
+		return res, err
+	}
+	var defaultChooser traversal.LinkTargetNodePrototypeChooser = dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
+		return basicnode.Prototype.Any, nil
+	})
+	// Traverse any links from the root node
+	err = traversal.Progress{
+		Cfg: &traversal.Config{
+			LinkLoader:                     makeLoader(bs),
+			LinkTargetNodePrototypeChooser: defaultChooser,
+		},
+	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
+		return nil
+	})
+
+	return res, nil
 }
