@@ -56,7 +56,6 @@ import (
 )
 
 const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
-const unixfsChunkSize uint64 = 1 << 10
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
@@ -173,7 +172,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Keystore:            ks,
 		FilecoinRPCEndpoint: opts.FilEndpoint,
 		FilecoinRPCHeader: http.Header{
-			"Authorization": []string{fmt.Sprintf("Basic %s", opts.FilToken)},
+			"Authorization": []string{opts.FilToken},
 		},
 	}
 
@@ -289,15 +288,21 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		})
 	}
 
-	link, err := nd.loadFilesToBlockstore(ctx, args.Path)
+	link, err := nd.loadFilesToBlockstore(ctx, args)
 	root := link.(cidlink.Link).Cid
 	if err != nil {
 		sendErr(err)
 		return
 	}
+	stats, err := hop.DAGStat(ctx, nd.bs, root, hop.AllSelector())
+	if err != nil {
+		log.Error().Err(err).Msg("DAGStat")
+	}
 	nd.send(Notify{
 		AddResult: &AddResult{
-			Cid: root.String(),
+			Cid:       root.String(),
+			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
+			NumBlocks: stats.NumBlocks,
 		}})
 
 	if args.Dispatch {
@@ -334,28 +339,28 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 	}
 }
 
-func (nd *node) loadFilesToBlockstore(ctx context.Context, path string) (ipld.Link, error) {
+func (nd *node) loadFilesToBlockstore(ctx context.Context, args *AddArgs) (ipld.Link, error) {
 
-	st, err := os.Stat(path)
+	st, err := os.Stat(args.Path)
 	if err != nil {
 		return nil, fmt.Errorf("unable to open file: %w", err)
 	}
-	file, err := files.NewSerialFile(path, false, st)
+	file, err := files.NewSerialFile(args.Path, false, st)
 	if err != nil {
 		return nil, fmt.Errorf("NewSerialFile: %w", err)
 	}
 
 	switch f := file.(type) {
 	case files.Directory:
-		return nd.addDir(ctx, path, f)
+		return nd.addDir(ctx, args.Path, f)
 	case files.File:
-		return nd.addFile(ctx, path, f)
+		return nd.addFile(ctx, f, args)
 	default:
 		return nil, fmt.Errorf("unknown file type")
 	}
 }
 
-func (nd *node) addFile(ctx context.Context, path string, file files.File) (ipld.Link, error) {
+func (nd *node) addFile(ctx context.Context, file files.File, args *AddArgs) (ipld.Link, error) {
 
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
 
@@ -372,7 +377,7 @@ func (nd *node) addFile(ctx context.Context, path string, file files.File) (ipld
 		Dagserv:    bufferedDS,
 	}
 
-	db, err := params.New(chunk.NewSizeSplitter(file, int64(unixfsChunkSize)))
+	db, err := params.New(chunk.NewSizeSplitter(file, int64(args.ChunkSize)))
 	if err != nil {
 		return nil, fmt.Errorf("unable to init chunker: %w", err)
 	}
@@ -427,11 +432,14 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
 
+	start := time.Now()
+
 	session, err := nd.exch.NewSession(ctx, c)
 	if err != nil {
 		return err
 	}
 	var offer *hop.Offer
+	var discDelay time.Duration
 	if args.Miner != "" {
 		miner, err := address.NewFromString(args.Miner)
 		if err != nil {
@@ -447,13 +455,18 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		if err != nil {
 			return err
 		}
+		now := time.Now()
+		discDelay = now.Sub(start)
 	}
 	if offer == nil {
 		offer, err = session.QueryGossip(ctx)
 		if err != nil {
 			return err
 		}
+		now := time.Now()
+		discDelay = now.Sub(start)
 	}
+
 	err = session.SyncBlocks(ctx, offer)
 	if err != nil {
 		return err
@@ -480,6 +493,8 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			if err != nil {
 				return err
 			}
+			end := time.Now()
+			transDelay := end.Sub(start)
 			if args.Out != "" {
 				n, err := nd.dag.Get(ctx, c)
 				if err != nil {
@@ -495,7 +510,10 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 				}
 			}
 			nd.send(Notify{
-				GetResult: &GetResult{},
+				GetResult: &GetResult{
+					DiscLatSeconds:  discDelay.Seconds(),
+					TransLatSeconds: transDelay.Seconds(),
+				},
 			})
 			return nil
 		case <-ctx.Done():
