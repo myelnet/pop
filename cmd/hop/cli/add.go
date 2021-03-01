@@ -9,10 +9,12 @@ import (
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/rs/zerolog/log"
 )
 
 var addArgs struct {
-	dispatch bool
+	dispatch  bool
+	chunkSize int
 }
 
 var addCmd = &ffcli.Command{
@@ -29,6 +31,7 @@ stores the blocks in the block store.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("add", flag.ExitOnError)
 		fs.BoolVar(&addArgs.dispatch, "dispatch", false, "dispatch the blocks to edge nodes")
+		fs.IntVar(&addArgs.chunkSize, "chunk-size", 1024, "chunk size in bytes")
 		return fs
 	})(),
 }
@@ -46,8 +49,9 @@ func runAdd(ctx context.Context, args []string) error {
 	go receive(ctx, cc, c)
 
 	cc.Add(&node.AddArgs{
-		Path:     args[0],
-		Dispatch: addArgs.dispatch,
+		Path:      args[0],
+		Dispatch:  addArgs.dispatch,
+		ChunkSize: addArgs.chunkSize,
 	})
 	for {
 		select {
@@ -56,7 +60,11 @@ func runAdd(ctx context.Context, args []string) error {
 				return errors.New(ar.Err)
 			}
 			if ar.Cid != "" {
-				fmt.Printf("%v\n", ar.Cid)
+				log.Info().
+					Str("Cid", ar.Cid).
+					Str("Size", ar.Size).
+					Int("NumBlocks", ar.NumBlocks).
+					Msg("added")
 				if addArgs.dispatch {
 					// Let's wait for any feedback from the dispatch
 					continue

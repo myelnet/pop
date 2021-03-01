@@ -37,11 +37,7 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-ipld-prime"
-	dagpb "github.com/ipld/go-ipld-prime-proto"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/ipld/go-ipld-prime/traversal"
-	selectors "github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-peer"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
@@ -243,53 +239,6 @@ func (tn *TestNode) NukeBlockstore(ctx context.Context, t *testing.T) {
 		err := tn.Bs.DeleteBlock(<-cids)
 		require.NoError(t, err)
 	}
-}
-
-func (tn *TestNode) GetGraphSize(ctx context.Context, root cid.Cid, sel ipld.Node) (int, error) {
-	link := cidlink.Link{Cid: root}
-	nodeBuilder := dagpb.Type.PBNode.NewBuilder()
-
-	err := link.Load(ctx, ipld.LinkContext{}, nodeBuilder, tn.Loader)
-	if err != nil {
-		return 0, fmt.Errorf("unable to load link: %v", err)
-	}
-	nd := nodeBuilder.Build()
-
-	s, err := selectors.ParseSelector(sel)
-	if err != nil {
-		return 0, err
-	}
-
-	var size int
-	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
-		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
-			c, ok := lnk.(cidlink.Link)
-			if !ok {
-				return nil, fmt.Errorf("incorrect Link Type")
-			}
-			block, err := bs.Get(c.Cid)
-			if err != nil {
-				return nil, err
-			}
-			size += len(block.RawData())
-			return bytes.NewReader(block.RawData()), nil
-		}
-	}
-
-	var defaultChooser traversal.LinkTargetNodePrototypeChooser = dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
-		return basicnode.Prototype.Any, nil
-	})
-
-	err = traversal.Progress{
-		Cfg: &traversal.Config{
-			LinkLoader:                     makeLoader(tn.Bs),
-			LinkTargetNodePrototypeChooser: defaultChooser,
-		},
-	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
-		return nil
-	})
-
-	return size, nil
 }
 
 func ThisDir(t *testing.T) string {

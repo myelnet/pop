@@ -83,8 +83,12 @@ func runGet(ctx context.Context, args []string) error {
 			}
 			now := time.Now()
 			delay := now.Sub(at)
-			// TODO: print latency and other metadata
-			fmt.Printf("get operation completed in %v\n", delay.Seconds())
+
+			log.Info().
+				Float64("DiscoveryLatency", gr.DiscLatSeconds).
+				Float64("TransferLatency", gr.TransLatSeconds).
+				Float64("TotalLatency", delay.Seconds()).
+				Msg("Completed")
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("Get operation timed out")

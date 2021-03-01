@@ -20,8 +20,9 @@ type PingArgs struct {
 
 // AddArgs get passed to the Add command
 type AddArgs struct {
-	Path     string
-	Dispatch bool
+	Path      string
+	Dispatch  bool
+	ChunkSize int
 }
 
 // GetArgs get passed to the Get command
@@ -52,20 +53,24 @@ type PingResult struct {
 
 // AddResult gives us feedback on the result of the Add request
 type AddResult struct {
-	Cid   string
-	Cache string
-	Err   string
+	Cid       string
+	Cache     string
+	Size      string
+	NumBlocks int
+	Err       string
 }
 
 // GetResult gives us feedback on the result of the Get request
 type GetResult struct {
-	DealID       string
-	TotalSpent   string
-	TotalPrice   string
-	PieceSize    string
-	PricePerByte string
-	UnsealPrice  string
-	Err          string
+	DealID          string
+	TotalSpent      string
+	TotalPrice      string
+	PieceSize       string
+	PricePerByte    string
+	UnsealPrice     string
+	DiscLatSeconds  float64
+	TransLatSeconds float64
+	Err             string
 }
 
 // Notify is a message sent from the daemon to the client
