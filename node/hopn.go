@@ -243,6 +243,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 			Addrs: addrs,
 			Peers: pstr,
 		}})
+		return
 	}
 
 	addr, err := address.NewFromString(who)
