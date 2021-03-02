@@ -243,7 +243,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("node.New: %v", err)
 	}
 
-	log.Info().Interface("addrs", nd.host.Addrs()).Msg("Node started libp2p")
+	log.Info().Strs("regions", opts.Regions).Msg("node is running")
 
 	server := &server{
 		node: nd,

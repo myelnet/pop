@@ -32,8 +32,9 @@ type Supply struct {
 	ctx context.Context
 	// New content subscriber to know when we've sent the content to new providers
 	subscribers *pubsub.PubSub
+	regions     []Region
 
-	mu sync.Mutex // Protects the following fields
+	mu sync.Mutex
 	// Keep track of which of our peers may have a block
 	// Not use for anything else than debugging currently but may be useful eventualy
 	providerPeers map[cid.Cid]*peer.Set
@@ -44,10 +45,11 @@ func New(
 	ctx context.Context,
 	h host.Host,
 	dt datatransfer.Manager,
+	regions []Region,
 ) *Supply {
 	manifest := NewManifest(h, dt)
 	// Connect to incoming supply messages form peers
-	net := NewNetwork(h)
+	net := NewNetwork(h, regions)
 	// Set the manifest to handle our messages
 	net.SetDelegate(manifest)
 	// We wrap it all in our Supply object
@@ -57,6 +59,7 @@ func New(
 		net:           net,
 		man:           manifest,
 		ctx:           ctx,
+		regions:       regions,
 		providerPeers: make(map[cid.Cid]*peer.Set),
 		subscribers:   pubsub.New(EventDispatcher),
 	}
@@ -127,9 +130,13 @@ func (s *Supply) selectProviders() ([]peer.ID, error) {
 		// Make sure we don't add ourselves
 		if pid != s.h.ID() {
 			// Make sure our peer supports the retrieval dispatch protocol
+			var protos []string
+			for _, p := range protoRegions(AddRequestProtocol, s.regions) {
+				protos = append(protos, string(p))
+			}
 			supported, err := s.h.Peerstore().SupportsProtocols(
 				pid,
-				string(AddRequestProtocolID),
+				protos...,
 			)
 			if err != nil || len(supported) == 0 {
 				continue

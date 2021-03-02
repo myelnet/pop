@@ -21,16 +21,16 @@ import (
 
 // Session to exchange multiple blocks with a set of connected peers
 type Session struct {
-	blockstore blockstore.Blockstore
-	reqTopic   *pubsub.Topic
-	net        RetrievalMarketNetwork
-	retriever  *retrieval.Client
-	clientAddr address.Address
-	root       cid.Cid
-	sel        iprime.Node
-	ctx        context.Context
-	done       chan error
-	unsub      retrieval.Unsubscribe
+	blockstore   blockstore.Blockstore
+	regionTopics map[string]*pubsub.Topic
+	net          RetrievalMarketNetwork
+	retriever    *retrieval.Client
+	clientAddr   address.Address
+	root         cid.Cid
+	sel          iprime.Node
+	ctx          context.Context
+	done         chan error
+	unsub        retrieval.Unsubscribe
 
 	mu        sync.Mutex
 	responses map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
@@ -104,8 +104,11 @@ func (s *Session) QueryGossip(ctx context.Context) (*Offer, error) {
 		return nil, err
 	}
 
-	if err := s.reqTopic.Publish(ctx, buf.Bytes()); err != nil {
-		return nil, err
+	// publish to all regions this exchange joined
+	for _, topic := range s.regionTopics {
+		if err := topic.Publish(ctx, buf.Bytes()); err != nil {
+			return nil, err
+		}
 	}
 
 	// TODO: add custom logic to select the right offer

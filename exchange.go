@@ -32,9 +32,11 @@ const RequestTopic = "/myel/hop/request/1.0"
 func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	var err error
 	ex := &Exchange{
-		h:  set.Host,
-		ps: set.PubSub,
-		bs: set.Blockstore,
+		h:            set.Host,
+		ps:           set.PubSub,
+		bs:           set.Blockstore,
+		regionSubs:   make(map[string]*pubsub.Subscription),
+		regionTopics: make(map[string]*pubsub.Topic),
 	}
 
 	// Start our lotus api if we have an endpoint.
@@ -77,27 +79,12 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	// TODO: this is an empty validator for now
 	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
 
-	// Gossip sub subscription for incoming content queries
-	topic, err := ex.ps.Join(RequestTopic)
-	if err != nil {
-		return nil, err
-	}
-	ex.reqTopic = topic
-
-	sub, err := topic.Subscribe()
-	if err != nil {
-		return nil, err
-	}
-	ex.reqSub = sub
-
-	go ex.requestLoop(ctx)
-
 	// TODO: validate AddRequest
 	ex.dataTransfer.RegisterVoucherType(&supply.AddRequest{}, &UnifiedRequestValidator{})
 
-	ex.supply = supply.New(ctx, ex.h, ex.dataTransfer)
+	ex.supply = supply.New(ctx, ex.h, ex.dataTransfer, set.Regions)
 
-	return ex, nil
+	return ex, ex.joinRegions(ctx, set.Regions)
 }
 
 // Exchange is a gossip based exchange for retrieving blocks from Filecoin
@@ -109,13 +96,36 @@ type Exchange struct {
 	supply       supply.Manager
 	ps           *pubsub.PubSub
 	provTopic    *pubsub.Topic
-	reqSub       *pubsub.Subscription
-	reqTopic     *pubsub.Topic
+	regionSubs   map[string]*pubsub.Subscription
+	regionTopics map[string]*pubsub.Topic
 	net          RetrievalMarketNetwork
 	dataTransfer datatransfer.Manager
 	wallet       wallet.Driver
 	cidListDir   string
 	fAPI         filecoin.API
+}
+
+// joinRegions allows a provider to handle request in specific CDN regions
+// TODO: allow nodes to join and leave regions without restarting
+func (e *Exchange) joinRegions(ctx context.Context, rgs []supply.Region) error {
+	// Gossip sub subscription for incoming content queries
+	for _, r := range rgs {
+		topic, err := e.ps.Join(fmt.Sprintf("%s/%s", RequestTopic, r.Name))
+		if err != nil {
+			return err
+		}
+		e.regionTopics[r.Name] = topic
+
+		sub, err := topic.Subscribe()
+		if err != nil {
+			return err
+		}
+		e.regionSubs[r.Name] = sub
+
+		go e.requestLoop(ctx, sub)
+	}
+
+	return nil
 }
 
 // Dispatch new content to cache providers
@@ -144,24 +154,24 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 		}
 	})
 	session := &Session{
-		blockstore: e.bs,
-		reqTopic:   e.reqTopic,
-		net:        e.net,
-		root:       root,
-		retriever:  cl,
-		clientAddr: e.wallet.DefaultAddress(),
-		ctx:        ctx,
-		done:       done,
-		unsub:      unsubscribe,
+		blockstore:   e.bs,
+		regionTopics: e.regionTopics,
+		net:          e.net,
+		root:         root,
+		retriever:    cl,
+		clientAddr:   e.wallet.DefaultAddress(),
+		ctx:          ctx,
+		done:         done,
+		unsub:        unsubscribe,
 	}
 	return session, nil
 }
 
 // requestLoop runs by default in the background when the Hop client is initialized
 // it iterates over new gossip messages and sends a response if we have the block in store
-func (e *Exchange) requestLoop(ctx context.Context) {
+func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription) {
 	for {
-		msg, err := e.reqSub.Next(ctx)
+		msg, err := sub.Next(ctx)
 		if err != nil {
 			return
 		}
@@ -180,7 +190,7 @@ func (e *Exchange) requestLoop(ctx context.Context) {
 		if err == nil && stats.Size > 0 {
 			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
 			if err != nil {
-				fmt.Println("Error", err)
+				fmt.Println("error", err)
 				continue
 			}
 			e.sendQueryResponse(qs, QueryResponseAvailable, uint64(stats.Size))
