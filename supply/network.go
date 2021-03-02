@@ -17,11 +17,16 @@ import (
 
 //go:generate cbor-gen-for AddRequest
 
-// AddRequestProtocolID labels our network for announcing new content to the network
-const AddRequestProtocolID = protocol.ID("/myel/hop/supply/add/1.0")
+// AddRequestProtocol labels our network for announcing new content to the network
+const AddRequestProtocol = "/myel/hop/supply/add/1.0"
 
-// QueryProtocolID labels our supply network protocol
-const QueryProtocolID = protocol.ID("/myel/hop/supply/query/1.0")
+func protoRegions(proto string, regions []Region) []protocol.ID {
+	var pls []protocol.ID
+	for _, r := range regions {
+		pls = append(pls, protocol.ID(fmt.Sprintf("%s/%s", proto, r.Name)))
+	}
+	return pls
+}
 
 // AddRequest describes the new content to anounce
 type AddRequest struct {
@@ -43,13 +48,10 @@ type Network struct {
 }
 
 // NewNetwork creates a new Network instance
-func NewNetwork(h host.Host) *Network {
+func NewNetwork(h host.Host, regions []Region) *Network {
 	sn := &Network{
-		host: h,
-		protocols: []protocol.ID{
-			AddRequestProtocolID,
-			QueryProtocolID,
-		},
+		host:      h,
+		protocols: protoRegions(AddRequestProtocol, regions),
 	}
 	return sn
 }

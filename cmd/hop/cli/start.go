@@ -23,6 +23,7 @@ var startArgs struct {
 	filToken     string
 	filTokenType string
 	privKeyPath  string
+	regions      string
 }
 
 var startCmd = &ffcli.Command{
@@ -48,6 +49,7 @@ The 'hop start' command starts an IPFS daemon service.
 		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.filTokenType, "fil-token-type", "Bearer", "auth token type")
+		fs.StringVar(&startArgs.regions, "regions", "Global", "provider regions separated by commas")
 
 		return fs
 	})(),
@@ -107,6 +109,7 @@ func runStart(ctx context.Context, args []string) error {
 		FilEndpoint:    startArgs.filEndpoint,
 		FilToken:       filToken,
 		PrivKey:        privKey,
+		Regions:        strings.Split(startArgs.regions, ","),
 	}
 
 	err = node.Run(ctx, opts)

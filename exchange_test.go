@@ -48,6 +48,7 @@ func TestExchangeDirect(t *testing.T) {
 					GraphSync:  n.Gs,
 					RepoPath:   n.DTTmpDir,
 					Keystore:   keystore.NewMemKeystore(),
+					Regions:    []supply.Region{supply.Regions["Global"]},
 				}
 
 				exch, err := NewExchange(bgCtx, settings)

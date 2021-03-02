@@ -80,6 +80,9 @@ type Options struct {
 	FilToken string
 	// PrivKey is a hex encoded private key to use for default address
 	PrivKey string
+	// Regions is a list of regions a provider chooses to support.
+	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
+	Regions []string
 }
 
 type node struct {
@@ -161,6 +164,20 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		storeutil.StorerForBlockstore(nd.bs),
 	)
 
+	// Convert region names to region structs
+	var regions []supply.Region
+	for _, rstring := range opts.Regions {
+		if r := supply.Regions[rstring]; r.Name != "" {
+			regions = append(regions, r)
+			continue
+		}
+		// We also support custom regions if users want their own provider subnet
+		regions = append(regions, supply.Region{
+			Name: rstring,
+			Code: supply.CustomRegion,
+		})
+	}
+
 	settings := hop.Settings{
 		Datastore:  nd.ds,
 		Blockstore: nd.bs,
@@ -174,6 +191,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{opts.FilToken},
 		},
+		Regions: regions,
 	}
 
 	nd.exch, err = hop.NewExchange(ctx, settings)
@@ -183,6 +201,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if opts.PrivKey != "" {
 		nd.importAddress(opts.PrivKey)
 	}
+	// start connecting with peers
 	go nd.bootstrap(ctx, opts.BootstrapPeers)
 
 	return nd, nil
