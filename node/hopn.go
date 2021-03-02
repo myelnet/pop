@@ -167,7 +167,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// Convert region names to region structs
 	var regions []supply.Region
 	for _, rstring := range opts.Regions {
-		if r := supply.RegionWithName(rstring); r.Name != "" {
+		if r := supply.Regions[rstring]; r.Name != "" {
 			regions = append(regions, r)
 			continue
 		}

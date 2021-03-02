@@ -62,7 +62,7 @@ func TestSendAddRequest(t *testing.T) {
 	unsubscribe := supply.SubscribeToEvents(func(event Event) {
 		require.Equal(t, rootCid, event.PayloadCID)
 		receivers <- event.Provider
-		if len(receivers)+1 == cap(receivers) {
+		if len(receivers) == cap(receivers) {
 			done <- nil
 		}
 
@@ -132,7 +132,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 	rootCid := link.(cidlink.Link).Cid
 
 	asia := []Region{
-		RegionWithName("Asia"),
+		Regions["Asia"],
 	}
 
 	supply := New(ctx, n1.Host, n1.Dt, asia)
@@ -152,7 +152,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 	}
 
 	africa := []Region{
-		RegionWithName("Africa"),
+		Regions["Africa"],
 	}
 
 	africaNodes := make(map[peer.ID]*testutil.TestNode)
@@ -175,15 +175,14 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	receivers := make(chan peer.ID, 6)
+	receivers := make(chan peer.ID, 4)
 	done := make(chan error)
 	unsubscribe := supply.SubscribeToEvents(func(event Event) {
 		require.Equal(t, rootCid, event.PayloadCID)
 		receivers <- event.Provider
-		if len(receivers)+1 == cap(receivers) {
+		if len(receivers) == cap(receivers) {
 			done <- nil
 		}
-
 	})
 	defer unsubscribe()
 
@@ -195,7 +194,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 		t.Error("requests incomplete")
 	case <-done:
 		pp := supply.providerPeers[rootCid].Peers()
-		require.Equal(t, len(pp), 5)
+		require.Equal(t, len(pp), 4)
 		for i := 0; i < len(pp); i++ {
 			asiaNodes[pp[i]].VerifyFileTransferred(ctx, t, rootCid, origBytes)
 		}

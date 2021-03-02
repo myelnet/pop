@@ -1,7 +1,6 @@
 package supply
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -66,46 +65,13 @@ var (
 	}
 )
 
-var regionsByName = map[string]Region{}
-var regionsByCode = map[RegionCode]Region{}
-
-// AddRegion registers a new region
-func AddRegion(r Region) error {
-	if _, ok := regionsByName[r.Name]; ok {
-		return fmt.Errorf("region by the name %s already exists", r.Name)
-	}
-
-	if reg, ok := regionsByCode[r.Code]; ok {
-		return fmt.Errorf("region code %d already taken by %q", r.Code, reg.Name)
-	}
-
-	regionsByName[r.Name] = r
-	regionsByCode[r.Code] = r
-	return nil
-}
-
-// RegionWithName returns a Region for a given name
-func RegionWithName(n string) Region {
-	return regionsByName[n]
-}
-
-// RegionWithCode returns a Region for a given RegionCode
-func RegionWithCode(c RegionCode) Region {
-	return regionsByCode[c]
-}
-
-func init() {
-	for _, r := range []Region{
-		global,
-		asia,
-		africa,
-		southAmerica,
-		northAmerica,
-		europe,
-		oceania,
-	} {
-		if err := AddRegion(r); err != nil {
-			panic(err)
-		}
-	}
+// Regions is a list of preset regions
+var Regions = map[string]Region{
+	"Global":       global,
+	"Asia":         asia,
+	"Africa":       africa,
+	"SouthAmerica": southAmerica,
+	"NorthAmerica": northAmerica,
+	"Europe":       europe,
+	"Oceania":      oceania,
 }
