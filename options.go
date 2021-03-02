@@ -115,7 +115,15 @@ type DAGStatResult struct {
 func DAGStat(ctx context.Context, bs blockstore.Blockstore, root cid.Cid, sel ipld.Node) (*DAGStatResult, error) {
 	res := &DAGStatResult{}
 	link := cidlink.Link{Cid: root}
-	nodeBuilder := dagpb.Type.PBNode.NewBuilder()
+	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
+		return basicnode.Prototype.Any, nil
+	})
+	// The root node could be a raw node so we need to select the builder accordingly
+	nodeType, err := chooser(link, ipld.LinkContext{})
+	if err != nil {
+		return res, err
+	}
+	builder := nodeType.NewBuilder()
 	// We make a custom loader to intercept when each block is read during the traversal
 	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
 		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
@@ -134,24 +142,21 @@ func DAGStat(ctx context.Context, bs blockstore.Blockstore, root cid.Cid, sel ip
 		}
 	}
 	// Load the root node
-	err := link.Load(ctx, ipld.LinkContext{}, nodeBuilder, makeLoader(bs))
+	err = link.Load(ctx, ipld.LinkContext{}, builder, makeLoader(bs))
 	if err != nil {
 		return res, fmt.Errorf("unable to load link: %v", err)
 	}
-	nd := nodeBuilder.Build()
+	nd := builder.Build()
 
 	s, err := selector.ParseSelector(sel)
 	if err != nil {
 		return res, err
 	}
-	var defaultChooser traversal.LinkTargetNodePrototypeChooser = dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
-		return basicnode.Prototype.Any, nil
-	})
 	// Traverse any links from the root node
 	err = traversal.Progress{
 		Cfg: &traversal.Config{
 			LinkLoader:                     makeLoader(bs),
-			LinkTargetNodePrototypeChooser: defaultChooser,
+			LinkTargetNodePrototypeChooser: chooser,
 		},
 	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
 		return nil
