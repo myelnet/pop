@@ -38,8 +38,15 @@ func TestAddRequestStream(t *testing.T) {
 	err := mn.LinkAll()
 	require.NoError(t, err)
 
-	net1 := NewNetwork(n1.Host)
-	net2 := NewNetwork(n2.Host)
+	regions := []Region{
+		{
+			Name: "Test",
+			Code: CustomRegion,
+		},
+	}
+
+	net1 := NewNetwork(n1.Host, regions)
+	net2 := NewNetwork(n2.Host, regions)
 
 	payload := blockGenerator.Next().Cid()
 	done := make(chan bool)

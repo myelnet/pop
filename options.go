@@ -29,6 +29,7 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-hop-exchange/supply"
 )
 
 // TODO: We should be able to customize these in the options
@@ -56,6 +57,8 @@ type Settings struct {
 	RepoPath            string
 	FilecoinRPCEndpoint string
 	FilecoinRPCHeader   http.Header
+	// Probably temporary as we want Regions to be more dynamic eventually
+	Regions []supply.Region
 }
 
 // NewDataTransfer packages together all the things needed for a new manager to work

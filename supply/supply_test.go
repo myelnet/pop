@@ -28,7 +28,14 @@ func TestSendAddRequest(t *testing.T) {
 	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
 
-	supply := New(ctx, n1.Host, n1.Dt)
+	regions := []Region{
+		{
+			Name: "TestRegion",
+			Code: CustomRegion,
+		},
+	}
+
+	supply := New(ctx, n1.Host, n1.Dt, regions)
 
 	providers := make(map[peer.ID]*testutil.TestNode)
 	var supplies []*Supply
@@ -38,7 +45,7 @@ func TestSendAddRequest(t *testing.T) {
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(ctx, n.Host, n.Dt)
+		s := New(ctx, n.Host, n.Dt, regions)
 
 		providers[n.Host.ID()] = n
 		supplies = append(supplies, s)
@@ -94,7 +101,14 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
 
-	supply := New(ctx, n1.Host, n1.Dt)
+	regions := []Region{
+		{
+			Name: "TestRegion",
+			Code: CustomRegion,
+		},
+	}
+
+	supply := New(ctx, n1.Host, n1.Dt, regions)
 
 	err := supply.SendAddRequest(rootCid, uint64(len(origBytes)))
 	require.EqualError(t, err, ErrNoPeers.Error())
