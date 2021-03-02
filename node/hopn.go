@@ -418,9 +418,9 @@ func (nd *node) addDir(ctx context.Context, path string, dir files.Directory) (i
 	return nil, fmt.Errorf("TODO")
 }
 
+// Get sends a request for content with the given arguments. It also sends feedback to any open cli
+// connections
 func (nd *node) Get(ctx context.Context, args *GetArgs) {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
-	defer cancel()
 	sendErr := func(err error) {
 		nd.send(Notify{
 			GetResult: &GetResult{
@@ -438,17 +438,21 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 				log.Info().
 					Str("event", datatransfer.Events[event.Code]).
 					Str("status", datatransfer.Statuses[state.Status()]).
+					Uint64("bytes received", state.Received()).
 					Msg("Retrieving")
 			},
 		)
 		defer unsub()
 	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
+	defer cancel()
 	err = nd.get(ctx, root, args)
 	if err != nil {
 		sendErr(err)
 	}
 }
 
+// get is a synchronous content retrieval operation which can be called by a CLI request or HTTP
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
 
@@ -542,6 +546,8 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	}
 }
 
+// bootstrap connects to a list of provided peer addresses, libp2p then uses dht discovery
+// to connect with all the peers the node is aware of
 func (nd *node) bootstrap(ctx context.Context, bpeers []string) error {
 	var peers []peer.AddrInfo
 	for _, addrStr := range bpeers {
@@ -581,6 +587,7 @@ func (nd *node) bootstrap(ctx context.Context, bpeers []string) error {
 	return nil
 }
 
+// connPeers returns a list of connected peer IDs
 func (nd *node) connPeers() []peer.ID {
 	conns := nd.host.Network().Conns()
 	var out []peer.ID

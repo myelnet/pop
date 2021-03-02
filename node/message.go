@@ -114,7 +114,8 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		return nil
 	}
 	if c := cmd.Get; c != nil {
-		cs.n.Get(ctx, c)
+		// Get requests can be quite long and we don't want to block other commands
+		go cs.n.Get(ctx, c)
 		return nil
 	}
 	return fmt.Errorf("CommandServer: no command specified")
