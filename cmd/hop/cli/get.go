@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/myelnet/go-hop-exchange/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
@@ -64,7 +63,7 @@ func runGet(ctx context.Context, args []string) error {
 		Verbose: getArgs.verbose,
 		Miner:   getArgs.miner,
 	})
-	at := time.Now()
+
 	for {
 		select {
 		case gr := <-grc:
@@ -81,13 +80,11 @@ func runGet(ctx context.Context, args []string) error {
 					Msg("started retrieval deal")
 				continue
 			}
-			now := time.Now()
-			delay := now.Sub(at)
 
 			log.Info().
 				Float64("DiscoveryLatency", gr.DiscLatSeconds).
 				Float64("TransferLatency", gr.TransLatSeconds).
-				Float64("TotalLatency", delay.Seconds()).
+				Float64("TotalLatency", gr.DiscLatSeconds+gr.TransLatSeconds).
 				Msg("Completed")
 			return nil
 		case <-ctx.Done():

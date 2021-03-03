@@ -234,6 +234,11 @@ func (e *Exchange) Supply() supply.Manager {
 	return e.supply
 }
 
+// Retrieval is the retrieval module and deal state manager
+func (e *Exchange) Retrieval() retrieval.Manager {
+	return e.retrieval
+}
+
 // StoragePeerInfo resolves a Filecoin address to find the peer info and add to our address book
 func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
 	miner, err := e.fAPI.StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
