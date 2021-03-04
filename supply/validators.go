@@ -1,4 +1,4 @@
-package hop
+package supply
 
 import (
 	"github.com/ipfs/go-cid"

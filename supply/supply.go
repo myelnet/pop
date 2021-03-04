@@ -47,25 +47,27 @@ func New(
 	dt datatransfer.Manager,
 	regions []Region,
 ) *Supply {
-	manifest := NewManifest(h, dt)
-	// Connect to incoming supply messages form peers
-	net := NewNetwork(h, regions)
-	// Set the manifest to handle our messages
-	net.SetDelegate(manifest)
 	// We wrap it all in our Supply object
 	s := &Supply{
 		h:             h,
 		dt:            dt,
-		net:           net,
-		man:           manifest,
 		ctx:           ctx,
 		regions:       regions,
 		providerPeers: make(map[cid.Cid]*peer.Set),
 		subscribers:   pubsub.New(EventDispatcher),
 	}
 
+	// TODO: validate AddRequest
+	s.dt.RegisterVoucherType(&AddRequest{}, &UnifiedRequestValidator{})
+
 	// listen for datatransfer events to identify the peers who pulled the content
 	s.dt.SubscribeToEvents(s.notifyProvidersReceived)
+
+	s.man = NewManifest(h, dt)
+	// Connect to incoming supply messages form peers
+	s.net = NewNetwork(h, regions)
+	// Set the manifest to handle our messages
+	s.net.SetDelegate(s.man)
 
 	return s
 }

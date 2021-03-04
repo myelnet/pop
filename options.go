@@ -13,7 +13,6 @@ import (
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
-	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-storedcounter"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -33,18 +32,6 @@ import (
 )
 
 // TODO: We should be able to customize these in the options
-
-// DefaultPricePerByte is the charge per byte retrieved if the miner does
-// not specifically set it
-var DefaultPricePerByte = abi.NewTokenAmount(2)
-
-// DefaultPaymentInterval is the baseline interval, set to 1Mb
-// if the miner does not explicitly set it otherwise
-var DefaultPaymentInterval = uint64(1 << 20)
-
-// DefaultPaymentIntervalIncrease is the amount interval increases on each payment,
-// set to to 1Mb if the miner does not explicitly set it otherwise
-var DefaultPaymentIntervalIncrease = uint64(1 << 20)
 
 // Settings are all the elements required to power the exchange
 type Settings struct {

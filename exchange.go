@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-state-types/big"
 	cid "github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -56,7 +56,7 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 		}
 	}
 	// Setup the messaging protocol for communicating retrieval deals
-	ex.net = NewFromLibp2pHost(ex.h)
+	ex.net = retrieval.NewQueryNetwork(ex.h)
 
 	// Retrieval data transfer setup
 	ex.dataTransfer, err = NewDataTransfer(ctx, ex.h, set.GraphSync, set.Datastore, "retrieval", set.RepoPath)
@@ -76,12 +76,7 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: this is an empty validator for now
-	ex.dataTransfer.RegisterVoucherType(&StorageDataTransferVoucher{}, &UnifiedRequestValidator{})
-
-	// TODO: validate AddRequest
-	ex.dataTransfer.RegisterVoucherType(&supply.AddRequest{}, &UnifiedRequestValidator{})
-
+	// create the supply manager to handle optimisations of the block supply
 	ex.supply = supply.New(ctx, ex.h, ex.dataTransfer, set.Regions)
 
 	return ex, ex.joinRegions(ctx, set.Regions)
@@ -92,22 +87,25 @@ type Exchange struct {
 	h            host.Host
 	bs           blockstore.Blockstore
 	multiStore   *multistore.MultiStore
-	retrieval    retrieval.Manager
-	supply       supply.Manager
 	ps           *pubsub.PubSub
-	provTopic    *pubsub.Topic
+	dataTransfer datatransfer.Manager
+
+	retrieval retrieval.Manager
+	net       retrieval.QueryNetwork
+	supply    supply.Manager
+	wallet    wallet.Driver
+	fAPI      filecoin.API
+
+	mu           sync.Mutex
 	regionSubs   map[string]*pubsub.Subscription
 	regionTopics map[string]*pubsub.Topic
-	net          RetrievalMarketNetwork
-	dataTransfer datatransfer.Manager
-	wallet       wallet.Driver
-	cidListDir   string
-	fAPI         filecoin.API
 }
 
 // joinRegions allows a provider to handle request in specific CDN regions
 // TODO: allow nodes to join and leave regions without restarting
 func (e *Exchange) joinRegions(ctx context.Context, rgs []supply.Region) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	// Gossip sub subscription for incoming content queries
 	for _, r := range rgs {
 		topic, err := e.ps.Join(fmt.Sprintf("%s/%s", RequestTopic, r.Name))
@@ -121,11 +119,53 @@ func (e *Exchange) joinRegions(ctx context.Context, rgs []supply.Region) error {
 			return err
 		}
 		e.regionSubs[r.Name] = sub
-
-		go e.requestLoop(ctx, sub)
+		// each request loop may provide different pricings based on the region
+		go e.requestLoop(ctx, sub, r)
 	}
 
 	return nil
+}
+
+// requestLoop runs by default in the background when the Hop client is initialized
+// it iterates over new gossip messages and sends a response if we have the block in store
+func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r supply.Region) {
+	for {
+		msg, err := sub.Next(ctx)
+		if err != nil {
+			return
+		}
+		if msg.ReceivedFrom == e.h.ID() {
+			continue
+		}
+		m := new(deal.Query)
+		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
+			continue
+		}
+		// DAGStat is both a way of checking if we have the blocks and returning its size
+		// TODO: support selector in Query
+		stats, err := DAGStat(ctx, e.bs, m.PayloadCID, AllSelector())
+		// We don't have the block we don't even reply to avoid taking bandwidth
+		// On the client side we assume no response means they don't have it
+		if err == nil && stats.Size > 0 {
+			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
+			if err != nil {
+				fmt.Println("error", err)
+				continue
+			}
+			answer := deal.QueryResponse{
+				Status:                     deal.QueryResponseAvailable,
+				Size:                       uint64(stats.Size),
+				PaymentAddress:             e.wallet.DefaultAddress(),
+				MinPricePerByte:            r.PPB, // TODO: dynamic pricing
+				MaxPaymentInterval:         deal.DefaultPaymentInterval,
+				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+			}
+			if err := qs.WriteQueryResponse(answer); err != nil {
+				fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
+				return
+			}
+		}
+	}
 }
 
 // Dispatch new content to cache providers
@@ -154,69 +194,15 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 		}
 	})
 	session := &Session{
-		blockstore:   e.bs,
 		regionTopics: e.regionTopics,
 		net:          e.net,
 		root:         root,
 		retriever:    cl,
 		clientAddr:   e.wallet.DefaultAddress(),
-		ctx:          ctx,
 		done:         done,
 		unsub:        unsubscribe,
 	}
 	return session, nil
-}
-
-// requestLoop runs by default in the background when the Hop client is initialized
-// it iterates over new gossip messages and sends a response if we have the block in store
-func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription) {
-	for {
-		msg, err := sub.Next(ctx)
-		if err != nil {
-			return
-		}
-		if msg.ReceivedFrom == e.h.ID() {
-			continue
-		}
-		m := new(Query)
-		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
-			continue
-		}
-		// DAGStat is both a way of checking if we have the blocks and returning its size
-		// TODO: support selector in Query
-		stats, err := DAGStat(ctx, e.bs, m.PayloadCID, AllSelector())
-		// We don't have the block we don't even reply to avoid taking bandwidth
-		// On the client side we assume no response means they don't have it
-		if err == nil && stats.Size > 0 {
-			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
-			if err != nil {
-				fmt.Println("error", err)
-				continue
-			}
-			e.sendQueryResponse(qs, QueryResponseAvailable, uint64(stats.Size))
-		}
-	}
-}
-
-func (e *Exchange) sendQueryResponse(stream RetrievalQueryStream, status QueryResponseStatus, size uint64) {
-	ask := &Ask{
-		PricePerByte:            big.Zero(),
-		PaymentInterval:         DefaultPaymentInterval,
-		PaymentIntervalIncrease: DefaultPaymentIntervalIncrease,
-	}
-
-	answer := QueryResponse{
-		Status:                     status,
-		Size:                       size,
-		PaymentAddress:             e.wallet.DefaultAddress(),
-		MinPricePerByte:            ask.PricePerByte,
-		MaxPaymentInterval:         ask.PaymentInterval,
-		MaxPaymentIntervalIncrease: ask.PaymentIntervalIncrease,
-	}
-	if err := stream.WriteQueryResponse(answer); err != nil {
-		fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
-		return
-	}
 }
 
 // Wallet returns the wallet instance funding the exchange

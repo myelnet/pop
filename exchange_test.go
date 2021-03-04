@@ -93,7 +93,7 @@ func TestExchangeDirect(t *testing.T) {
 			client.Supply().SubscribeToEvents(func(event supply.Event) {
 				require.Equal(t, rootCid, event.PayloadCID)
 				receivers <- event.Provider
-				if len(receivers)+1 == cap(receivers) {
+				if len(receivers) == cap(receivers) {
 					done <- nil
 				}
 			})

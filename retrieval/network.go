@@ -1,4 +1,4 @@
-package hop
+package retrieval
 
 import (
 	"bufio"
@@ -14,10 +14,10 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 )
 
-// Let's try to stay compatible with lotus nodes so we can retrieve from lotus
-// providers too
+// We stay compatible with lotus nodes so we can retrieve from lotus providers too
 
 // FilQueryProtocolID is the protocol for querying information about retrieval
 // deal parameters from Filecoin storage miners
@@ -30,33 +30,33 @@ const HopQueryProtocolID = protocol.ID("/myel/hop/query/1.0")
 // These are the required interfaces that must be implemented to send and receive data
 // for retrieval queries and deals.
 
-// RetrievalQueryStream is the API needed to send and receive retrieval query
+// QueryStream is the API needed to send and receive retrieval query
 // data over data-transfer network.
-type RetrievalQueryStream interface {
-	ReadQuery() (Query, error)
-	WriteQuery(Query) error
-	ReadQueryResponse() (QueryResponse, error)
-	WriteQueryResponse(QueryResponse) error
+type QueryStream interface {
+	ReadQuery() (deal.Query, error)
+	WriteQuery(deal.Query) error
+	ReadQueryResponse() (deal.QueryResponse, error)
+	WriteQueryResponse(deal.QueryResponse) error
 	Close() error
 	OtherPeer() peer.ID
 }
 
-// RetrievalReceiver is the API for handling data coming in on
+// QueryReceiver is the API for handling data coming in on
 // both query and deal streams
-type RetrievalReceiver interface {
+type QueryReceiver interface {
 	// HandleQueryStream sends and receives data-transfer data via the
 	// RetrievalQueryStream provided
-	HandleQueryStream(RetrievalQueryStream)
+	HandleQueryStream(QueryStream)
 }
 
-// RetrievalMarketNetwork is the API for creating query and deal streams and
+// QueryNetwork is the API for creating query and deal streams and
 // delegating responders to those streams.
-type RetrievalMarketNetwork interface {
+type QueryNetwork interface {
 	//  NewQueryStream creates a new RetrievalQueryStream implementer using the provided peer.ID
-	NewQueryStream(peer.ID) (RetrievalQueryStream, error)
+	NewQueryStream(peer.ID) (QueryStream, error)
 
-	// SetDelegate sets a RetrievalReceiver implementer to handle stream data
-	SetDelegate(RetrievalReceiver) error
+	// SetDelegate sets a QueryReceiver implementer to handle stream data
+	SetDelegate(QueryReceiver) error
 
 	// StopHandlingRequests unsets the RetrievalReceiver and would perform any other necessary
 	// shutdown logic.
@@ -75,32 +75,32 @@ type queryStream struct {
 	buffered *bufio.Reader
 }
 
-func (qs *queryStream) ReadQuery() (Query, error) {
-	var q Query
+func (qs *queryStream) ReadQuery() (deal.Query, error) {
+	var q deal.Query
 
 	if err := q.UnmarshalCBOR(qs.buffered); err != nil {
-		return Query{}, err
+		return deal.Query{}, err
 
 	}
 
 	return q, nil
 }
 
-func (qs *queryStream) WriteQuery(q Query) error {
+func (qs *queryStream) WriteQuery(q deal.Query) error {
 	return cborutil.WriteCborRPC(qs.rw, &q)
 }
 
-func (qs *queryStream) ReadQueryResponse() (QueryResponse, error) {
-	var resp QueryResponse
+func (qs *queryStream) ReadQueryResponse() (deal.QueryResponse, error) {
+	var resp deal.QueryResponse
 
 	if err := resp.UnmarshalCBOR(qs.buffered); err != nil {
-		return QueryResponse{}, err
+		return deal.QueryResponse{}, err
 	}
 
 	return resp, nil
 }
 
-func (qs *queryStream) WriteQueryResponse(qr QueryResponse) error {
+func (qs *queryStream) WriteQueryResponse(qr deal.QueryResponse) error {
 	return cborutil.WriteCborRPC(qs.rw, &qr)
 }
 
@@ -117,11 +117,11 @@ const defaultMinAttemptDuration = 1 * time.Second
 const defaultMaxAttemptDuration = 5 * time.Minute
 
 // Option is an option for configuring the libp2p storage market network
-type Option func(*libp2pRetrievalMarketNetwork)
+type Option func(*Libp2pQueryNetwork)
 
 // RetryParameters changes the default parameters around connection reopening
 func RetryParameters(minDuration time.Duration, maxDuration time.Duration, attempts float64) Option {
-	return func(impl *libp2pRetrievalMarketNetwork) {
+	return func(impl *Libp2pQueryNetwork) {
 		impl.maxStreamOpenAttempts = attempts
 		impl.minAttemptDuration = minDuration
 		impl.maxAttemptDuration = maxDuration
@@ -130,15 +130,15 @@ func RetryParameters(minDuration time.Duration, maxDuration time.Duration, attem
 
 // SupportedProtocols sets what protocols this network instances listens on
 func SupportedProtocols(supportedProtocols []protocol.ID) Option {
-	return func(impl *libp2pRetrievalMarketNetwork) {
+	return func(impl *Libp2pQueryNetwork) {
 		impl.supportedProtocols = supportedProtocols
 	}
 }
 
-// NewFromLibp2pHost constructs a new instance of the RetrievalMarketNetwork from a
+// NewQueryNetwork constructs a new instance of the QueryNetwork from a
 // libp2p host
-func NewFromLibp2pHost(h host.Host, options ...Option) RetrievalMarketNetwork {
-	impl := &libp2pRetrievalMarketNetwork{
+func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
+	impl := &Libp2pQueryNetwork{
 		host:                  h,
 		maxStreamOpenAttempts: defaultMaxStreamOpenAttempts,
 		minAttemptDuration:    defaultMinAttemptDuration,
@@ -154,21 +154,21 @@ func NewFromLibp2pHost(h host.Host, options ...Option) RetrievalMarketNetwork {
 	return impl
 }
 
-// libp2pRetrievalMarketNetwork transforms the libp2p host interface, which sends and receives
+// Libp2pQueryNetwork transforms the libp2p host interface, which sends and receives
 // NetMessage objects, into the graphsync network interface.
-// It implements the RetrievalMarketNetwork API.
-type libp2pRetrievalMarketNetwork struct {
+// It implements the QueryNetwork API.
+type Libp2pQueryNetwork struct {
 	host host.Host
 	// inbound messages from the network are forwarded to the receiver
-	receiver              RetrievalReceiver
+	receiver              QueryReceiver
 	maxStreamOpenAttempts float64
 	minAttemptDuration    time.Duration
 	maxAttemptDuration    time.Duration
 	supportedProtocols    []protocol.ID
 }
 
-//  NewQueryStream creates a new RetrievalQueryStream using the provided peer.ID
-func (impl *libp2pRetrievalMarketNetwork) NewQueryStream(id peer.ID) (RetrievalQueryStream, error) {
+// NewQueryStream creates a new QueryStream using the provided peer.ID
+func (impl *Libp2pQueryNetwork) NewQueryStream(id peer.ID) (QueryStream, error) {
 	s, err := impl.openStream(context.Background(), id, impl.supportedProtocols)
 	if err != nil {
 		return nil, err
@@ -177,7 +177,7 @@ func (impl *libp2pRetrievalMarketNetwork) NewQueryStream(id peer.ID) (RetrievalQ
 	return &queryStream{p: id, rw: s, buffered: buffered}, nil
 }
 
-func (impl *libp2pRetrievalMarketNetwork) openStream(ctx context.Context, id peer.ID, protocols []protocol.ID) (network.Stream, error) {
+func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, protocols []protocol.ID) (network.Stream, error) {
 	b := &backoff.Backoff{
 		Min:    impl.minAttemptDuration,
 		Max:    impl.maxAttemptDuration,
@@ -201,7 +201,7 @@ func (impl *libp2pRetrievalMarketNetwork) openStream(ctx context.Context, id pee
 }
 
 // SetDelegate sets a RetrievalReceiver to handle stream data
-func (impl *libp2pRetrievalMarketNetwork) SetDelegate(r RetrievalReceiver) error {
+func (impl *Libp2pQueryNetwork) SetDelegate(r QueryReceiver) error {
 	impl.receiver = r
 	for _, proto := range impl.supportedProtocols {
 		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
@@ -211,7 +211,7 @@ func (impl *libp2pRetrievalMarketNetwork) SetDelegate(r RetrievalReceiver) error
 
 // StopHandlingRequests unsets the RetrievalReceiver and would perform any other necessary
 // shutdown logic.
-func (impl *libp2pRetrievalMarketNetwork) StopHandlingRequests() error {
+func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
 	impl.receiver = nil
 	for _, proto := range impl.supportedProtocols {
 		impl.host.RemoveStreamHandler(proto)
@@ -219,7 +219,7 @@ func (impl *libp2pRetrievalMarketNetwork) StopHandlingRequests() error {
 	return nil
 }
 
-func (impl *libp2pRetrievalMarketNetwork) handleNewQueryStream(s network.Stream) {
+func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 	if impl.receiver == nil {
 		fmt.Printf("no receiver set")
 		s.Reset()
@@ -227,15 +227,17 @@ func (impl *libp2pRetrievalMarketNetwork) handleNewQueryStream(s network.Stream)
 	}
 	remotePID := s.Conn().RemotePeer()
 	buffered := bufio.NewReaderSize(s, 16)
-	var qs RetrievalQueryStream
+	var qs QueryStream
 	qs = &queryStream{remotePID, s, buffered}
 	impl.receiver.HandleQueryStream(qs)
 }
 
-func (impl *libp2pRetrievalMarketNetwork) ID() peer.ID {
+// ID returns the host peer ID
+func (impl *Libp2pQueryNetwork) ID() peer.ID {
 	return impl.host.ID()
 }
 
-func (impl *libp2pRetrievalMarketNetwork) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
+// AddAddrs adds a new peer into the host peerstore
+func (impl *Libp2pQueryNetwork) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
 	impl.host.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
 }
