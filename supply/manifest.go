@@ -28,11 +28,11 @@ func NewManifest(h host.Host, dt datatransfer.Manager) *Manifest {
 	return &Manifest{h, dt}
 }
 
-// HandleAddRequest and decide whether to add the block to our supply or not
-func (m *Manifest) HandleAddRequest(stream AddRequestStreamer) {
+// HandleRequest and decide whether to add the block to our supply or not
+func (m *Manifest) HandleRequest(stream RequestStreamer) {
 	defer stream.Close()
 
-	req, err := stream.ReadAddRequest()
+	req, err := stream.ReadRequest()
 	if err != nil {
 		fmt.Println("Unable to read notification")
 		return
@@ -40,7 +40,7 @@ func (m *Manifest) HandleAddRequest(stream AddRequestStreamer) {
 	// TODO: run custom logic to validate the presence of a storage deal for this block
 	// we may need to request deal info in the message
 	// + check if we have room to store it
-	if err := m.AddBlock(context.Background(), req, stream.OtherPeer()); err != nil {
+	if err := m.SyncBlocks(context.Background(), req, stream.OtherPeer()); err != nil {
 		fmt.Println("Unable to add new block to our supply", err)
 		return
 	}
@@ -54,8 +54,8 @@ func AllSelector() ipld.Node {
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 }
 
-// AddBlock to the manifest
-func (m *Manifest) AddBlock(ctx context.Context, req AddRequest, from peer.ID) error {
+// SyncBlocks to the manifest
+func (m *Manifest) SyncBlocks(ctx context.Context, req Request, from peer.ID) error {
 
 	done := make(chan datatransfer.Event, 1)
 	unsubscribe := m.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
@@ -73,7 +73,7 @@ func (m *Manifest) AddBlock(ctx context.Context, req AddRequest, from peer.ID) e
 	select {
 	case event := <-done:
 		if event.Code == datatransfer.Error {
-			return fmt.Errorf("Failed to retrieve: %v", event.Message)
+			return fmt.Errorf("failed to retrieve: %v", event.Message)
 		}
 		return nil
 	}

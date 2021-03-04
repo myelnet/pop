@@ -86,32 +86,22 @@ func TestExchangeDirect(t *testing.T) {
 			link, origBytes := cnode.LoadUnixFSFileToStore(ctx, t, "/README.md")
 			rootCid := link.(cidlink.Link).Cid
 
-			// In tis test we expect the maximum of providers to receive the content
+			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			receivers := make(chan peer.ID, 6)
-			done := make(chan error)
-			client.Supply().SubscribeToEvents(func(event supply.Event) {
-				require.Equal(t, rootCid, event.PayloadCID)
-				receivers <- event.Provider
-				if len(receivers) == cap(receivers) {
-					done <- nil
-				}
-			})
-
-			err := client.Dispatch(rootCid)
+			res, err := client.Dispatch(rootCid)
 			require.NoError(t, err)
 
-			select {
-			case <-ctx.Done():
-				t.Fatal("couldn't finish content propagation")
-			case <-done:
+			var records []*supply.PRecord
+			for len(records) < 6 {
+				rec, err := res.Next(ctx)
+				require.NoError(t, err)
+				records = append(records, rec)
 			}
+			res.Close()
 
 			// Gather and check all the recipients have a proper copy of the file
-			pp, err := client.Supply().ProviderPeersForContent(rootCid)
-			require.NoError(t, err)
-			for _, p := range pp {
-				pnodes[p].VerifyFileTransferred(ctx, t, rootCid, origBytes)
+			for _, r := range records {
+				pnodes[r.Provider].VerifyFileTransferred(ctx, t, rootCid, origBytes)
 			}
 
 			cnode.NukeBlockstore(ctx, t)

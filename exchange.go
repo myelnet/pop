@@ -77,7 +77,7 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 		return nil, err
 	}
 	// create the supply manager to handle optimisations of the block supply
-	ex.supply = supply.New(ctx, ex.h, ex.dataTransfer, set.Regions)
+	ex.supply = supply.New(ex.h, ex.dataTransfer, set.Regions)
 
 	return ex, ex.joinRegions(ctx, set.Regions)
 }
@@ -169,12 +169,15 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 }
 
 // Dispatch new content to cache providers
-func (e *Exchange) Dispatch(c cid.Cid) error {
-	size, err := e.bs.GetSize(c)
+func (e *Exchange) Dispatch(c cid.Cid) (*supply.Response, error) {
+	stat, err := DAGStat(context.Background(), e.bs, c, AllSelector())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return e.supply.SendAddRequest(c, uint64(size))
+	return e.supply.Dispatch(supply.Request{
+		PayloadCID: c,
+		Size:       uint64(stat.Size),
+	})
 }
 
 // NewSession returns a new retrieval session
