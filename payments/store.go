@@ -6,7 +6,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
-	"github.com/filecoin-project/specs-actors/v2/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -86,7 +86,7 @@ func (s *Store) putChannelInfo(ci *ChannelInfo) error {
 
 	b, err := marshallChannelInfo(ci)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshalling: %w", err)
 	}
 
 	return s.ds.Put(k, b)

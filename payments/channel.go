@@ -359,6 +359,7 @@ func (ch *channel) mpoolPush(ctx context.Context, msg *filecoin.Message) (*filec
 		if strings.Contains(err.Error(), "already in mpool, increase GasPremium") {
 			// incGas picks up the suggested gas premium from the error message and tries to push
 			// a new message to the pool with that amount
+			fmt.Println("message already in pool, increasing gas")
 			return ch.increaseGas(ctx, msg, err.Error())
 		}
 		return nil, fmt.Errorf("MpoolPush failed with error: %v", err)
@@ -669,14 +670,14 @@ func (ch *channel) nextNonceForLane(ci *ChannelInfo, lane uint64) uint64 {
 func (ch *channel) addVoucherUnlocked(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher, minDelta filecoin.BigInt) (filecoin.BigInt, error) {
 	ci, err := ch.store.ByAddress(chAddr)
 	if err != nil {
-		return filecoin.BigInt{}, err
+		return filecoin.BigInt{}, fmt.Errorf("looking for channel: %w", err)
 	}
 
 	// Check if the voucher has already been added
 	for _, v := range ci.Vouchers {
 		eq, err := cborutil.Equals(sv, v.Voucher)
 		if err != nil {
-			return filecoin.BigInt{}, err
+			return filecoin.BigInt{}, fmt.Errorf("cborutil.Equals: %w", err)
 		}
 		if eq {
 			// Ignore the duplicate voucher.
@@ -699,7 +700,7 @@ func (ch *channel) addVoucherUnlocked(ctx context.Context, chAddr address.Addres
 	if exists {
 		redeemed, err = laneState.Redeemed()
 		if err != nil {
-			return filecoin.NewInt(0), err
+			return filecoin.NewInt(0), fmt.Errorf("laneState.Redeemed(): %w", err)
 		}
 	}
 
@@ -732,7 +733,7 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 	// Load payment channel actor state
 	pchState, err := ch.loadActorState(chAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loadActorState: %w", err)
 	}
 
 	// Load channel "From" account actor state
@@ -767,7 +768,7 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 	// Check the voucher against the highest known voucher nonce / value
 	laneStates, err := ch.laneState(pchState, chAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("laneState: %v", err)
 	}
 
 	// If the new voucher nonce value is less than the highest known
@@ -810,7 +811,7 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 	// total:   7
 	totalRedeemed, err := ch.totalRedeemedWithVoucher(laneStates, sv)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("totalRedeemedWithVoucher: %w", err)
 	}
 
 	// Total required balance must not exceed actor balance
