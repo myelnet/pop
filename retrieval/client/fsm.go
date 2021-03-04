@@ -50,6 +50,7 @@ var paymentChannelCreationStates = []fsm.StateKey{
 	deal.StatusAccepted,
 	deal.StatusPaymentChannelCreating,
 	deal.StatusPaymentChannelAllocatingLane,
+	deal.StatusPaymentChannelAddingInitialFunds,
 }
 
 // FSMEvents is the state chart defining the events that can happen in a retrieval client
@@ -127,8 +128,8 @@ var FSMEvents = fsm.Events{
 		// created for an earlier deal but the initial funding for this deal
 		// was being added, then we still need to allocate a payment channel
 		// lane
-		From(deal.StatusPaymentChannelCreating).To(deal.StatusPaymentChannelAllocatingLane).
-		From(deal.StatusPaymentChannelAddingInitialFunds).To(deal.StatusPaymentChannelAllocatingLane).
+		FromMany(deal.StatusPaymentChannelCreating, deal.StatusPaymentChannelAddingInitialFunds).
+		To(deal.StatusPaymentChannelAllocatingLane).
 		// If the payment channel ran out of funds and needed to be topped up,
 		// then the payment channel lane already exists so just move straight
 		// to the ongoing state
