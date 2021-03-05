@@ -1,12 +1,9 @@
 package supply
 
 import (
-	"context"
 	"fmt"
-	"sync"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/hannahhoward/go-pubsub"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -17,109 +14,86 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
-	SendAddRequest(cid.Cid, uint64) error
-	SubscribeToEvents(Subscriber) Unsubscribe
+	// Dispatch a Request to n providers to cache our content, may expose the n as a param if need be
+	Dispatch(Request) (*Response, error)
 	ProviderPeersForContent(cid.Cid) ([]peer.ID, error)
 }
 
 // Supply keeps track of the content we store and provide on the network
 // its role is to always seek and supply new and more efficient content to store
 type Supply struct {
-	h   host.Host
-	dt  datatransfer.Manager
-	net *Network
-	man *Manifest
-	ctx context.Context
-	// New content subscriber to know when we've sent the content to new providers
-	subscribers *pubsub.PubSub
-	regions     []Region
+	h       host.Host
+	dt      datatransfer.Manager
+	net     *Network
+	man     *Manifest
+	regions []Region
+}
 
-	mu sync.Mutex
-	// Keep track of which of our peers may have a block
-	// Not use for anything else than debugging currently but may be useful eventualy
-	providerPeers map[cid.Cid]*peer.Set
+// PRecord is a provider <> cid mapping for recording who is storing what content
+type PRecord struct {
+	Provider   peer.ID
+	PayloadCID cid.Cid
 }
 
 // New instance of the SupplyManager
 func New(
-	ctx context.Context,
 	h host.Host,
 	dt datatransfer.Manager,
 	regions []Region,
 ) *Supply {
-	manifest := NewManifest(h, dt)
-	// Connect to incoming supply messages form peers
-	net := NewNetwork(h, regions)
-	// Set the manifest to handle our messages
-	net.SetDelegate(manifest)
 	// We wrap it all in our Supply object
 	s := &Supply{
-		h:             h,
-		dt:            dt,
-		net:           net,
-		man:           manifest,
-		ctx:           ctx,
-		regions:       regions,
-		providerPeers: make(map[cid.Cid]*peer.Set),
-		subscribers:   pubsub.New(EventDispatcher),
+		h:       h,
+		dt:      dt,
+		regions: regions,
 	}
 
-	// listen for datatransfer events to identify the peers who pulled the content
-	s.dt.SubscribeToEvents(s.notifyProvidersReceived)
+	// TODO: validate AddRequest
+	s.dt.RegisterVoucherType(&Request{}, &UnifiedRequestValidator{})
+
+	s.man = NewManifest(h, dt)
+	// Connect to incoming supply messages form peers
+	s.net = NewNetwork(h, regions)
+	// Set the manifest to handle our messages
+	s.net.SetDelegate(s.man)
 
 	return s
 }
 
-func (s *Supply) notifyProvidersReceived(event datatransfer.Event, chState datatransfer.ChannelState) {
-	if chState.Status() == datatransfer.Completed {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
-		root := chState.BaseCID()
-
-		// We should already have a peer set for that cid
-		// if not this data transfer may be unrelated
-		set, ok := s.providerPeers[root]
-		if !ok {
-			return
-		}
-		// The recipient is the provider who received our content
-		rec := chState.Recipient()
-		if rec != s.h.ID() {
-			set.Add(rec)
-		}
-		// Notify subscribers
-		// TODO: publish error event
-		s.subscribers.Publish(Event{
-			PayloadCID: root,
-			Provider:   rec,
-		})
-	}
-}
-
 // ProviderPeersForContent gets the known providers for a given content id
 func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	pset, ok := s.providerPeers[c]
-	if !ok {
-		return nil, fmt.Errorf("content not tracked")
-	}
-	return pset.Peers(), nil
+	return nil, nil
 }
 
-// SendAddRequest to the network until we have propagated the content to enough peers
-func (s *Supply) SendAddRequest(payload cid.Cid, size uint64) error {
-	s.mu.Lock()
-	s.providerPeers[payload] = peer.NewSet()
-	s.mu.Unlock()
+// Dispatch requests to the network until we have propagated the content to enough peers
+func (s *Supply) Dispatch(r Request) (*Response, error) {
+	res := &Response{
+		recordChan: make(chan PRecord),
+	}
+
+	// listen for datatransfer events to identify the peers who pulled the content
+	res.unsub = s.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+		if chState.Status() == datatransfer.Completed {
+			root := chState.BaseCID()
+			if root != r.PayloadCID {
+				return
+			}
+			// The recipient is the provider who received our content
+			rec := chState.Recipient()
+			res.recordChan <- PRecord{
+				Provider:   rec,
+				PayloadCID: root,
+			}
+		}
+	})
+
 	// Select the providers we want to send to
 	providers, err := s.selectProviders()
 	if err != nil {
-		return err
+		return res, err
 	}
-	s.processAddRequests(payload, size, providers)
-	return nil
+	s.sendAllRequests(r, providers)
+	return res, nil
 }
 
 func (s *Supply) selectProviders() ([]peer.ID, error) {
@@ -131,7 +105,7 @@ func (s *Supply) selectProviders() ([]peer.ID, error) {
 		if pid != s.h.ID() {
 			// Make sure our peer supports the retrieval dispatch protocol
 			var protos []string
-			for _, p := range protoRegions(AddRequestProtocol, s.regions) {
+			for _, p := range protoRegions(RequestProtocol, s.regions) {
 				protos = append(protos, string(p))
 			}
 			supported, err := s.h.Peerstore().SupportsProtocols(
@@ -157,53 +131,17 @@ func (s *Supply) selectProviders() ([]peer.ID, error) {
 	return peers, nil
 }
 
-func (s *Supply) processAddRequests(payload cid.Cid, size uint64, peers []peer.ID) {
+func (s *Supply) sendAllRequests(r Request, peers []peer.ID) {
 	for _, p := range peers {
-		stream, err := s.net.NewAddRequestStream(p)
+		stream, err := s.net.NewRequestStream(p)
 		if err != nil {
 			fmt.Println("Unable to create new request stream", err)
 			continue
 		}
-		m := AddRequest{
-			PayloadCID: payload,
-			Size:       size,
-		}
-		err = stream.WriteAddRequest(m)
+		err = stream.WriteRequest(r)
 		if err != nil {
 			fmt.Println("Unable to send addRequest:", err)
 			continue
 		}
 	}
-}
-
-// SubscribeToEvents to listen for supply events
-func (s *Supply) SubscribeToEvents(subscriber Subscriber) Unsubscribe {
-	return Unsubscribe(s.subscribers.Subscribe(subscriber))
-}
-
-// Subscriber is a callback to listen for supply events
-type Subscriber func(event Event)
-
-// Unsubscribe cancels a subscription
-type Unsubscribe func()
-
-// Event determines when we propagated content to a new provider
-// TODO: different event types etc
-type Event struct {
-	PayloadCID cid.Cid
-	Provider   peer.ID
-}
-
-// EventDispatcher converts our pubsub signature to our callback signature
-func EventDispatcher(evt pubsub.Event, subscriberFn pubsub.SubscriberFn) error {
-	ie, ok := evt.(Event)
-	if !ok {
-		return fmt.Errorf("wrong type of event")
-	}
-	cb, ok := subscriberFn.(Subscriber)
-	if !ok {
-		return fmt.Errorf("wrong subscriber")
-	}
-	cb(ie)
-	return nil
 }

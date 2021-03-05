@@ -209,6 +209,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 }
 
+// send hits out notify callback if we attached one
 func (nd *node) send(n Notify) {
 	nd.mu.Lock()
 	notify := nd.notify
@@ -331,31 +332,25 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		recipients := make(chan peer.ID)
-		unsub := nd.exch.Supply().SubscribeToEvents(func(event supply.Event) {
-			recipients <- event.Provider
-		})
-		defer unsub()
-		err := nd.exch.Dispatch(root)
+		res, err := nd.exch.Dispatch(root)
+		defer res.Close()
 		if err != nil {
 			sendErr(err)
 			return
 		}
 		for {
-			select {
-			// Right now we only wait for 1 peer to receive the content but we should wait for
-			// a set amount of peers
-			case p := <-recipients:
-				nd.send(Notify{
-					AddResult: &AddResult{
-						Cache: p.String(),
-					},
-				})
-				return
-			case <-ctx.Done():
+			// Right now we only wait for 1 peer to receive the content but we could wait for
+			// more peers, the question is when to stop as we don't know exactly how many will retrieve
+			rec, err := res.Next(ctx)
+			nd.send(Notify{
+				AddResult: &AddResult{
+					Cache: rec.Provider.String(),
+				},
+			})
+			if err != nil {
 				sendErr(ctx.Err())
-				return
 			}
+			return
 		}
 	}
 }
@@ -463,7 +458,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	if err != nil {
 		return err
 	}
-	var offer *hop.Offer
+	var offer *deal.Offer
 	var discDuration time.Duration
 	if args.Miner != "" {
 		miner, err := address.NewFromString(args.Miner)

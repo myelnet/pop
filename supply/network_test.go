@@ -16,17 +16,17 @@ var blockGenerator = blocksutil.NewBlockGenerator()
 
 type testReceiver struct {
 	t             *testing.T
-	streamHandler func(AddRequestStreamer)
+	streamHandler func(RequestStreamer)
 }
 
-func (tr *testReceiver) HandleAddRequest(s AddRequestStreamer) {
+func (tr *testReceiver) HandleRequest(s RequestStreamer) {
 	defer s.Close()
 	if tr.streamHandler != nil {
 		tr.streamHandler(s)
 	}
 }
 
-func TestAddRequestStream(t *testing.T) {
+func TestRequestStream(t *testing.T) {
 
 	ctxBg := context.Background()
 
@@ -50,8 +50,8 @@ func TestAddRequestStream(t *testing.T) {
 
 	payload := blockGenerator.Next().Cid()
 	done := make(chan bool)
-	tr2 := &testReceiver{t: t, streamHandler: func(s AddRequestStreamer) {
-		r, err := s.ReadAddRequest()
+	tr2 := &testReceiver{t: t, streamHandler: func(s RequestStreamer) {
+		r, err := s.ReadRequest()
 		require.NoError(t, err)
 
 		assert.Equal(t, payload, r.PayloadCID)
@@ -62,10 +62,10 @@ func TestAddRequestStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctxBg, 10*time.Second)
 	defer cancel()
 
-	s, err := net1.NewAddRequestStream(n2.Host.ID())
+	s, err := net1.NewRequestStream(n2.Host.ID())
 	require.NoError(t, err)
 
-	go require.NoError(t, s.WriteAddRequest(AddRequest{
+	go require.NoError(t, s.WriteRequest(Request{
 		PayloadCID: payload,
 		Size:       16,
 	}))
