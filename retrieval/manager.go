@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -76,6 +77,21 @@ type Provider struct {
 	requestValidator *ProviderRequestValidator
 	revalidator      *ProviderRevalidator
 	pay              payments.Manager
+	askStore         *AskStore
+}
+
+// GetAsk returns the current deal parameters this provider accepts for a given peer
+func (p *Provider) GetAsk(k peer.ID) deal.QueryResponse {
+	return p.askStore.GetAsk(k)
+}
+
+// SetAsk sets the deal parameters this provider accepts
+func (p *Provider) SetAsk(k peer.ID, ask deal.QueryResponse) {
+	err := p.askStore.SetAsk(k, ask)
+
+	if err != nil {
+		fmt.Printf("Error setting retrieval ask: %v\v", err)
+	}
 }
 
 func (p *Provider) notifySubscribers(eventName fsm.EventName, state fsm.StateType) {
@@ -128,6 +144,9 @@ func New(
 		subscribers:  pubsub.New(provider.Dispatcher),
 		dataTransfer: dt,
 		pay:          pay,
+		askStore: &AskStore{
+			asks: make(map[peer.ID]deal.QueryResponse),
+		},
 	}
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{
 		Environment:     &providerDealEnvironment{p},

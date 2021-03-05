@@ -161,9 +161,12 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
 			}
 			if err := qs.WriteQueryResponse(answer); err != nil {
-				fmt.Printf("Retrieval query: WriteCborRPC: %s", err)
+				fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
 				return
 			}
+			// We need to remember the offer we made so we can validate against it once
+			// clients start the retrieval
+			e.retrieval.Provider().SetAsk(msg.ReceivedFrom, answer)
 		}
 	}
 }

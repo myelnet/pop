@@ -68,7 +68,7 @@ func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
 // Dispatch requests to the network until we have propagated the content to enough peers
 func (s *Supply) Dispatch(r Request) (*Response, error) {
 	res := &Response{
-		recordChan: make(chan *PRecord),
+		recordChan: make(chan PRecord),
 	}
 
 	// listen for datatransfer events to identify the peers who pulled the content
@@ -80,7 +80,7 @@ func (s *Supply) Dispatch(r Request) (*Response, error) {
 			}
 			// The recipient is the provider who received our content
 			rec := chState.Recipient()
-			res.recordChan <- &PRecord{
+			res.recordChan <- PRecord{
 				Provider:   rec,
 				PayloadCID: root,
 			}

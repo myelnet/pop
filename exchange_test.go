@@ -91,7 +91,7 @@ func TestExchangeDirect(t *testing.T) {
 			res, err := client.Dispatch(rootCid)
 			require.NoError(t, err)
 
-			var records []*supply.PRecord
+			var records []supply.PRecord
 			for len(records) < 6 {
 				rec, err := res.Next(ctx)
 				require.NoError(t, err)

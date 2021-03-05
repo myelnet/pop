@@ -30,7 +30,7 @@ func init() {
 // ValidationEnvironment contains the dependencies needed to validate deals
 type ValidationEnvironment interface {
 	// CheckDealParams verifies the given deal params are acceptable
-	CheckDealParams(pricePerByte abi.TokenAmount, paymentInterval uint64, paymentIntervalIncrease uint64, unsealPrice abi.TokenAmount) error
+	CheckDealParams(deal.ProviderState) error
 	// RunDealDecisioningLogic runs custom deal decision logic to decide if a deal is accepted, if present
 	RunDealDecisioningLogic(ctx context.Context, state deal.ProviderState) (bool, string, error)
 	// StateMachines returns the FSM Group to begin tracking with
@@ -93,7 +93,7 @@ func (rv *ProviderRequestValidator) validatePull(receiver peer.ID, proposal *dea
 		Receiver: receiver,
 	}
 
-	status, err := rv.acceptDeal(&pds)
+	status, err := rv.acceptDeal(pds)
 
 	response := deal.Response{
 		ID:     proposal.ID,
@@ -113,15 +113,15 @@ func (rv *ProviderRequestValidator) validatePull(receiver peer.ID, proposal *dea
 	return &response, datatransfer.ErrPause
 }
 
-func (rv *ProviderRequestValidator) acceptDeal(d *deal.ProviderState) (deal.Status, error) {
+func (rv *ProviderRequestValidator) acceptDeal(d deal.ProviderState) (deal.Status, error) {
 	// check that the deal parameters match our required parameters or
 	// reject outright
-	err := rv.env.CheckDealParams(d.PricePerByte, d.PaymentInterval, d.PaymentIntervalIncrease, d.UnsealPrice)
+	err := rv.env.CheckDealParams(d)
 	if err != nil {
 		return deal.StatusRejected, err
 	}
 
-	accepted, reason, err := rv.env.RunDealDecisioningLogic(context.TODO(), *d)
+	accepted, reason, err := rv.env.RunDealDecisioningLogic(context.TODO(), d)
 	if err != nil {
 		return deal.StatusErrored, err
 	}

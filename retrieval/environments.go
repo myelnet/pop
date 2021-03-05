@@ -3,12 +3,12 @@ package retrieval
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-fil-markets/shared"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
@@ -108,20 +108,17 @@ type providerValidationEnvironment struct {
 }
 
 // CheckDealParams verifies the given deal params are acceptable
-func (pve *providerValidationEnvironment) CheckDealParams(pricePerByte abi.TokenAmount, paymentInterval uint64, paymentIntervalIncrease uint64, unsealPrice abi.TokenAmount) error {
-	// ask := pve.p.GetAsk()
-	// if pricePerByte.LessThan(ask.PricePerByte) {
-	// 	return errors.New("Price per byte too low")
-	// }
-	// if paymentInterval > ask.PaymentInterval {
-	// 	return errors.New("Payment interval too large")
-	// }
-	// if paymentIntervalIncrease > ask.PaymentIntervalIncrease {
-	// 	return errors.New("Payment interval increase too large")
-	// }
-	// if !ask.UnsealPrice.Nil() && unsealPrice.LessThan(ask.UnsealPrice) {
-	// 	return errors.New("Unseal price too small")
-	// }
+func (pve *providerValidationEnvironment) CheckDealParams(ds deal.ProviderState) error {
+	ask := pve.p.GetAsk(ds.Receiver)
+	if ds.PricePerByte.LessThan(ask.MinPricePerByte) {
+		return errors.New("price per byte too low")
+	}
+	if ds.PaymentInterval > ask.MaxPaymentInterval {
+		return errors.New("payment interval too large")
+	}
+	if ds.PaymentIntervalIncrease > ask.MaxPaymentIntervalIncrease {
+		return errors.New("payment interval increase too large")
+	}
 	return nil
 }
 

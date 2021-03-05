@@ -41,17 +41,17 @@ func (Request) Type() datatransfer.TypeIdentifier {
 
 // Response is an async collection of confirmations from data transfers to cache providers
 type Response struct {
-	recordChan chan *PRecord
+	recordChan chan PRecord
 	unsub      datatransfer.Unsubscribe
 }
 
 // Next returns the next record from a new cache
-func (r *Response) Next(ctx context.Context) (*PRecord, error) {
+func (r *Response) Next(ctx context.Context) (PRecord, error) {
 	select {
 	case r := <-r.recordChan:
 		return r, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return PRecord{}, ctx.Err()
 	}
 }
 

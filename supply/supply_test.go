@@ -61,7 +61,7 @@ func TestSendAddRequest(t *testing.T) {
 	defer res.Close()
 	require.NoError(t, err)
 
-	var records []*PRecord
+	var records []PRecord
 	for len(records) < 6 {
 		rec, err := res.Next(ctx)
 		require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 	defer res.Close()
 	require.NoError(t, err)
 
-	var recipients []*PRecord
+	var recipients []PRecord
 	for len(recipients) < 5 {
 		rec, err := res.Next(ctx)
 		require.NoError(t, err)
