@@ -22,7 +22,7 @@ func TestSendAddRequest(t *testing.T) {
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
-	require.NoError(t, n1.Dt.RegisterVoucherType(&AddRequest{}, &testutil.FakeDTValidator{}))
+	require.NoError(t, n1.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
 	// n1 is our client is adding a file to the store
 	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
@@ -35,7 +35,7 @@ func TestSendAddRequest(t *testing.T) {
 		},
 	}
 
-	supply := New(ctx, n1.Host, n1.Dt, regions)
+	supply := New(n1.Host, n1.Dt, regions)
 
 	providers := make(map[peer.ID]*testutil.TestNode)
 	var supplies []*Supply
@@ -45,7 +45,7 @@ func TestSendAddRequest(t *testing.T) {
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(ctx, n.Host, n.Dt, regions)
+		s := New(n.Host, n.Dt, regions)
 
 		providers[n.Host.ID()] = n
 		supplies = append(supplies, s)
@@ -57,30 +57,19 @@ func TestSendAddRequest(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	receivers := make(chan peer.ID, 6)
-	done := make(chan error)
-	unsubscribe := supply.SubscribeToEvents(func(event Event) {
-		require.Equal(t, rootCid, event.PayloadCID)
-		receivers <- event.Provider
-		if len(receivers) == cap(receivers) {
-			done <- nil
-		}
-
-	})
-	defer unsubscribe()
-
-	err = supply.SendAddRequest(rootCid, uint64(len(origBytes)))
+	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
+	defer res.Close()
 	require.NoError(t, err)
 
-	select {
-	case <-ctx.Done():
-		t.Error("requests incomplete")
-	case <-done:
-		pp := supply.providerPeers[rootCid].Peers()
-		for i := 0; i < len(pp); i++ {
-			providers[pp[i]].VerifyFileTransferred(ctx, t, rootCid, origBytes)
-		}
+	var records []PRecord
+	for len(records) < 6 {
+		rec, err := res.Next(ctx)
+		require.NoError(t, err)
+		records = append(records, rec)
+	}
 
+	for _, c := range records {
+		providers[c.Provider].VerifyFileTransferred(ctx, t, rootCid, origBytes)
 	}
 }
 
@@ -89,14 +78,11 @@ func TestSendAddRequest(t *testing.T) {
 func TestSendAddRequestNoPeers(t *testing.T) {
 	bgCtx := context.Background()
 
-	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
-	defer cancel()
-
 	mn := mocknet.New(bgCtx)
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
-	require.NoError(t, n1.Dt.RegisterVoucherType(&AddRequest{}, &testutil.FakeDTValidator{}))
+	require.NoError(t, n1.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
 	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
@@ -108,9 +94,10 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 		},
 	}
 
-	supply := New(ctx, n1.Host, n1.Dt, regions)
+	supply := New(n1.Host, n1.Dt, regions)
 
-	err := supply.SendAddRequest(rootCid, uint64(len(origBytes)))
+	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
+	defer res.Close()
 	require.EqualError(t, err, ErrNoPeers.Error())
 }
 
@@ -125,7 +112,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
-	require.NoError(t, n1.Dt.RegisterVoucherType(&AddRequest{}, &testutil.FakeDTValidator{}))
+	require.NoError(t, n1.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
 	// n1 is our client is adding a file to the store
 	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
@@ -135,7 +122,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 		Regions["Asia"],
 	}
 
-	supply := New(ctx, n1.Host, n1.Dt, asia)
+	supply := New(n1.Host, n1.Dt, asia)
 
 	asiaNodes := make(map[peer.ID]*testutil.TestNode)
 	var asiaSupplies []*Supply
@@ -145,7 +132,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(ctx, n.Host, n.Dt, asia)
+		s := New(n.Host, n.Dt, asia)
 
 		asiaNodes[n.Host.ID()] = n
 		asiaSupplies = append(asiaSupplies, s)
@@ -163,7 +150,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(ctx, n.Host, n.Dt, africa)
+		s := New(n.Host, n.Dt, africa)
 
 		africaNodes[n.Host.ID()] = n
 		africaSupplies = append(africaSupplies, s)
@@ -175,29 +162,17 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	receivers := make(chan peer.ID, 4)
-	done := make(chan error)
-	unsubscribe := supply.SubscribeToEvents(func(event Event) {
-		require.Equal(t, rootCid, event.PayloadCID)
-		receivers <- event.Provider
-		if len(receivers) == cap(receivers) {
-			done <- nil
-		}
-	})
-	defer unsubscribe()
-
-	err = supply.SendAddRequest(rootCid, uint64(len(origBytes)))
+	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
+	defer res.Close()
 	require.NoError(t, err)
 
-	select {
-	case <-ctx.Done():
-		t.Error("requests incomplete")
-	case <-done:
-		pp := supply.providerPeers[rootCid].Peers()
-		require.Equal(t, len(pp), 4)
-		for i := 0; i < len(pp); i++ {
-			asiaNodes[pp[i]].VerifyFileTransferred(ctx, t, rootCid, origBytes)
-		}
-
+	var recipients []PRecord
+	for len(recipients) < 5 {
+		rec, err := res.Next(ctx)
+		require.NoError(t, err)
+		recipients = append(recipients, rec)
+	}
+	for _, p := range recipients {
+		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, rootCid, origBytes)
 	}
 }

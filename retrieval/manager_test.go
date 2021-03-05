@@ -101,10 +101,11 @@ func (p *mockPayments) SetChannelAvailableFunds(funds payments.AvailableFunds) {
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
-		name     string
-		addFunds bool
-		chFunds  payments.AvailableFunds
-		free     bool
+		name           string
+		addFunds       bool
+		chFunds        payments.AvailableFunds
+		free           bool
+		failValidation bool
 	}{
 		{name: "Basic transfer"},
 		{name: "Existing channel", addFunds: true},
@@ -112,6 +113,7 @@ func TestRetrieval(t *testing.T) {
 			ConfirmedAmt: abi.NewTokenAmount(-40100000),
 		}},
 		{name: "Free transfer", free: true},
+		{name: "Validation error", failValidation: true},
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -179,7 +181,7 @@ func TestRetrieval(t *testing.T) {
 			r1.Client().SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 				fmt.Println("Client:", deal.Statuses[state.Status])
 				switch state.Status {
-				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
+				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored, deal.StatusRejected:
 					clientDealStateChan <- state
 					return
 				case deal.StatusInsufficientFunds:
@@ -205,6 +207,17 @@ func TestRetrieval(t *testing.T) {
 			unsealPrice := big.Zero()
 			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
 			require.NoError(t, err)
+			ask := deal.QueryResponse{
+				MinPricePerByte:            pricePerByte,
+				MaxPaymentInterval:         paymentInterval,
+				MaxPaymentIntervalIncrease: paymentIntervalIncrease,
+			}
+			// The client is trying to retrieve at lower price than agreed upon in the query/response agreement
+			if testCase.failValidation {
+				ask.MinPricePerByte = big.Add(pricePerByte, abi.NewTokenAmount(int64(20)))
+			}
+			// We need to set the ask first
+			r2.Provider().SetAsk(n1.Host.ID(), ask)
 
 			// We offset it a bit since it's usually higher with ipld encoding
 			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+200)))
@@ -220,6 +233,10 @@ func TestRetrieval(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("deal failed to complete")
 			case clientDealState := <-clientDealStateChan:
+				if testCase.failValidation {
+					require.Equal(t, deal.StatusRejected, clientDealState.Status)
+					return
+				}
 				require.Equal(t, deal.StatusCompleted, clientDealState.Status)
 			}
 

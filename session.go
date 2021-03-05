@@ -8,7 +8,6 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	cid "github.com/ipfs/go-cid"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	iprime "github.com/ipld/go-ipld-prime"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
@@ -21,34 +20,26 @@ import (
 
 // Session to exchange multiple blocks with a set of connected peers
 type Session struct {
-	blockstore   blockstore.Blockstore
 	regionTopics map[string]*pubsub.Topic
-	net          RetrievalMarketNetwork
+	net          retrieval.QueryNetwork
 	retriever    *retrieval.Client
 	clientAddr   address.Address
 	root         cid.Cid
 	sel          iprime.Node
-	ctx          context.Context
 	done         chan error
 	unsub        retrieval.Unsubscribe
 
 	mu        sync.Mutex
-	responses map[peer.ID]QueryResponse // List of all the responses peers sent us back for a gossip query
-	dealID    *deal.ID                  // current ongoing deal if any
-}
-
-// Offer is the conditions under which a provider is willing to approve a transfer
-type Offer struct {
-	PeerID   peer.ID
-	Response QueryResponse
+	responses map[peer.ID]deal.QueryResponse // List of all the responses peers sent us back for a gossip query
+	dealID    *deal.ID                       // current ongoing deal if any
 }
 
 type gossipSourcing struct {
-	offers chan Offer // stream of offers coming from a gossip query
+	offers chan deal.Offer // stream of offers coming from a gossip query
 }
 
 // HandleQueryStream for direct provider queries
-func (g *gossipSourcing) HandleQueryStream(stream RetrievalQueryStream) {
+func (g *gossipSourcing) HandleQueryStream(stream retrieval.QueryStream) {
 
 	defer stream.Close()
 
@@ -58,20 +49,23 @@ func (g *gossipSourcing) HandleQueryStream(stream RetrievalQueryStream) {
 		return
 	}
 
-	g.offers <- Offer{stream.OtherPeer(), response}
+	g.offers <- deal.Offer{
+		PeerID:   stream.OtherPeer(),
+		Response: response,
+	}
 }
 
 // QueryMiner asks a storage miner for retrieval conditions
-func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*Offer, error) {
+func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*deal.Offer, error) {
 	stream, err := s.net.NewQueryStream(pid)
 	if err != nil {
 		return nil, err
 	}
 	defer stream.Close()
 
-	err = stream.WriteQuery(Query{
+	err = stream.WriteQuery(deal.Query{
 		PayloadCID:  s.root,
-		QueryParams: QueryParams{},
+		QueryParams: deal.QueryParams{},
 	})
 	if err != nil {
 		return nil, err
@@ -81,7 +75,7 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*Offer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Offer{
+	return &deal.Offer{
 		PeerID:   pid,
 		Response: res,
 	}, nil
@@ -89,14 +83,14 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*Offer, error) {
 
 // QueryGossip asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
-func (s *Session) QueryGossip(ctx context.Context) (*Offer, error) {
-	offers := make(chan Offer, 1)
+func (s *Session) QueryGossip(ctx context.Context) (*deal.Offer, error) {
+	offers := make(chan deal.Offer, 1)
 	disc := &gossipSourcing{offers}
 	s.net.SetDelegate(disc)
 
-	m := Query{
+	m := deal.Query{
 		PayloadCID:  s.root,
-		QueryParams: QueryParams{},
+		QueryParams: deal.QueryParams{},
 	}
 
 	buf := new(bytes.Buffer)
@@ -124,7 +118,7 @@ func (s *Session) QueryGossip(ctx context.Context) (*Offer, error) {
 }
 
 // SyncBlocks will trigger a retrieval without returning the blocks
-func (s *Session) SyncBlocks(ctx context.Context, of *Offer) error {
+func (s *Session) SyncBlocks(ctx context.Context, of *deal.Offer) error {
 	params, err := deal.NewParams(
 		of.Response.MinPricePerByte,
 		of.Response.MaxPaymentInterval,

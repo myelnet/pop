@@ -75,6 +75,12 @@ var FSMEvents = fsm.Events{
 		}),
 
 	// Initial deal acceptance events
+	fsm.Event(EventDealRejected).
+		From(deal.StatusWaitForAcceptance).To(deal.StatusRejected).
+		Action(func(deal *deal.ClientState, message string) error {
+			deal.Message = fmt.Sprintf("deal rejected: %s", message)
+			return nil
+		}),
 	fsm.Event(EventDealNotFound).
 		From(deal.StatusWaitForAcceptance).To(deal.StatusDealNotFound).
 		Action(func(ds *deal.ClientState, message string) error {

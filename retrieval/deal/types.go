@@ -9,6 +9,7 @@ import (
 	"github.com/filecoin-project/go-fil-markets/piecestore"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
@@ -17,7 +18,84 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
-//go:generate cbor-gen-for --map-encoding Proposal Response Params Payment ClientState ProviderState PaymentInfo
+//go:generate cbor-gen-for --map-encoding QueryParams Query QueryResponse Proposal Response Params Payment ClientState ProviderState PaymentInfo
+
+// QueryParams - indicate what specific information about a piece that a retrieval
+// client is interested in, as well as specific parameters the client is seeking
+// for the retrieval deal
+type QueryParams struct {
+	PieceCID *cid.Cid // optional, query if miner has this cid in this piece. some miners may not be able to respond.
+	// MaxPricePerByte            abi.TokenAmount // optional, tell miner uninterested if more expensive than this
+	// MinPaymentInterval         uint64          // optional, tell miner uninterested unless payment interval is greater than this
+	// MinPaymentIntervalIncrease uint64          // optional, tell miner uninterested unless payment interval increase is greater than this
+}
+
+// Query is a query to a given provider to determine information about a piece
+// they may have available for retrieval
+// If we don't have a specific provider in mind we can use gossip Hop to find one
+type Query struct {
+	PayloadCID cid.Cid
+	QueryParams
+}
+
+// QueryResponseStatus indicates whether a queried piece is available
+type QueryResponseStatus uint64
+
+const (
+	// QueryResponseAvailable indicates a provider has a piece and is prepared to
+	// return it
+	QueryResponseAvailable QueryResponseStatus = iota
+
+	// QueryResponseUnavailable indicates a provider either does not have or cannot
+	// serve the queried piece to the client
+	QueryResponseUnavailable
+
+	// QueryResponseError indicates something went wrong generating a query response
+	QueryResponseError
+)
+
+// QueryItemStatus indicates whether the requested part of a piece (payload or selector)
+// is available for retrieval
+type QueryItemStatus uint64
+
+const (
+	// QueryItemAvailable indicates requested part of the piece is available to be
+	// served
+	QueryItemAvailable QueryItemStatus = iota
+
+	// QueryItemUnavailable indicates the piece either does not contain the requested
+	// item or it cannot be served
+	QueryItemUnavailable
+
+	// QueryItemUnknown indicates the provider cannot determine if the given item
+	// is part of the requested piece (for example, if the piece is sealed and the
+	// miner does not maintain a payload CID index)
+	QueryItemUnknown
+)
+
+// QueryResponse is a miners response to a given retrieval query
+type QueryResponse struct {
+	Status                     QueryResponseStatus
+	PieceCIDFound              QueryItemStatus // if a PieceCID was requested, the result
+	Size                       uint64          // Total size of piece in bytes
+	PaymentAddress             address.Address // address to send funds to -- may be different than miner addr
+	MinPricePerByte            abi.TokenAmount
+	MaxPaymentInterval         uint64
+	MaxPaymentIntervalIncrease uint64
+	Message                    string
+	UnsealPrice                abi.TokenAmount
+}
+
+// PieceRetrievalPrice is the total price to retrieve the piece (size * MinPricePerByte + UnsealedPrice)
+func (qr QueryResponse) PieceRetrievalPrice() abi.TokenAmount {
+	return big.Add(big.Mul(qr.MinPricePerByte, abi.NewTokenAmount(int64(qr.Size))), qr.UnsealPrice)
+}
+
+// Offer is the conditions under which a provider is willing to approve a transfer
+type Offer struct {
+	PeerID   peer.ID
+	Response QueryResponse
+}
 
 // ID is an identifier for a retrieval deal (unique to a client)
 type ID uint64

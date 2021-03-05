@@ -15,10 +15,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 )
 
-//go:generate cbor-gen-for AddRequest
+//go:generate cbor-gen-for Request
 
-// AddRequestProtocol labels our network for announcing new content to the network
-const AddRequestProtocol = "/myel/hop/supply/add/1.0"
+// RequestProtocol labels our network for announcing new content to the network
+const RequestProtocol = "/myel/hop/supply/dispatch/1.0"
 
 func protoRegions(proto string, regions []Region) []protocol.ID {
 	var pls []protocol.ID
@@ -28,15 +28,37 @@ func protoRegions(proto string, regions []Region) []protocol.ID {
 	return pls
 }
 
-// AddRequest describes the new content to anounce
-type AddRequest struct {
+// Request describes the content to cache providers who may or may not accept to retrieve it
+type Request struct {
 	PayloadCID cid.Cid
 	Size       uint64
 }
 
 // Type defines AddRequest as a datatransfer voucher for pulling the data from the request
-func (a *AddRequest) Type() datatransfer.TypeIdentifier {
-	return "AddRequestVoucher"
+func (Request) Type() datatransfer.TypeIdentifier {
+	return "DispatchRequestVoucher"
+}
+
+// Response is an async collection of confirmations from data transfers to cache providers
+type Response struct {
+	recordChan chan PRecord
+	unsub      datatransfer.Unsubscribe
+}
+
+// Next returns the next record from a new cache
+func (r *Response) Next(ctx context.Context) (PRecord, error) {
+	select {
+	case r := <-r.recordChan:
+		return r, nil
+	case <-ctx.Done():
+		return PRecord{}, ctx.Err()
+	}
+}
+
+// Close stops listening for cache confirmations
+func (r *Response) Close() {
+	r.unsub()
+	close(r.recordChan)
 }
 
 // Network handles all the different messaging protocols
@@ -51,19 +73,19 @@ type Network struct {
 func NewNetwork(h host.Host, regions []Region) *Network {
 	sn := &Network{
 		host:      h,
-		protocols: protoRegions(AddRequestProtocol, regions),
+		protocols: protoRegions(RequestProtocol, regions),
 	}
 	return sn
 }
 
-// NewAddRequestStream to send AddRequest messages to
-func (sn *Network) NewAddRequestStream(dest peer.ID) (AddRequestStreamer, error) {
+// NewRequestStream to send AddRequest messages to
+func (sn *Network) NewRequestStream(dest peer.ID) (RequestStreamer, error) {
 	s, err := sn.host.NewStream(context.Background(), dest, sn.protocols...)
 	if err != nil {
 		return nil, err
 	}
 	buffered := bufio.NewReaderSize(s, 16)
-	return &addRequestStream{p: dest, rw: s, buffered: buffered}, nil
+	return &requestStream{p: dest, rw: s, buffered: buffered}, nil
 }
 
 // SetDelegate assigns a handler for all the protocols
@@ -82,45 +104,45 @@ func (sn *Network) handleStream(s network.Stream) {
 	}
 	remotePID := s.Conn().RemotePeer()
 	buffered := bufio.NewReaderSize(s, 16)
-	ns := &addRequestStream{remotePID, s, buffered}
-	sn.receiver.HandleAddRequest(ns)
+	ns := &requestStream{remotePID, s, buffered}
+	sn.receiver.HandleRequest(ns)
 }
 
 // StreamReceiver will read the stream and do something in response
 type StreamReceiver interface {
-	HandleAddRequest(AddRequestStreamer)
+	HandleRequest(RequestStreamer)
 }
 
-// AddRequestStreamer reads AddRequest structs from a muxed stream
-type AddRequestStreamer interface {
-	ReadAddRequest() (AddRequest, error)
-	WriteAddRequest(AddRequest) error
+// RequestStreamer reads AddRequest structs from a muxed stream
+type RequestStreamer interface {
+	ReadRequest() (Request, error)
+	WriteRequest(Request) error
 	OtherPeer() peer.ID
 	Close() error
 }
 
-type addRequestStream struct {
+type requestStream struct {
 	p        peer.ID
 	rw       mux.MuxedStream
 	buffered *bufio.Reader
 }
 
-func (a *addRequestStream) ReadAddRequest() (AddRequest, error) {
-	var m AddRequest
+func (a *requestStream) ReadRequest() (Request, error) {
+	var m Request
 	if err := m.UnmarshalCBOR(a.buffered); err != nil {
-		return AddRequest{}, err
+		return Request{}, err
 	}
 	return m, nil
 }
 
-func (a *addRequestStream) WriteAddRequest(m AddRequest) error {
+func (a *requestStream) WriteRequest(m Request) error {
 	return cborutil.WriteCborRPC(a.rw, &m)
 }
 
-func (a *addRequestStream) Close() error {
+func (a *requestStream) Close() error {
 	return a.rw.Close()
 }
 
-func (a *addRequestStream) OtherPeer() peer.ID {
+func (a *requestStream) OtherPeer() peer.ID {
 	return a.p
 }

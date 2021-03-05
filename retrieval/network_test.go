@@ -1,4 +1,4 @@
-package hop
+package retrieval
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	cid "github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 	"github.com/myelnet/go-hop-exchange/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -15,12 +16,12 @@ import (
 var blockGenerator = blocksutil.NewBlockGenerator()
 
 type testhandler struct {
-	net  RetrievalMarketNetwork
+	net  QueryNetwork
 	root cid.Cid
 	t    *testing.T
 }
 
-func (h *testhandler) HandleQueryStream(stream RetrievalQueryStream) {
+func (h *testhandler) HandleQueryStream(stream QueryStream) {
 	defer stream.Close()
 
 	query, err := stream.ReadQuery()
@@ -29,13 +30,13 @@ func (h *testhandler) HandleQueryStream(stream RetrievalQueryStream) {
 
 	addr, _ := address.NewIDAddress(uint64(10))
 
-	answer := QueryResponse{
-		Status:                     QueryResponseAvailable,
+	answer := deal.QueryResponse{
+		Status:                     deal.QueryResponseAvailable,
 		Size:                       1600,
 		PaymentAddress:             addr,
-		MinPricePerByte:            DefaultPricePerByte,
-		MaxPaymentInterval:         DefaultPaymentInterval,
-		MaxPaymentIntervalIncrease: DefaultPaymentIntervalIncrease,
+		MinPricePerByte:            deal.DefaultPricePerByte,
+		MaxPaymentInterval:         deal.DefaultPaymentInterval,
+		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
 	}
 	err = stream.WriteQueryResponse(answer)
 	require.NoError(h.t, err)
@@ -51,8 +52,8 @@ func TestNetwork(t *testing.T) {
 	cnode := testutil.NewTestNode(mn, t)
 	pnode := testutil.NewTestNode(mn, t)
 
-	cnet := NewFromLibp2pHost(cnode.Host)
-	pnet := NewFromLibp2pHost(pnode.Host)
+	cnet := NewQueryNetwork(cnode.Host)
+	pnet := NewQueryNetwork(pnode.Host)
 
 	phandler := &testhandler{pnet, root, t}
 	pnet.SetDelegate(phandler)
@@ -65,16 +66,16 @@ func TestNetwork(t *testing.T) {
 	require.NoError(t, err)
 	defer stream.Close()
 
-	err = stream.WriteQuery(Query{
+	err = stream.WriteQuery(deal.Query{
 		PayloadCID:  root,
-		QueryParams: QueryParams{},
+		QueryParams: deal.QueryParams{},
 	})
 	require.NoError(t, err)
 
 	res, err := stream.ReadQueryResponse()
 	require.NoError(t, err)
 
-	require.Equal(t, res.Status, QueryResponseAvailable)
+	require.Equal(t, res.Status, deal.QueryResponseAvailable)
 }
 
 /****
