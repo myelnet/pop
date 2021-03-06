@@ -258,3 +258,8 @@ func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*
 	e.net.AddAddrs(pi.ID, pi.Addrs)
 	return &pi, nil
 }
+
+// IsFilecoinOnline tells us if we are connected to the Filecoin RPC api
+func (e *Exchange) IsFilecoinOnline() bool {
+	return e.fAPI != nil
+}
