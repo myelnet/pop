@@ -124,6 +124,10 @@ const (
 	// the client that all blocks were sent for the deal, and the client is
 	// waiting for the last blocks to arrive
 	EventWaitForLastBlocks
+
+	// EventProviderErrored happens when we receive a status in response voucher
+	// telling us something went wrong on the provider side but they don't know what (500)
+	EventProviderErrored
 )
 
 // Events is a human readable map of client event name -> event description
@@ -164,4 +168,5 @@ var Events = map[Event]string{
 	EventRecheckFunds:                  "ClientEventRecheckFunds",
 	EventCancel:                        "ClientEventCancel",
 	EventWaitForLastBlocks:             "ClientEventWaitForLastBlocks",
+	EventProviderErrored:               "ClientEventProviderErrored",
 }

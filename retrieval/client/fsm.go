@@ -167,6 +167,14 @@ var FSMEvents = fsm.Events{
 			return nil
 		}),
 
+	// Provider Errors
+	fsm.Event(EventProviderErrored).
+		FromAny().To(deal.StatusErrored).
+		Action(func(ds *deal.ClientState, msg string) error {
+			ds.Message = msg
+			return nil
+		}),
+
 	// Transfer Channel Errors
 	fsm.Event(EventDataTransferError).
 		FromAny().To(deal.StatusErrored).
