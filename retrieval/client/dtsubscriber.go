@@ -19,6 +19,10 @@ func eventFromDealStatus(response *deal.Response) (Event, []interface{}) {
 	switch response.Status {
 	case deal.StatusRejected:
 		return EventDealRejected, []interface{}{response.Message}
+		// For now we keep this here so we can read the message
+		// as sometimes there is a bug on the storage miner side
+	case deal.StatusErrored:
+		return EventProviderErrored, []interface{}{response.Message}
 	case deal.StatusDealNotFound:
 		return EventDealNotFound, []interface{}{response.Message}
 	case deal.StatusAccepted:

@@ -3,22 +3,24 @@ package cli
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/peterbourgon/ff/v2"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
 
 var startArgs struct {
 	temp         bool
-	peer         string
+	bootstrap    string
 	filEndpoint  string
 	filToken     string
 	filTokenType string
@@ -27,9 +29,8 @@ var startArgs struct {
 }
 
 var startCmd = &ffcli.Command{
-	Name:       "start",
-	ShortUsage: "start",
-	ShortHelp:  "Starts an IPFS daemon",
+	Name:      "start",
+	ShortHelp: "Starts an IPFS daemon",
 	LongHelp: strings.TrimSpace(`
 
 The 'hop start' command starts an IPFS daemon service.
@@ -38,32 +39,49 @@ The 'hop start' command starts an IPFS daemon service.
 	Exec: runStart,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
-		fs.BoolVar(&startArgs.temp, "temp", true, "create a temporary datastore for testing")
-		fs.StringVar(
-			&startArgs.peer,
-			"peer",
-			"/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
-			"bootstrap peer to discover others",
-		)
+		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
+		fs.StringVar(&startArgs.bootstrap, "bootstrap", "", "bootstrap peer to discover others")
 		fs.StringVar(&startArgs.filEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
-		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.filTokenType, "fil-token-type", "Bearer", "auth token type")
+		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "Global", "provider regions separated by commas")
 
 		return fs
+	})(),
+	Options: (func() []ff.Option {
+		path, err := repoFullPath(getRepoPath())
+		if err != nil {
+			path = ""
+		}
+		return []ff.Option{
+			ff.WithConfigFile(filepath.Join(path, "HopConfig.json")),
+			ff.WithConfigFileParser(ff.JSONParser),
+			ff.WithAllowMissingConfigFile(true),
+		}
 	})(),
 }
 
 func runStart(ctx context.Context, args []string) error {
 	var err error
+	path, err := repoFullPath(getRepoPath())
+	if err != nil {
+		return err
+	}
 
-	rpath := ""
-	if startArgs.temp {
-		rpath, err = ioutil.TempDir("", "repo")
+	exists, err := repoExists(path)
+	if err != nil {
+		return err
+	}
+
+	if !exists || startArgs.temp {
+		path, err = os.MkdirTemp("", ".hop")
 		if err != nil {
 			return err
 		}
+		defer os.RemoveAll(path)
+		log.Warn().
+			Msg("Creating temp repo... To create a persistent repo run `hop init`")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -94,18 +112,21 @@ func runStart(ctx context.Context, args []string) error {
 
 	var privKey string
 	if startArgs.privKeyPath != "" {
-		fdata, err := ioutil.ReadFile(startArgs.privKeyPath)
+		fdata, err := os.ReadFile(startArgs.privKeyPath)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to read private key")
 		} else {
 			privKey = strings.TrimSpace(string(fdata))
 		}
 	}
+	var bAddrs []string
+	if startArgs.bootstrap != "" {
+		bAddrs = append(bAddrs, startArgs.bootstrap)
+	}
 
 	opts := node.Options{
-		RepoPath:       rpath,
-		SocketPath:     "hopd.sock",
-		BootstrapPeers: []string{startArgs.peer},
+		RepoPath:       path,
+		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.filEndpoint,
 		FilToken:       filToken,
 		PrivKey:        privKey,
@@ -118,4 +139,32 @@ func runStart(ctx context.Context, args []string) error {
 		return err
 	}
 	return nil
+}
+
+// Repo path is akin to IPFS: ~/.hop by default or changed via $HOP_PATH
+func getRepoPath() string {
+	if path, ok := os.LookupEnv("HOP_PATH"); ok {
+		return path
+	}
+	return ".hop"
+}
+
+// construct full path and check if a repo was initialized with a datastore
+func repoFullPath(path string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, path), nil
+}
+
+func repoExists(path string) (bool, error) {
+	_, err := os.Stat(filepath.Join(path, "datastore"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

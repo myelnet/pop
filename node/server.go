@@ -243,7 +243,10 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("node.New: %v", err)
 	}
 
-	log.Info().Strs("regions", opts.Regions).Msg("node is running")
+	log.Info().
+		Strs("regions", opts.Regions).
+		Bool("isFilecoinRPCOnline", nd.exch.IsFilecoinOnline()).
+		Msg("node is running")
 
 	server := &server{
 		node: nd,

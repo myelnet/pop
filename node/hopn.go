@@ -108,7 +108,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	dsopts.SyncWrites = false
 	dsopts.Truncate = true
 
-	nd.ds, err = badgerds.NewDatastore(opts.RepoPath, &dsopts)
+	nd.ds, err = badgerds.NewDatastore(filepath.Join(opts.RepoPath, "datastore"), &dsopts)
 	if err != nil {
 		return nil, err
 	}
