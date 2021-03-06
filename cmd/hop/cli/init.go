@@ -49,6 +49,9 @@ func runInit(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		// default configs
+		// Regions aren't set in a static config object as we aim to make them
+		// more dynamic in the future
 		config := HopConfig{
 			FilEndpoint:   os.Getenv("FIL_ENDPOINT"),
 			FilToken:      os.Getenv("FIL_TOKEN"),

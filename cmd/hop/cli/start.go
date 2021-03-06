@@ -43,8 +43,8 @@ The 'hop start' command starts an IPFS daemon service.
 		fs.StringVar(&startArgs.bootstrap, "bootstrap", "", "bootstrap peer to discover others")
 		fs.StringVar(&startArgs.filEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
-		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.filTokenType, "fil-token-type", "Bearer", "auth token type")
+		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "Global", "provider regions separated by commas")
 
 		return fs

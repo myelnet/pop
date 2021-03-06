@@ -49,6 +49,11 @@ As an IPFS plugin:
 
 ## CLI Usage
 
+### `hop init`
+
+Creates a new local directory for the datastore, keystore etc at ~/.hop. Generates a config file
+with address to bootstrap nodes and Filecoin gateway.
+
 ### `hop start`
 
 Starts an ipfs daemon ready to provide content
