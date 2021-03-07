@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -23,17 +23,12 @@ import (
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	unixfile "github.com/ipfs/go-unixfs/file"
-	"github.com/ipfs/go-unixfs/importer/balanced"
-	"github.com/ipfs/go-unixfs/importer/helpers"
-	"github.com/ipld/go-ipld-prime"
-	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
@@ -90,6 +85,7 @@ type node struct {
 	host host.Host
 	ds   datastore.Batching
 	bs   blockstore.Blockstore
+	ms   *multistore.MultiStore
 	dag  ipldformat.DAGService
 	gs   graphsync.GraphExchange
 	ps   *pubsub.PubSub
@@ -114,6 +110,11 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	nd.bs = blockstore.NewBlockstore(nd.ds)
+
+	nd.ms, err = multistore.NewMultiDstore(nd.ds)
+	if err != nil {
+		return nil, err
+	}
 
 	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
 
@@ -182,6 +183,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	settings := hop.Settings{
 		Datastore:  nd.ds,
 		Blockstore: nd.bs,
+		MultiStore: nd.ms,
 		Host:       nd.host,
 		PubSub:     nd.ps,
 		GraphSync:  nd.gs,
@@ -299,7 +301,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	}
 }
 
-// Add a file to the IPFS unixfs dag
+// Add a file to the Workdag
 func (nd *node) Add(ctx context.Context, args *AddArgs) {
 
 	sendErr := func(err error) {
@@ -310,13 +312,22 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		})
 	}
 
-	link, err := nd.loadFilesToBlockstore(ctx, args)
-	root := link.(cidlink.Link).Cid
+	id := nd.ms.Next()
+	st, err := nd.ms.Get(id)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	stats, err := hop.DAGStat(ctx, nd.bs, root, hop.AllSelector())
+	w := &Workdag{store: st, index: &Index{}}
+	root, err := w.Add(ctx, AddOptions{
+		Path:      args.Path,
+		ChunkSize: int64(args.ChunkSize),
+	})
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	stats, err := hop.DAGStat(ctx, st.Bstore, root, hop.AllSelector())
 	if err != nil {
 		log.Error().Err(err).Msg("DAGStat")
 	}
@@ -353,65 +364,6 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 			return
 		}
 	}
-}
-
-func (nd *node) loadFilesToBlockstore(ctx context.Context, args *AddArgs) (ipld.Link, error) {
-
-	st, err := os.Stat(args.Path)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open file: %w", err)
-	}
-	file, err := files.NewSerialFile(args.Path, false, st)
-	if err != nil {
-		return nil, fmt.Errorf("NewSerialFile: %w", err)
-	}
-
-	switch f := file.(type) {
-	case files.Directory:
-		return nd.addDir(ctx, args.Path, f)
-	case files.File:
-		return nd.addFile(ctx, f, args)
-	default:
-		return nil, fmt.Errorf("unknown file type")
-	}
-}
-
-func (nd *node) addFile(ctx context.Context, file files.File, args *AddArgs) (ipld.Link, error) {
-
-	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
-
-	prefix, err := merkledag.PrefixForCidVersion(1)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create cid prefix: %w", err)
-	}
-	prefix.MhType = DefaultHashFunction
-
-	params := helpers.DagBuilderParams{
-		Maxlinks:   unixfsLinksPerLevel,
-		RawLeaves:  true,
-		CidBuilder: prefix,
-		Dagserv:    bufferedDS,
-	}
-
-	db, err := params.New(chunk.NewSizeSplitter(file, int64(args.ChunkSize)))
-	if err != nil {
-		return nil, fmt.Errorf("unable to init chunker: %w", err)
-	}
-
-	n, err := balanced.Layout(db)
-	if err != nil {
-		return nil, fmt.Errorf("unable to chunk file: %w", err)
-	}
-
-	err = bufferedDS.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("unable to commit blocks to store: %w", err)
-	}
-	return cidlink.Link{Cid: n.Cid()}, nil
-}
-
-func (nd *node) addDir(ctx context.Context, path string, dir files.Directory) (ipld.Link, error) {
-	return nil, fmt.Errorf("TODO")
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli

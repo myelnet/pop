@@ -160,13 +160,9 @@ type DealEnvironment interface {
 	CloseDataTransfer(context.Context, datatransfer.ChannelID) error
 }
 
-// TrackTransfer resumes a deal so we can start sending data
+// TrackTransfer keeps track of a transfer during revalidation
 func TrackTransfer(ctx fsm.Context, environment DealEnvironment, ds deal.ProviderState) error {
 	err := environment.TrackTransfer(ds)
-	if err != nil {
-		return ctx.Trigger(EventDataTransferError, err)
-	}
-	err = environment.ResumeDataTransfer(ctx.Context(), ds.ChannelID)
 	if err != nil {
 		return ctx.Trigger(EventDataTransferError, err)
 	}

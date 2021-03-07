@@ -49,31 +49,23 @@ func TransportConfigurer(thisPeer peer.ID, storeGetter StoreGetter) datatransfer
 	}
 }
 
-type clientStoreGetter struct {
+type dualStoreGetter struct {
 	c *Client
-}
-
-func (csg *clientStoreGetter) Get(pid peer.ID, did deal.ID) (*multistore.Store, error) {
-	var state deal.ClientState
-	err := csg.c.stateMachines.Get(did).Get(&state)
-	if err != nil {
-		return nil, err
-	}
-	if state.StoreID == nil {
-		return nil, nil
-	}
-	return csg.c.multiStore.Get(*state.StoreID)
-}
-
-type providerStoreGetter struct {
 	p *Provider
 }
 
-func (psg *providerStoreGetter) Get(pid peer.ID, did deal.ID) (*multistore.Store, error) {
-	var state deal.ProviderState
-	err := psg.p.stateMachines.GetSync(context.TODO(), deal.ProviderDealIdentifier{Receiver: pid, DealID: did}, &state)
-	if err != nil {
-		return nil, err
+// Our transport handles both client and provider as a result we need to try both states see which one works
+// TODO: figure out how to improve so we don't cause unnecessary reads on the client side
+func (dsg *dualStoreGetter) Get(pid peer.ID, did deal.ID) (*multistore.Store, error) {
+	var pstate deal.ProviderState
+	err := dsg.p.stateMachines.GetSync(context.TODO(), deal.ProviderDealIdentifier{Receiver: pid, DealID: did}, &pstate)
+	if err == nil {
+		return dsg.p.multiStore.Get(pstate.StoreID)
 	}
-	return psg.p.multiStore.Get(state.StoreID)
+	var cstate deal.ClientState
+	err = dsg.c.stateMachines.Get(did).Get(&cstate)
+	if err == nil {
+		return dsg.c.multiStore.Get(*cstate.StoreID)
+	}
+	return nil, err
 }

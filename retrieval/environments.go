@@ -9,6 +9,7 @@ import (
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-fil-markets/shared"
 	"github.com/filecoin-project/go-multistore"
+	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
@@ -137,7 +138,12 @@ func (pve *providerValidationEnvironment) BeginTracking(pds deal.ProviderState) 
 	return pve.p.stateMachines.Send(pds.Identifier(), provider.EventOpen)
 }
 
-// NextStoreID allocates a store for this deal
+// GetStoreID finds a store where our content is currently
+func (pve *providerValidationEnvironment) GetStoreID(c cid.Cid) (multistore.StoreID, error) {
+	return pve.p.storeIDGetter.GetStoreID(c)
+}
+
+// NextStoreID allocates a store for this deal TODO: do we still need this?
 func (pve *providerValidationEnvironment) NextStoreID() (multistore.StoreID, error) {
 	storeID := pve.p.multiStore.Next()
 	_, err := pve.p.multiStore.Get(storeID)

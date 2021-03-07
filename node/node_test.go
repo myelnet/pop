@@ -26,6 +26,7 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	nd := &node{}
 	nd.ds = tn.Ds
 	nd.bs = tn.Bs
+	nd.ms = tn.Ms
 	nd.dag = tn.DAG
 	nd.host = tn.Host
 	nd.gs = tn.Gs
@@ -35,6 +36,7 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	settings := hop.Settings{
 		Datastore:  nd.ds,
 		Blockstore: nd.bs,
+		MultiStore: nd.ms,
 		Host:       nd.host,
 		PubSub:     nd.ps,
 		GraphSync:  nd.gs,
