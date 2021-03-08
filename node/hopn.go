@@ -395,6 +395,18 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	})
 }
 
+// Commit packages multiple unix FS dags into one, kind of like a flat directory
+func (nd *node) Commit(ctx context.Context, args *CommitArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			CommitResult: &CommitResult{
+				Err: err.Error(),
+			},
+		})
+	}
+	sendErr(errors.New("TODO"))
+}
+
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli
 // connections
 func (nd *node) Get(ctx context.Context, args *GetArgs) {

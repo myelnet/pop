@@ -25,9 +25,14 @@ type AddArgs struct {
 	ChunkSize int
 }
 
-// StatusArgs get passes to the Status command
+// StatusArgs get passed to the Status command
 type StatusArgs struct {
 	Verbose bool
+}
+
+// CommitArgs are passed to the Commit command
+type CommitArgs struct {
+	Archive bool
 }
 
 // GetArgs get passed to the Get command
@@ -45,6 +50,7 @@ type Command struct {
 	Ping   *PingArgs
 	Add    *AddArgs
 	Status *StatusArgs
+	Commit *CommitArgs
 	Get    *GetArgs
 }
 
@@ -72,6 +78,12 @@ type StatusResult struct {
 	Err    string
 }
 
+// CommitResult gives us feedback on the result of the Commit operation
+type CommitResult struct {
+	DataCid string
+	Err     string
+}
+
 // GetResult gives us feedback on the result of the Get request
 type GetResult struct {
 	DealID          string
@@ -90,6 +102,7 @@ type Notify struct {
 	PingResult   *PingResult
 	AddResult    *AddResult
 	StatusResult *StatusResult
+	CommitResult *CommitResult
 	GetResult    *GetResult
 }
 
@@ -128,6 +141,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Status; c != nil {
 		cs.n.Status(ctx, c)
+		return nil
+	}
+	if c := cmd.Commit; c != nil {
+		cs.n.Commit(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -199,6 +216,10 @@ func (cc *CommandClient) Add(args *AddArgs) {
 
 func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
+}
+
+func (cc *CommandClient) Commit(args *CommitArgs) {
+	cc.send(Command{Commit: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {
