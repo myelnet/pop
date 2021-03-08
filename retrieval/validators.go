@@ -37,6 +37,8 @@ type ValidationEnvironment interface {
 	BeginTracking(pds deal.ProviderState) error
 	// NextStoreID allocates a store for this deal
 	NextStoreID() (multistore.StoreID, error)
+	// GetStoreID gets an existing store for this deal
+	GetStoreID(cid.Cid) (multistore.StoreID, error)
 }
 
 // ProviderRequestValidator validates incoming requests for the Retrieval Provider
@@ -93,7 +95,7 @@ func (rv *ProviderRequestValidator) validatePull(receiver peer.ID, proposal *dea
 		Receiver: receiver,
 	}
 
-	status, err := rv.acceptDeal(pds)
+	status, err := rv.acceptDeal(&pds)
 
 	response := deal.Response{
 		ID:     proposal.ID,
@@ -110,18 +112,18 @@ func (rv *ProviderRequestValidator) validatePull(receiver peer.ID, proposal *dea
 		return nil, err
 	}
 
-	return &response, datatransfer.ErrPause
+	return &response, nil
 }
 
-func (rv *ProviderRequestValidator) acceptDeal(d deal.ProviderState) (deal.Status, error) {
+func (rv *ProviderRequestValidator) acceptDeal(d *deal.ProviderState) (deal.Status, error) {
 	// check that the deal parameters match our required parameters or
 	// reject outright
-	err := rv.env.CheckDealParams(d)
+	err := rv.env.CheckDealParams(*d)
 	if err != nil {
 		return deal.StatusRejected, err
 	}
 
-	accepted, reason, err := rv.env.RunDealDecisioningLogic(context.TODO(), d)
+	accepted, reason, err := rv.env.RunDealDecisioningLogic(context.TODO(), *d)
 	if err != nil {
 		return deal.StatusErrored, err
 	}
@@ -129,18 +131,10 @@ func (rv *ProviderRequestValidator) acceptDeal(d deal.ProviderState) (deal.Statu
 		return deal.StatusRejected, fmt.Errorf(reason)
 	}
 
-	// TODO: verify we have the content
-	// block, err := rv.env.GetBlock(d.PayloadCID)
-	// if err != nil {
-	// 	if err == retrievalmarket.ErrNotFound {
-	// 		return retrievalmarket.DealStatusDealNotFound, err
-	// 	}
-	// 	return retrievalmarket.DealStatusErrored, err
-	// }
-
-	d.StoreID, err = rv.env.NextStoreID()
+	// This also verifies we do have the content ready to provide
+	d.StoreID, err = rv.env.GetStoreID(d.PayloadCID)
 	if err != nil {
-		return deal.StatusErrored, err
+		return deal.StatusDealNotFound, err
 	}
 
 	return deal.StatusAccepted, nil

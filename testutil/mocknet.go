@@ -211,12 +211,50 @@ func (tn *TestNode) LoadUnixFSFileToStore(ctx context.Context, t *testing.T, dir
 	return cidlink.Link{Cid: nd.Cid()}, buf.Bytes()
 }
 
-func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t *testing.T, link cid.Cid, origBytes []byte) {
-
-	n, err := tn.DAG.Get(ctx, link)
+func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t *testing.T, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
+	stID := tn.Ms.Next()
+	store, err := tn.Ms.Get(stID)
 	require.NoError(t, err)
 
-	ufile, err := unixfile.NewUnixfsFile(ctx, tn.DAG, n)
+	fpath, err := filepath.Abs(filepath.Join(ThisDir(t), "..", dirPath))
+	require.NoError(t, err)
+
+	f, err := os.Open(fpath)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	tr := io.TeeReader(f, &buf)
+	file := files.NewReaderFile(tr)
+
+	// import to UnixFS
+	bufferedDS := ipldformat.NewBufferedDAG(ctx, store.DAG)
+
+	params := helpers.DagBuilderParams{
+		Maxlinks:   unixfsLinksPerLevel,
+		RawLeaves:  true,
+		CidBuilder: nil,
+		Dagserv:    bufferedDS,
+	}
+
+	db, err := params.New(chunk.NewSizeSplitter(file, int64(unixfsChunkSize)))
+	require.NoError(t, err)
+
+	nd, err := balanced.Layout(db)
+	require.NoError(t, err)
+
+	err = bufferedDS.Commit()
+	require.NoError(t, err)
+
+	// save the original files bytes
+	return cidlink.Link{Cid: nd.Cid()}, stID, buf.Bytes()
+}
+
+func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t *testing.T, dag ipldformat.DAGService, link cid.Cid, origBytes []byte) {
+
+	n, err := dag.Get(ctx, link)
+	require.NoError(t, err)
+
+	ufile, err := unixfile.NewUnixfsFile(ctx, dag, n)
 	require.NoError(t, err)
 
 	fn, ok := ufile.(files.File)

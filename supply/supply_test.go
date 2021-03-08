@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSendAddRequest(t *testing.T) {
+func TestSendRequest(t *testing.T) {
 	bgCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
@@ -22,10 +22,9 @@ func TestSendAddRequest(t *testing.T) {
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
-	require.NoError(t, n1.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
 	// n1 is our client is adding a file to the store
-	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
 
 	regions := []Region{
@@ -35,20 +34,20 @@ func TestSendAddRequest(t *testing.T) {
 		},
 	}
 
-	supply := New(n1.Host, n1.Dt, regions)
+	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, regions)
 
 	providers := make(map[peer.ID]*testutil.TestNode)
-	var supplies []*Supply
+	supplies := make(map[peer.ID]*Supply)
 	// We add a bunch of retrieval providers
 	for i := 0; i < 10; i++ {
 		n := testutil.NewTestNode(mn, t)
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(n.Host, n.Dt, regions)
+		s := New(n.Host, n.Dt, n.Ds, n.Ms, regions)
 
 		providers[n.Host.ID()] = n
-		supplies = append(supplies, s)
+		supplies[n.Host.ID()] = s
 	}
 
 	err := mn.LinkAll()
@@ -57,7 +56,9 @@ func TestSendAddRequest(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
+	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, DispatchOptions{
+		StoreID: storeID,
+	})
 	defer res.Close()
 	require.NoError(t, err)
 
@@ -69,22 +70,24 @@ func TestSendAddRequest(t *testing.T) {
 	}
 
 	for _, c := range records {
-		providers[c.Provider].VerifyFileTransferred(ctx, t, rootCid, origBytes)
+		store, err := supplies[c.Provider].GetStore(rootCid)
+		require.NoError(t, err)
+
+		providers[c.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 	}
 }
 
 // In some rare cases where our node isn't connected to any peer we should still
 // be able to fail gracefully
-func TestSendAddRequestNoPeers(t *testing.T) {
+func TestSendRequestNoPeers(t *testing.T) {
 	bgCtx := context.Background()
 
 	mn := mocknet.New(bgCtx)
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
-	require.NoError(t, n1.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
-	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
 
 	regions := []Region{
@@ -94,15 +97,17 @@ func TestSendAddRequestNoPeers(t *testing.T) {
 		},
 	}
 
-	supply := New(n1.Host, n1.Dt, regions)
+	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, regions)
 
-	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
+	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, DispatchOptions{
+		StoreID: storeID,
+	})
 	defer res.Close()
 	require.EqualError(t, err, ErrNoPeers.Error())
 }
 
 // The role of this test is to make sure we never dispatch content to unwanted regions
-func TestSendAddRequestDiffRegions(t *testing.T) {
+func TestSendRequestDiffRegions(t *testing.T) {
 	bgCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
@@ -112,30 +117,29 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
-	require.NoError(t, n1.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
 	// n1 is our client is adding a file to the store
-	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, "/supply/readme.md")
 	rootCid := link.(cidlink.Link).Cid
 
 	asia := []Region{
 		Regions["Asia"],
 	}
 
-	supply := New(n1.Host, n1.Dt, asia)
+	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, asia)
 
 	asiaNodes := make(map[peer.ID]*testutil.TestNode)
-	var asiaSupplies []*Supply
+	asiaSupplies := make(map[peer.ID]*Supply)
 	// We add a bunch of asian retrieval providers
 	for i := 0; i < 5; i++ {
 		n := testutil.NewTestNode(mn, t)
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(n.Host, n.Dt, asia)
+		s := New(n.Host, n.Dt, n.Ds, n.Ms, asia)
 
 		asiaNodes[n.Host.ID()] = n
-		asiaSupplies = append(asiaSupplies, s)
+		asiaSupplies[n.Host.ID()] = s
 	}
 
 	africa := []Region{
@@ -150,7 +154,7 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 		n.SetupDataTransfer(bgCtx, t)
 
 		// Create a supply for each node
-		s := New(n.Host, n.Dt, africa)
+		s := New(n.Host, n.Dt, n.Ds, n.Ms, africa)
 
 		africaNodes[n.Host.ID()] = n
 		africaSupplies = append(africaSupplies, s)
@@ -162,7 +166,9 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
+	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, DispatchOptions{
+		StoreID: storeID,
+	})
 	defer res.Close()
 	require.NoError(t, err)
 
@@ -173,6 +179,9 @@ func TestSendAddRequestDiffRegions(t *testing.T) {
 		recipients = append(recipients, rec)
 	}
 	for _, p := range recipients {
-		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, rootCid, origBytes)
+		store, err := asiaSupplies[p.Provider].GetStore(rootCid)
+		require.NoError(t, err)
+
+		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 	}
 }

@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -23,17 +23,12 @@ import (
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	unixfile "github.com/ipfs/go-unixfs/file"
-	"github.com/ipfs/go-unixfs/importer/balanced"
-	"github.com/ipfs/go-unixfs/importer/helpers"
-	"github.com/ipld/go-ipld-prime"
-	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
@@ -60,13 +55,6 @@ const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
-// IPFSNode is the IPFS API
-type IPFSNode interface {
-	Ping(context.Context, string)
-	Add(context.Context, *AddArgs)
-	Get(context.Context, *GetArgs)
-}
-
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -90,6 +78,7 @@ type node struct {
 	host host.Host
 	ds   datastore.Batching
 	bs   blockstore.Blockstore
+	ms   *multistore.MultiStore
 	dag  ipldformat.DAGService
 	gs   graphsync.GraphExchange
 	ps   *pubsub.PubSub
@@ -114,6 +103,11 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	nd.bs = blockstore.NewBlockstore(nd.ds)
+
+	nd.ms, err = multistore.NewMultiDstore(nd.ds)
+	if err != nil {
+		return nil, err
+	}
 
 	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
 
@@ -182,6 +176,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	settings := hop.Settings{
 		Datastore:  nd.ds,
 		Blockstore: nd.bs,
+		MultiStore: nd.ms,
 		Host:       nd.host,
 		PubSub:     nd.ps,
 		GraphSync:  nd.gs,
@@ -299,7 +294,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	}
 }
 
-// Add a file to the IPFS unixfs dag
+// Add a file to the Workdag
 func (nd *node) Add(ctx context.Context, args *AddArgs) {
 
 	sendErr := func(err error) {
@@ -310,15 +305,24 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		})
 	}
 
-	link, err := nd.loadFilesToBlockstore(ctx, args)
-	root := link.(cidlink.Link).Cid
+	w, err := NewWorkdag(nd.ms, nd.ds)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	stats, err := hop.DAGStat(ctx, nd.bs, root, hop.AllSelector())
+	root, err := w.Add(ctx, AddOptions{
+		Path:      args.Path,
+		ChunkSize: int64(args.ChunkSize),
+	})
 	if err != nil {
-		log.Error().Err(err).Msg("DAGStat")
+		sendErr(err)
+		return
+	}
+	// We could get the size from the index entry but DAGStat gives more feedback into
+	// how the file actually got chunked
+	stats, err := hop.DAGStat(ctx, w.Store().Bstore, root, hop.AllSelector())
+	if err != nil {
+		log.Error().Err(err).Msg("record not found")
 	}
 	nd.send(Notify{
 		AddResult: &AddResult{
@@ -332,7 +336,14 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		res, err := nd.exch.Dispatch(root)
+		res, err := nd.exch.Supply().Dispatch(
+			supply.Request{
+				PayloadCID: root,
+				Size:       uint64(stats.Size),
+			},
+			supply.DispatchOptions{
+				StoreID: w.StoreID(),
+			})
 		defer res.Close()
 		if err != nil {
 			sendErr(err)
@@ -355,63 +366,45 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 	}
 }
 
-func (nd *node) loadFilesToBlockstore(ctx context.Context, args *AddArgs) (ipld.Link, error) {
+// Status prints the current workdag index. It shows which files have been added but not yet committed
+// and pushed to the network
+func (nd *node) Status(ctx context.Context, args *StatusArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			StatusResult: &StatusResult{
+				Err: err.Error(),
+			},
+		})
+	}
 
-	st, err := os.Stat(args.Path)
+	w, err := NewWorkdag(nd.ms, nd.ds)
 	if err != nil {
-		return nil, fmt.Errorf("unable to open file: %w", err)
+		sendErr(err)
+		return
 	}
-	file, err := files.NewSerialFile(args.Path, false, st)
+	s, err := w.Status()
 	if err != nil {
-		return nil, fmt.Errorf("NewSerialFile: %w", err)
+		sendErr(err)
+		return
 	}
 
-	switch f := file.(type) {
-	case files.Directory:
-		return nd.addDir(ctx, args.Path, f)
-	case files.File:
-		return nd.addFile(ctx, f, args)
-	default:
-		return nil, fmt.Errorf("unknown file type")
-	}
+	nd.send(Notify{
+		StatusResult: &StatusResult{
+			Output: s.String(),
+		},
+	})
 }
 
-func (nd *node) addFile(ctx context.Context, file files.File, args *AddArgs) (ipld.Link, error) {
-
-	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
-
-	prefix, err := merkledag.PrefixForCidVersion(1)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create cid prefix: %w", err)
+// Commit packages multiple unix FS dags into one, kind of like a flat directory
+func (nd *node) Commit(ctx context.Context, args *CommitArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			CommitResult: &CommitResult{
+				Err: err.Error(),
+			},
+		})
 	}
-	prefix.MhType = DefaultHashFunction
-
-	params := helpers.DagBuilderParams{
-		Maxlinks:   unixfsLinksPerLevel,
-		RawLeaves:  true,
-		CidBuilder: prefix,
-		Dagserv:    bufferedDS,
-	}
-
-	db, err := params.New(chunk.NewSizeSplitter(file, int64(args.ChunkSize)))
-	if err != nil {
-		return nil, fmt.Errorf("unable to init chunker: %w", err)
-	}
-
-	n, err := balanced.Layout(db)
-	if err != nil {
-		return nil, fmt.Errorf("unable to chunk file: %w", err)
-	}
-
-	err = bufferedDS.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("unable to commit blocks to store: %w", err)
-	}
-	return cidlink.Link{Cid: n.Cid()}, nil
-}
-
-func (nd *node) addDir(ctx context.Context, path string, dir files.Directory) (ipld.Link, error) {
-	return nil, fmt.Errorf("TODO")
+	sendErr(errors.New("TODO"))
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli

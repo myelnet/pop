@@ -13,6 +13,7 @@ import (
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-storedcounter"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -37,6 +38,7 @@ import (
 type Settings struct {
 	Datastore           datastore.Batching
 	Blockstore          blockstore.Blockstore
+	MultiStore          *multistore.MultiStore
 	Host                host.Host
 	PubSub              *pubsub.PubSub
 	GraphSync           graphsync.GraphExchange

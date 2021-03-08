@@ -225,7 +225,11 @@ var FSMEvents = fsm.Events{
 		FromMany(paymentChannelCreationStates...).ToJustRecord().
 		FromMany(deal.StatusSendFunds, deal.StatusFundsNeeded).ToJustRecord().
 		From(deal.StatusFundsNeededLastPayment).To(deal.StatusSendFundsLastPayment).
-		From(deal.StatusClientWaitingForLastBlocks).To(deal.StatusCompleted).
+		FromMany(
+			deal.StatusClientWaitingForLastBlocks,
+			// Should fix err: Invalid transition in queue, state `21`, event `16`
+			deal.StatusCheckComplete,
+		).To(deal.StatusCompleted).
 		Action(func(ds *deal.ClientState) error {
 			ds.AllBlocksReceived = true
 			return nil

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
@@ -98,6 +99,15 @@ func (p *mockPayments) SetChannelAvailableFunds(funds payments.AvailableFunds) {
 	p.chFunds = &chFunds
 }
 
+type mockStoreIDGetter struct {
+	id  multistore.StoreID
+	err error
+}
+
+func (m *mockStoreIDGetter) GetStoreID(c cid.Cid) (multistore.StoreID, error) {
+	return m.id, m.err
+}
+
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
@@ -153,17 +163,20 @@ func TestRetrieval(t *testing.T) {
 				chAddr:     chAddr,
 				chFunds:    &chFunds,
 			}
-			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, n1.Host.ID())
-			require.NoError(t, err)
-
-			n2.SetupDataTransfer(bgCtx, t)
-			pay2 := &mockPayments{}
-			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, n2.Host.ID())
+			// this is only needed on the provider side to find where content is stored
+			sidg1 := &mockStoreIDGetter{}
+			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, sidg1, n1.Host.ID())
 			require.NoError(t, err)
 
 			// n1 is our client and is retrieving a file n2 has so we add it first
-			link, origBytes := n2.LoadUnixFSFileToStore(bgCtx, t, "/retrieval/readme.md")
+			link, storeID, origBytes := n2.LoadFileToNewStore(bgCtx, t, "/retrieval/readme.md")
 			rootCid := link.(cidlink.Link).Cid
+
+			n2.SetupDataTransfer(bgCtx, t)
+			pay2 := &mockPayments{}
+			sidg2 := &mockStoreIDGetter{id: storeID}
+			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, sidg2, n2.Host.ID())
+			require.NoError(t, err)
 
 			clientAddr, err := address.NewIDAddress(uint64(10))
 			require.NoError(t, err)
@@ -174,12 +187,12 @@ func TestRetrieval(t *testing.T) {
 			defer cancel()
 
 			r2.Provider().SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
-				fmt.Println("Provider:", deal.Statuses[state.Status])
+				fmt.Println("PROVIDER:", deal.Statuses[state.Status])
 			})
 
 			clientDealStateChan := make(chan deal.ClientState)
 			r1.Client().SubscribeToEvents(func(event client.Event, state deal.ClientState) {
-				fmt.Println("Client:", deal.Statuses[state.Status])
+				fmt.Println("CLIENT:", deal.Statuses[state.Status])
 				switch state.Status {
 				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored, deal.StatusRejected:
 					clientDealStateChan <- state
@@ -240,7 +253,9 @@ func TestRetrieval(t *testing.T) {
 				require.Equal(t, deal.StatusCompleted, clientDealState.Status)
 			}
 
-			n1.VerifyFileTransferred(bgCtx, t, rootCid, origBytes)
+			store, err := n1.Ms.Get(clientStoreID)
+			require.NoError(t, err)
+			n1.VerifyFileTransferred(bgCtx, t, store.DAG, rootCid, origBytes)
 		})
 	}
 }

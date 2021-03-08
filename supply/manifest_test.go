@@ -55,7 +55,7 @@ func TestHandleRequest(t *testing.T) {
 
 	// n2 is our provider and received a request from n1 (mocked in this test)
 	// it calls HandleAddRequest to maybe retrieve it from the client
-	manifest := NewManifest(n2.Host, n2.Dt)
+	manifest := NewManifest(n2.Host, n2.Dt, n2.Ds, n2.Ms)
 	stream := &mockRequestStream{
 		req: Request{
 			PayloadCID: rootCid,
@@ -68,5 +68,5 @@ func TestHandleRequest(t *testing.T) {
 	manifest.HandleRequest(stream)
 
 	// Now we check if we have received the blocks
-	n2.VerifyFileTransferred(bgCtx, t, rootCid, origBytes)
+	n2.VerifyFileTransferred(bgCtx, t, n2.DAG, rootCid, origBytes)
 }

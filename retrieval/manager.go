@@ -33,6 +33,11 @@ type Manager interface {
 	Provider() *Provider
 }
 
+// StoreIDGetter is an interface required for finding the store associated with the content to provide
+type StoreIDGetter interface {
+	GetStoreID(cid.Cid) (multistore.StoreID, error)
+}
+
 // Retrieval manager implementation
 type Retrieval struct {
 	c *Client
@@ -78,6 +83,7 @@ type Provider struct {
 	revalidator      *ProviderRevalidator
 	pay              payments.Manager
 	askStore         *AskStore
+	storeIDGetter    StoreIDGetter
 }
 
 // GetAsk returns the current deal parameters this provider accepts for a given peer
@@ -115,6 +121,7 @@ func New(
 	ds datastore.Batching,
 	pay payments.Manager,
 	dt datatransfer.Manager,
+	sg StoreIDGetter,
 	self peer.ID,
 ) (Manager, error) {
 	sc := storedcounter.New(ds, datastore.NewKey("/retrieval/deal-id"))
@@ -147,6 +154,7 @@ func New(
 		askStore: &AskStore{
 			asks: make(map[peer.ID]deal.QueryResponse),
 		},
+		storeIDGetter: sg,
 	}
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{
 		Environment:     &providerDealEnvironment{p},
@@ -178,6 +186,11 @@ func New(
 		return nil, err
 	}
 	err = dt.RegisterRevalidator(&deal.Payment{}, p.revalidator)
+	if err != nil {
+		return nil, err
+	}
+	tconfig := TransportConfigurer(self, &dualStoreGetter{c, p})
+	err = dt.RegisterTransportConfigurer(&deal.Proposal{}, tconfig)
 	if err != nil {
 		return nil, err
 	}

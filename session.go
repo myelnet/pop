@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-multistore"
 	cid "github.com/ipfs/go-cid"
 	iprime "github.com/ipld/go-ipld-prime"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
@@ -20,18 +21,33 @@ import (
 
 // Session to exchange multiple blocks with a set of connected peers
 type Session struct {
+	// storeID is the unique store used to load the content retrieved during this session
+	storeID multistore.StoreID
+	// regionTopics are all the region gossip subscriptions this session can query to find the content
 	regionTopics map[string]*pubsub.Topic
-	net          retrieval.QueryNetwork
-	retriever    *retrieval.Client
-	clientAddr   address.Address
-	root         cid.Cid
-	sel          iprime.Node
-	done         chan error
-	unsub        retrieval.Unsubscribe
+	// net is the network procotol used by providers to send their offers
+	net retrieval.QueryNetwork
+	// retriever manages the state of the transfer once we have a good offer
+	retriever *retrieval.Client
+	// clientAddr is the address that will be used to make any payment for retrieving the content
+	clientAddr address.Address
+	// root is the root cid of the dag we are retrieving during this session
+	root cid.Cid
+	// sel is the selector used to select specific nodes only to retrieve. if not provided we select
+	// all the nodes by default
+	sel iprime.Node
+	// done is the final message telling us we have received all the blocks and all is well. if the error
+	// is not nil, then all is actually not well and we may need to try again.
+	done chan error
+	// unsubscribes is used to clear any subscriptions to our retrieval events when we have received
+	// all the content
+	unsub retrieval.Unsubscribe
 
-	mu        sync.Mutex
-	responses map[peer.ID]deal.QueryResponse // List of all the responses peers sent us back for a gossip query
-	dealID    *deal.ID                       // current ongoing deal if any
+	mu sync.Mutex
+	// responses is a list of all the responses peers sent us back for a gossip query
+	responses map[peer.ID]deal.QueryResponse
+	// dealID is the ID of any ongoing deal we might have with a provider during this session
+	dealID *deal.ID
 }
 
 type gossipSourcing struct {
@@ -136,7 +152,7 @@ func (s *Session) SyncBlocks(ctx context.Context, of *deal.Offer) error {
 		of.PeerID,
 		s.clientAddr,
 		of.Response.PaymentAddress,
-		nil,
+		&s.storeID,
 	)
 	if err != nil {
 		return err
@@ -178,4 +194,9 @@ func (s *Session) Close() {
 // SetAddress to use for funding the retriebal
 func (s *Session) SetAddress(addr address.Address) {
 	s.clientAddr = addr
+}
+
+// StoreID returns the store ID used for this session
+func (s *Session) StoreID() multistore.StoreID {
+	return s.storeID
 }
