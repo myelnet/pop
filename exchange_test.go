@@ -59,6 +59,7 @@ func TestExchangeDirect(t *testing.T) {
 				settings := Settings{
 					Datastore:  n.Ds,
 					Blockstore: n.Bs,
+					MultiStore: n.Ms,
 					Host:       n.Host,
 					PubSub:     ps,
 					GraphSync:  n.Gs,
@@ -83,12 +84,18 @@ func TestExchangeDirect(t *testing.T) {
 
 			require.NoError(t, mn.ConnectAllButSelf())
 
-			link, origBytes := cnode.LoadUnixFSFileToStore(ctx, t, "/README.md")
+			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, "/README.md")
 			rootCid := link.(cidlink.Link).Cid
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			res, err := client.Dispatch(rootCid)
+			res, err := client.Supply().Dispatch(supply.Request{
+				PayloadCID: rootCid,
+				Size:       uint64(len(origBytes)),
+			},
+				supply.DispatchOptions{
+					StoreID: storeID,
+				})
 			require.NoError(t, err)
 
 			var records []supply.PRecord
@@ -101,13 +108,16 @@ func TestExchangeDirect(t *testing.T) {
 
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
-				pnodes[r.Provider].VerifyFileTransferred(ctx, t, rootCid, origBytes)
+				store, err := providers[r.Provider].Supply().GetStore(rootCid)
+				require.NoError(t, err)
+				pnodes[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 			}
 
-			cnode.NukeBlockstore(ctx, t)
+			err = client.Supply().RemoveContent(rootCid)
+			require.NoError(t, err)
 
 			// Sanity check to make sure our client does not have a copy of our blocks
-			_, err = cnode.DAG.Get(ctx, rootCid)
+			_, err = client.Supply().GetStore(rootCid)
 			require.Error(t, err)
 
 			// Now we fetch it again from our providers
@@ -128,8 +138,10 @@ func TestExchangeDirect(t *testing.T) {
 				t.Fatal("failed to finish sync")
 			}
 
+			store, err := cnode.Ms.Get(session.StoreID())
+			require.NoError(t, err)
 			// And we verify we got the file back
-			cnode.VerifyFileTransferred(ctx, t, rootCid, origBytes)
+			cnode.VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 		})
 	}
 }

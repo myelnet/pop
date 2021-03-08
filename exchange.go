@@ -63,21 +63,26 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	if err != nil {
 		return nil, err
 	}
-	ex.multiStore, err = multistore.NewMultiDstore(set.Datastore)
-	if err != nil {
-		return nil, err
-	}
+	ex.multiStore = set.MultiStore
 	// Add a special adaptor to use the blockstore with cbor encoding
 	cborblocks := cbor.NewCborStore(set.Blockstore)
 	// Create our payment manager
 	paym := payments.New(ctx, ex.fAPI, ex.wallet, set.Datastore, cborblocks)
+	// create the supply manager to handle optimisations of the block supply
+	ex.supply = supply.New(ex.h, ex.dataTransfer, set.Datastore, ex.multiStore, set.Regions)
 	// Create our retrieval manager
-	ex.retrieval, err = retrieval.New(ctx, ex.multiStore, set.Datastore, paym, ex.dataTransfer, ex.h.ID())
+	ex.retrieval, err = retrieval.New(
+		ctx,
+		ex.multiStore,
+		set.Datastore,
+		paym,
+		ex.dataTransfer,
+		ex.supply,
+		ex.h.ID(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	// create the supply manager to handle optimisations of the block supply
-	ex.supply = supply.New(ex.h, ex.dataTransfer, set.Regions)
 
 	return ex, ex.joinRegions(ctx, set.Regions)
 }
@@ -141,9 +146,14 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
+
+		store, err := e.supply.GetStore(m.PayloadCID)
+		if err != nil {
+			continue
+		}
 		// DAGStat is both a way of checking if we have the blocks and returning its size
 		// TODO: support selector in Query
-		stats, err := DAGStat(ctx, e.bs, m.PayloadCID, AllSelector())
+		stats, err := DAGStat(ctx, store.Bstore, m.PayloadCID, AllSelector())
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && stats.Size > 0 {
@@ -171,18 +181,6 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 	}
 }
 
-// Dispatch new content to cache providers
-func (e *Exchange) Dispatch(c cid.Cid) (*supply.Response, error) {
-	stat, err := DAGStat(context.Background(), e.bs, c, AllSelector())
-	if err != nil {
-		return nil, err
-	}
-	return e.supply.Dispatch(supply.Request{
-		PayloadCID: c,
-		Size:       uint64(stat.Size),
-	})
-}
-
 // NewSession returns a new retrieval session
 func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, error) {
 	// Track when the session is completed
@@ -207,6 +205,8 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 		clientAddr:   e.wallet.DefaultAddress(),
 		done:         done,
 		unsub:        unsubscribe,
+		// We create a fresh new store for this session
+		storeID: e.multiStore.Next(),
 	}
 	return session, nil
 }

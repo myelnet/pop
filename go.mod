@@ -39,6 +39,7 @@ require (
 	github.com/ipfs/go-merkledag v0.3.2
 	github.com/ipfs/go-path v0.0.9
 	github.com/ipfs/go-unixfs v0.2.4
+	github.com/ipld/go-car v0.1.1-0.20201119040415-11b6074b6d4d
 	github.com/ipld/go-ipld-prime v0.7.0
 	github.com/ipld/go-ipld-prime-proto v0.1.1
 	github.com/jpillora/backoff v1.0.0
