@@ -37,6 +37,7 @@ change in the future.
 			startCmd,
 			pingCmd,
 			addCmd,
+			statusCmd,
 			getCmd,
 		},
 		FlagSet: rootfs,

@@ -48,24 +48,27 @@ func TestWorkdag(t *testing.T) {
 
 	filepaths := genTestFiles(t)
 
-	sidx := ms.Next()
-	s, err := ms.Get(sidx)
+	wd, err := NewWorkdag(ms, ds)
 	require.NoError(t, err)
 
-	wd := &Workdag{
-		store: s,
-		index: &Index{},
-	}
-
-	for _, p := range filepaths {
-		_, err := wd.Add(ctx, AddOptions{Path: p, ChunkSize: int64(1 << 10)})
+	for i := 0; i < 6; i++ {
+		_, err := wd.Add(ctx, AddOptions{Path: filepaths[i], ChunkSize: int64(1 << 10)})
 		require.NoError(t, err)
 
 	}
 
 	status, err := wd.Status()
 	require.NoError(t, err)
-	require.Equal(t, len(filepaths), len(status))
+	require.Equal(t, 6, len(status))
+
+	// Should handle new instance
+	wd, err = NewWorkdag(ms, ds)
+	require.NoError(t, err)
+
+	for i := 6; i < 8; i++ {
+		_, err := wd.Add(ctx, AddOptions{Path: filepaths[i], ChunkSize: int64(1 << 10)})
+		require.NoError(t, err)
+	}
 
 	roots, err := wd.Commit(ctx, CommitOptions{})
 	require.NoError(t, err)

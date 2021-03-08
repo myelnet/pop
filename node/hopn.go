@@ -55,13 +55,6 @@ const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
-// IPFSNode is the IPFS API
-type IPFSNode interface {
-	Ping(context.Context, string)
-	Add(context.Context, *AddArgs)
-	Get(context.Context, *GetArgs)
-}
-
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -312,13 +305,11 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		})
 	}
 
-	id := nd.ms.Next()
-	st, err := nd.ms.Get(id)
+	w, err := NewWorkdag(nd.ms, nd.ds)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	w := &Workdag{store: st, index: &Index{}}
 	root, err := w.Add(ctx, AddOptions{
 		Path:      args.Path,
 		ChunkSize: int64(args.ChunkSize),
@@ -327,9 +318,11 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		sendErr(err)
 		return
 	}
-	stats, err := hop.DAGStat(ctx, st.Bstore, root, hop.AllSelector())
+	// We could get the size from the index entry but DAGStat gives more feedback into
+	// how the file actually got chunked
+	stats, err := hop.DAGStat(ctx, w.Store().Bstore, root, hop.AllSelector())
 	if err != nil {
-		log.Error().Err(err).Msg("DAGStat")
+		log.Error().Err(err).Msg("record not found")
 	}
 	nd.send(Notify{
 		AddResult: &AddResult{
@@ -343,7 +336,14 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		res, err := nd.exch.Dispatch(root)
+		res, err := nd.exch.Supply().Dispatch(
+			supply.Request{
+				PayloadCID: root,
+				Size:       uint64(stats.Size),
+			},
+			supply.DispatchOptions{
+				StoreID: w.StoreID(),
+			})
 		defer res.Close()
 		if err != nil {
 			sendErr(err)
@@ -364,6 +364,35 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 			return
 		}
 	}
+}
+
+// Status prints the current workdag index. It shows which files have been added but not yet committed
+// and pushed to the network
+func (nd *node) Status(ctx context.Context, args *StatusArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			StatusResult: &StatusResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	w, err := NewWorkdag(nd.ms, nd.ds)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	s, err := w.Status()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	nd.send(Notify{
+		StatusResult: &StatusResult{
+			Output: s.String(),
+		},
+	})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli

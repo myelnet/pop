@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/filecoin-project/go-multistore"
 	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
@@ -27,10 +30,73 @@ var (
 	ErrEntryNotFound = errors.New("entry not found")
 )
 
+// KStoreID is datastore key for persisting the last ID of a store for the current workdag
+const KStoreID = "storeid"
+
+// KIndex is the datastore key for persisting the index of a workdag
+const KIndex = "index"
+
 // Workdag represents any local content that hasn't been committed into a car file yet.
 type Workdag struct {
-	store *multistore.Store
-	index *Index
+	storeID multistore.StoreID
+	store   *multistore.Store
+	ds      datastore.Batching
+}
+
+// NewWorkdag instanciates a workdag, checks if we have a store ID and loads the right store
+func NewWorkdag(ms *multistore.MultiStore, ds datastore.Batching) (*Workdag, error) {
+	w := &Workdag{
+		ds: namespace.Wrap(ds, datastore.NewKey("/workdag")),
+	}
+	idx, err := w.Index()
+	if err != nil && errors.Is(err, datastore.ErrNotFound) {
+		idx = &Index{
+			StoreID: ms.Next(),
+		}
+	} else if err != nil {
+		return nil, err
+	}
+	w.storeID = idx.StoreID
+	w.store, err = ms.Get(idx.StoreID)
+	if err != nil {
+		return nil, err
+	}
+
+	return w, w.SetIndex(idx)
+}
+
+// Store exposes the underlying store
+func (w *Workdag) Store() *multistore.Store {
+	return w.store
+}
+
+// StoreID exposes the ID of the underlying store
+func (w *Workdag) StoreID() multistore.StoreID {
+	return w.storeID
+}
+
+// SetIndex updates the Workdag index after an operation
+func (w *Workdag) SetIndex(idx *Index) error {
+	enc, err := json.Marshal(idx)
+	if err != nil {
+		return err
+	}
+
+	return w.ds.Put(datastore.NewKey(KIndex), enc)
+}
+
+// Index decodes and returns the workdag index from the datastore
+func (w *Workdag) Index() (*Index, error) {
+	var idx Index
+	enc, err := w.ds.Get(datastore.NewKey(KIndex))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(enc, &idx); err != nil {
+		return nil, err
+	}
+
+	return &idx, nil
 }
 
 // AddOptions describes how an add operation should be performed
@@ -101,9 +167,13 @@ func (w *Workdag) doAddFile(ctx context.Context, f files.File, opts AddOptions) 
 	if err != nil {
 		return nil, err
 	}
-	e, err := w.index.Entry(opts.Path)
+	idx, err := w.Index()
+	if err != nil {
+		return nil, err
+	}
+	e, err := idx.Entry(opts.Path)
 	if errors.Is(err, ErrEntryNotFound) {
-		e = w.index.Add(opts.Path)
+		e = idx.Add(opts.Path)
 	} else if err != nil {
 		return nil, err
 	}
@@ -113,7 +183,7 @@ func (w *Workdag) doAddFile(ctx context.Context, f files.File, opts AddOptions) 
 		return nil, err
 	}
 
-	return cidlink.Link{Cid: n.Cid()}, nil
+	return cidlink.Link{Cid: n.Cid()}, w.SetIndex(idx)
 
 }
 
@@ -135,8 +205,12 @@ func (s Status) String() string {
 
 // Status returns the current Status
 func (w *Workdag) Status() (Status, error) {
+	idx, err := w.Index()
+	if err != nil {
+		return nil, err
+	}
 	s := make(Status)
-	for _, e := range w.index.Entries {
+	for _, e := range idx.Entries {
 		s[e.Name] = e.Cid
 	}
 	return s, nil
@@ -148,10 +222,14 @@ type CommitOptions struct {
 
 // Commit stores the current contents of the index in a new car and loads it in the blockstore
 func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) ([]cid.Cid, error) {
+	idx, err := w.Index()
+	if err != nil {
+		return nil, err
+	}
 	buf := new(bytes.Buffer)
 
 	var dags []car.Dag
-	for _, e := range w.index.Entries {
+	for _, e := range idx.Entries {
 		dags = append(dags, car.Dag{Root: e.Cid, Selector: hop.AllSelector()})
 	}
 
@@ -169,6 +247,8 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) ([]cid.Cid, er
 // Index contains the information about which objects are currently checked out
 // in the workdag, having information about the working files.
 type Index struct {
+	// StoreID is the store ID in which the indexed dags are stored
+	StoreID multistore.StoreID
 	// Entries collection of entries represented by this Index. The order of
 	// this collection is not guaranteed
 	Entries []*Entry

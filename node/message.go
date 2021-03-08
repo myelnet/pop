@@ -25,6 +25,11 @@ type AddArgs struct {
 	ChunkSize int
 }
 
+// StatusArgs get passes to the Status command
+type StatusArgs struct {
+	Verbose bool
+}
+
 // GetArgs get passed to the Get command
 type GetArgs struct {
 	Cid     string
@@ -37,9 +42,10 @@ type GetArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
-	Ping *PingArgs
-	Add  *AddArgs
-	Get  *GetArgs
+	Ping   *PingArgs
+	Add    *AddArgs
+	Status *StatusArgs
+	Get    *GetArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -60,6 +66,12 @@ type AddResult struct {
 	Err       string
 }
 
+// StatusResult gives us the result of status request to pring
+type StatusResult struct {
+	Output string
+	Err    string
+}
+
 // GetResult gives us feedback on the result of the Get request
 type GetResult struct {
 	DealID          string
@@ -75,18 +87,19 @@ type GetResult struct {
 
 // Notify is a message sent from the daemon to the client
 type Notify struct {
-	PingResult *PingResult
-	AddResult  *AddResult
-	GetResult  *GetResult
+	PingResult   *PingResult
+	AddResult    *AddResult
+	StatusResult *StatusResult
+	GetResult    *GetResult
 }
 
 // CommandServer receives commands on the daemon side and executes them
 type CommandServer struct {
-	n             IPFSNode             // the ipfs node we are controlling
+	n             *node                // the ipfs node we are controlling
 	sendNotifyMsg func(jsonMsg []byte) // send a notification message
 }
 
-func NewCommandServer(ipfs IPFSNode, sendNotifyMsg func(b []byte)) *CommandServer {
+func NewCommandServer(ipfs *node, sendNotifyMsg func(b []byte)) *CommandServer {
 	return &CommandServer{
 		n:             ipfs,
 		sendNotifyMsg: sendNotifyMsg,
@@ -111,6 +124,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Add; c != nil {
 		cs.n.Add(ctx, c)
+		return nil
+	}
+	if c := cmd.Status; c != nil {
+		cs.n.Status(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -178,6 +195,10 @@ func (cc *CommandClient) Ping(addr string) {
 
 func (cc *CommandClient) Add(args *AddArgs) {
 	cc.send(Command{Add: args})
+}
+
+func (cc *CommandClient) Status(args *StatusArgs) {
+	cc.send(Command{Status: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {
