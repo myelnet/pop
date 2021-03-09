@@ -7,6 +7,7 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 )
@@ -26,6 +27,7 @@ type LotusAPI struct {
 		StateMarketBalance                func(context.Context, address.Address, TipSetKey) (MarketBalance, error)
 		StateDealProviderCollateralBounds func(context.Context, abi.PaddedPieceSize, bool, TipSetKey) (DealCollateralBounds, error)
 		StateMinerInfo                    func(context.Context, address.Address, TipSetKey) (MinerInfo, error)
+		StateMinerProvingDeadline         func(context.Context, address.Address, TipSetKey) (*dline.Info, error)
 		StateListMiners                   func(context.Context, TipSetKey) ([]address.Address, error)
 		ChainReadObj                      func(context.Context, cid.Cid) ([]byte, error)
 		ChainGetMessage                   func(context.Context, cid.Cid) (*Message, error)
@@ -100,6 +102,10 @@ func (a *LotusAPI) StateMinerInfo(ctx context.Context, addr address.Address, tsk
 
 func (a *LotusAPI) StateListMiners(ctx context.Context, tsk TipSetKey) ([]address.Address, error) {
 	return a.Methods.StateListMiners(ctx, tsk)
+}
+
+func (a *LotusAPI) StateMinerProvingDeadline(ctx context.Context, addr address.Address, tsk TipSetKey) (*dline.Info, error) {
+	return a.Methods.StateMinerProvingDeadline(ctx, addr, tsk)
 }
 
 func (a *LotusAPI) ChainReadObj(ctx context.Context, c cid.Cid) ([]byte, error) {

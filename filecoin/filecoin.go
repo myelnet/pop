@@ -6,6 +6,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 )
@@ -26,6 +27,7 @@ type API interface {
 	StateDealProviderCollateralBounds(context.Context, abi.PaddedPieceSize, bool, TipSetKey) (DealCollateralBounds, error)
 	StateMinerInfo(context.Context, address.Address, TipSetKey) (MinerInfo, error)
 	StateListMiners(context.Context, TipSetKey) ([]address.Address, error)
+	StateMinerProvingDeadline(context.Context, address.Address, TipSetKey) (*dline.Info, error)
 	ChainReadObj(context.Context, cid.Cid) ([]byte, error)
 	ChainGetMessage(context.Context, cid.Cid) (*Message, error)
 	Close()
