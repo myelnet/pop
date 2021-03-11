@@ -39,6 +39,7 @@ change in the future.
 			addCmd,
 			statusCmd,
 			commitCmd,
+			pushCmd,
 			getCmd,
 		},
 		FlagSet: rootfs,

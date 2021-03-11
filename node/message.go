@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -35,6 +36,14 @@ type CommitArgs struct {
 	Archive bool
 }
 
+// PushArgs are passed to the Push command
+type PushArgs struct {
+	Commit   string
+	CacheNum int
+	StoreNum int
+	Duration time.Duration
+}
+
 // GetArgs get passed to the Get command
 type GetArgs struct {
 	Cid     string
@@ -51,6 +60,7 @@ type Command struct {
 	Add    *AddArgs
 	Status *StatusArgs
 	Commit *CommitArgs
+	Push   *PushArgs
 	Get    *GetArgs
 }
 
@@ -80,8 +90,14 @@ type StatusResult struct {
 
 // CommitResult gives us feedback on the result of the Commit operation
 type CommitResult struct {
-	DataCid string
-	Err     string
+	Output string
+	Err    string
+}
+
+// PushResult is feedback on the push operation
+type PushResult struct {
+	Output string
+	Err    string
 }
 
 // GetResult gives us feedback on the result of the Get request
@@ -103,6 +119,7 @@ type Notify struct {
 	AddResult    *AddResult
 	StatusResult *StatusResult
 	CommitResult *CommitResult
+	PushResult   *PushResult
 	GetResult    *GetResult
 }
 
@@ -145,6 +162,12 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Commit; c != nil {
 		cs.n.Commit(ctx, c)
+		return nil
+	}
+	if c := cmd.Push; c != nil {
+		// push requests are usually quite long so we don't block the thread so users
+		// can keep adding to the workdag while their previous commit is uploading for example
+		go cs.n.Push(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -220,6 +243,10 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 
 func (cc *CommandClient) Commit(args *CommitArgs) {
 	cc.send(Command{Commit: args})
+}
+
+func (cc *CommandClient) Push(args *PushArgs) {
+	cc.send(Command{Push: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {

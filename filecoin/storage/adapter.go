@@ -166,28 +166,9 @@ func (a *Adapter) OnDealExpiredOrSlashed(ctx context.Context, dealID abi.DealID,
 }
 
 // ListStorageProviders returns information about known miners
+// we use our own currated list so we don't actually need it at this time
 func (a *Adapter) ListStorageProviders(ctx context.Context, tok shared.TipSetToken) ([]*sm.StorageProviderInfo, error) {
-	tsk, err := fil.TipSetKeyFromBytes(tok)
-	if err != nil {
-		return nil, err
-	}
-
-	addresses, err := a.fAPI.StateListMiners(ctx, tsk)
-	if err != nil {
-		return nil, err
-	}
-
 	var out []*sm.StorageProviderInfo
-
-	for _, addr := range addresses {
-		mi, err := a.GetMinerInfo(ctx, addr, tok)
-		if err != nil {
-			return nil, err
-		}
-
-		out = append(out, mi)
-	}
-
 	return out, nil
 }
 
@@ -298,6 +279,10 @@ func (a *Adapter) GetMinerInfo(ctx context.Context, maddr address.Address, tok s
 	mi, err := a.fAPI.StateMinerInfo(ctx, maddr, tsk)
 	if err != nil {
 		return nil, err
+	}
+	// PeerId is often nil which causes panics down the road
+	if mi.PeerId == nil {
+		return nil, fmt.Errorf("no peer id for miner %v", maddr)
 	}
 	out := NewStorageProviderInfo(maddr, mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
 	return &out, nil

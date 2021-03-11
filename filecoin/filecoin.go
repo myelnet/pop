@@ -26,7 +26,6 @@ type API interface {
 	StateMarketBalance(context.Context, address.Address, TipSetKey) (MarketBalance, error)
 	StateDealProviderCollateralBounds(context.Context, abi.PaddedPieceSize, bool, TipSetKey) (DealCollateralBounds, error)
 	StateMinerInfo(context.Context, address.Address, TipSetKey) (MinerInfo, error)
-	StateListMiners(context.Context, TipSetKey) ([]address.Address, error)
 	StateMinerProvingDeadline(context.Context, address.Address, TipSetKey) (*dline.Info, error)
 	ChainReadObj(context.Context, cid.Cid) ([]byte, error)
 	ChainGetMessage(context.Context, cid.Cid) (*Message, error)

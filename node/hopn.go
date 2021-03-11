@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -44,6 +45,7 @@ import (
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/go-hop-exchange"
 	"github.com/myelnet/go-hop-exchange/filecoin"
+	"github.com/myelnet/go-hop-exchange/filecoin/storage"
 	"github.com/myelnet/go-hop-exchange/retrieval/client"
 	"github.com/myelnet/go-hop-exchange/retrieval/deal"
 	"github.com/myelnet/go-hop-exchange/supply"
@@ -74,6 +76,12 @@ type Options struct {
 	Regions []string
 }
 
+// RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
+type RemoteStorer interface {
+	Store(context.Context, cid.Cid) (*storage.Receipt, error)
+	GetMarketQuote(context.Context, storage.QuoteParams) (*storage.Quote, error)
+}
+
 type node struct {
 	host host.Host
 	ds   datastore.Batching
@@ -83,6 +91,7 @@ type node struct {
 	gs   graphsync.GraphExchange
 	ps   *pubsub.PubSub
 	exch *hop.Exchange
+	rs   RemoteStorer
 
 	mu     sync.Mutex
 	notify func(Notify)
@@ -197,6 +206,20 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if opts.PrivKey != "" {
 		nd.importAddress(opts.PrivKey)
 	}
+
+	nd.rs, err = storage.New(
+		nd.host,
+		nd.bs,
+		nd.ms,
+		nd.ds,
+		nd.exch.DataTransfer(),
+		nd.exch.Wallet(),
+		nd.exch.FilecoinAPI(),
+		nd.exch.Supply(),
+	)
+	if err != nil {
+		return nil, err
+	}
 	// start connecting with peers
 	go nd.bootstrap(ctx, opts.BootstrapPeers)
 
@@ -273,7 +296,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 		strs = append(strs, a.String())
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	pings := ping.Ping(ctx, nd.host, pi.ID)
@@ -395,7 +418,7 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	})
 }
 
-// Commit packages multiple unix FS dags into one, kind of like a flat directory
+// Commit packages multiple unix FS dags into an archive for storage
 func (nd *node) Commit(ctx context.Context, args *CommitArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
@@ -404,7 +427,72 @@ func (nd *node) Commit(ctx context.Context, args *CommitArgs) {
 			},
 		})
 	}
-	sendErr(errors.New("TODO"))
+	w, err := NewWorkdag(nd.ms, nd.ds)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	ref, err := w.Commit(ctx, CommitOptions{})
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	buf := bytes.NewBuffer(nil)
+	fmt.Fprintf(buf, "Data CID: %s\n", ref.PayloadCID.String())
+	fmt.Fprintf(buf, "Data size: %d\n", ref.PayloadSize)
+	fmt.Fprintf(buf, "Piece CID: %s\n", ref.PieceCID.String())
+	fmt.Fprintf(buf, "Piece size: %d\n", ref.PieceSize)
+
+	nd.send(Notify{
+		CommitResult: &CommitResult{
+			Output: buf.String(),
+		},
+	})
+}
+
+// Push deploys a committed DAG archive for storage
+func (nd *node) Push(ctx context.Context, args *PushArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			PushResult: &PushResult{
+				Err: err.Error(),
+			},
+		})
+	}
+	w, err := NewWorkdag(nd.ms, nd.ds)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	idx, err := w.Index()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	com := idx.Commits[len(idx.Commits)-1]
+
+	dur := 24 * time.Hour * time.Duration(180)
+
+	quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
+		PieceSize: uint64(com.PieceSize),
+		Duration:  dur,
+	})
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	buf := bytes.NewBuffer(nil)
+	// for _, addr := range receipt.Miners {
+	fmt.Fprintf(buf, "Contract Duration: %s\n", dur)
+	fmt.Fprintf(buf, "Miners: %v\n", quote.Miners)
+	fmt.Fprintf(buf, "Price: %s\n", quote.Total.String())
+	// }
+	nd.send(Notify{
+		PushResult: &PushResult{
+			Output: buf.String(),
+		},
+	})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli

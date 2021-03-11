@@ -261,6 +261,14 @@ func BigSub(a, b BigInt) BigInt {
 	return BigInt{Int: big.NewInt(0).Sub(a.Int, b.Int)}
 }
 
+func BigMul(a, b BigInt) BigInt {
+	return BigInt{Int: big.NewInt(0).Mul(a.Int, b.Int)}
+}
+
+func BigDiv(a, b BigInt) BigInt {
+	return BigInt{Int: big.NewInt(0).Div(a.Int, b.Int)}
+}
+
 type BlockHeader struct {
 	Miner address.Address // 0
 

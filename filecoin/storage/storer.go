@@ -34,13 +34,25 @@ type StoreIDGetter interface {
 	GetStoreID(cid.Cid) (multistore.StoreID, error)
 }
 
+// MinerLister allows the storage module to get a list of Filecoin miners to store with
+type MinerLister interface {
+	ListMiners(ctx context.Context) ([]address.Address, error)
+}
+
+// Supplier is a generic interface for supplying the storage module with dynamic information about content
+// and network agents
+type Supplier interface {
+	StoreIDGetter
+	MinerLister
+}
+
 // Storage is a minimal system for creating basic storage deals on Filecoin
 type Storage struct {
 	client  storagemarket.StorageClient
 	adapter *Adapter
 	fundmgr *FundManager
 	fAPI    fil.API
-	sg      StoreIDGetter
+	sp      Supplier
 }
 
 // New creates a new storage client instance
@@ -52,7 +64,7 @@ func New(
 	dt datatransfer.Manager,
 	w wallet.Driver,
 	api fil.API,
-	sg StoreIDGetter,
+	sp Supplier,
 ) (*Storage, error) {
 	fundmgr := NewFundManager(ds, api, w)
 	ad := &Adapter{
@@ -69,7 +81,7 @@ func New(
 		return nil, err
 	}
 
-	c, err := storageimpl.NewClient(net, bs, ms, ds, disc, ds, ad, storageimpl.DealPollingInterval(time.Second))
+	c, err := storageimpl.NewClient(net, bs, ms, dt, disc, ds, ad, storageimpl.DealPollingInterval(time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +90,7 @@ func New(
 		client:  c,
 		adapter: ad,
 		fundmgr: fundmgr,
-		sg:      sg,
+		sp:      sp,
 	}, nil
 }
 
@@ -89,6 +101,34 @@ func (s *Storage) Start(ctx context.Context) error {
 		return err
 	}
 	return s.client.Start(ctx)
+}
+
+// LoadMiners selects a set of miners to queue storage deals with
+func (s *Storage) LoadMiners(ctx context.Context) ([]*storagemarket.StorageAsk, error) {
+	addrs, err := s.sp.ListMiners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tok, _, err := s.adapter.GetChainHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i := 0
+	var sel []*storagemarket.StorageAsk
+	// We need at least 7 miners to make sure at least one deal succeeds
+	for len(sel) < 7 {
+		info, err := s.adapter.GetMinerInfo(ctx, addrs[i], tok)
+		i++
+		if err != nil {
+			continue
+		}
+		ask, err := s.client.GetAsk(ctx, *info)
+		if err != nil {
+			continue
+		}
+		sel = append(sel, ask)
+	}
+	return sel, nil
 }
 
 // StartDealParams are params configurable on the user side
@@ -106,7 +146,7 @@ type StartDealParams struct {
 
 // StartDeal starts a new storage deal with a Filecoin storage miner
 func (s *Storage) StartDeal(ctx context.Context, params *StartDealParams) (*cid.Cid, error) {
-	storeID, err := s.sg.GetStoreID(params.Data.Root)
+	storeID, err := s.sp.GetStoreID(params.Data.Root)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +189,7 @@ func (s *Storage) StartDeal(ctx context.Context, params *StartDealParams) (*cid.
 		Rt:            st,
 		FastRetrieval: params.FastRetrieval,
 		VerifiedDeal:  params.VerifiedDeal,
-		StoreID:       storeID,
+		StoreID:       &storeID,
 	})
 
 	if err != nil {
@@ -157,6 +197,73 @@ func (s *Storage) StartDeal(ctx context.Context, params *StartDealParams) (*cid.
 	}
 
 	return &result.ProposalCid, nil
+}
+
+// QuoteParams is the params to calculate the storage quote with.
+type QuoteParams struct {
+	PieceSize uint64
+	Duration  time.Duration
+}
+
+// Quote is an estimate of who can store given content and for how much
+type Quote struct {
+	Total  fil.FIL
+	Miners []address.Address
+}
+
+// GetMarketQuote returns the costs of storing for a given CID and duration
+func (s *Storage) GetMarketQuote(ctx context.Context, params QuoteParams) (*Quote, error) {
+	asks, err := s.LoadMiners(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	gib := fil.NewInt(1 << 30)
+
+	var miners []address.Address
+	var epochPrices []big.Int
+
+	epochs := abi.ChainEpoch(params.Duration / (time.Duration(uint64(builtin.EpochDurationSeconds)) * time.Second))
+
+	pricePerGib := big.Zero()
+
+	for _, a := range asks {
+		miners = append(miners, a.Miner)
+		p := a.Price
+
+		pricePerGib = fil.BigAdd(pricePerGib, p)
+		epochPrice := fil.BigDiv(fil.BigMul(p, fil.NewInt(params.PieceSize)), gib)
+		epochPrices = append(epochPrices, epochPrice)
+
+	}
+
+	epochPrice := fil.BigDiv(fil.BigMul(pricePerGib, fil.NewInt(uint64(params.PieceSize))), gib)
+	totalPrice := fil.BigMul(epochPrice, fil.NewInt(uint64(epochs)))
+	return &Quote{
+		Total:  fil.FIL(totalPrice),
+		Miners: miners,
+	}, nil
+}
+
+// Receipt compiles all information about our content storage contracts
+type Receipt struct {
+	Miners []address.Address
+}
+
+// Store is the main storage operation which automatically stores content for a given CID
+// with the best conditions available
+func (s *Storage) Store(ctx context.Context, c cid.Cid) (*Receipt, error) {
+	asks, err := s.LoadMiners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var miners []address.Address
+	for _, a := range asks {
+		miners = append(miners, a.Miner)
+	}
+	return &Receipt{
+		Miners: miners,
+	}, nil
 }
 
 func PreferredSealProofTypeFromWindowPoStType(proof abi.RegisteredPoStProof) (abi.RegisteredSealProof, error) {
