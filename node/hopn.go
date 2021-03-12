@@ -44,13 +44,13 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
-	"github.com/myelnet/go-hop-exchange"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/filecoin/storage"
-	"github.com/myelnet/go-hop-exchange/retrieval/client"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
-	"github.com/myelnet/go-hop-exchange/supply"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	"github.com/myelnet/pop"
+	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/filecoin/storage"
+	"github.com/myelnet/pop/retrieval/client"
+	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/supply"
+	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
 )
 
@@ -92,7 +92,7 @@ type node struct {
 	dag  ipldformat.DAGService
 	gs   graphsync.GraphExchange
 	ps   *pubsub.PubSub
-	exch *hop.Exchange
+	exch *pop.Exchange
 	rs   RemoteStorer
 
 	mu     sync.Mutex
@@ -184,7 +184,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		})
 	}
 
-	settings := hop.Settings{
+	settings := pop.Settings{
 		Datastore:  nd.ds,
 		Blockstore: nd.bs,
 		MultiStore: nd.ms,
@@ -201,7 +201,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Regions: regions,
 	}
 
-	nd.exch, err = hop.NewExchange(ctx, settings)
+	nd.exch, err = pop.NewExchange(ctx, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 	}
 	// We could get the size from the index entry but DAGStat gives more feedback into
 	// how the file actually got chunked
-	stats, err := hop.DAGStat(ctx, w.Store().Bstore, root, hop.AllSelector())
+	stats, err := pop.DAGStat(ctx, w.Store().Bstore, root, pop.AllSelector())
 	if err != nil {
 		log.Error().Err(err).Msg("record not found")
 	}

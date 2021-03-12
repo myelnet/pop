@@ -1,4 +1,4 @@
-module github.com/myelnet/go-hop-exchange
+module github.com/myelnet/pop
 
 go 1.14
 

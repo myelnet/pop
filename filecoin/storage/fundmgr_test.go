@@ -17,8 +17,8 @@ import (
 	"github.com/ipfs/go-datastore"
 	dss "github.com/ipfs/go-datastore/sync"
 	keystore "github.com/ipfs/go-ipfs-keystore"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
 

@@ -15,8 +15,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/myelnet/go-hop-exchange/payments"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/payments"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 func TestClientFSM(t *testing.T) {

@@ -18,15 +18,15 @@ var initCmd = &ffcli.Command{
 	ShortHelp: "Creates a new IPFS repo with a config file",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop init' command generates a new empty repo at path ~/.hop with default configurations. This is required 
-before starting the node for the first time. To edit configs open ~/.hop/HopConfig.json.
+The 'pop init' command generates a new empty repo at path ~/.pop with default configurations. This is required 
+before starting the node for the first time. To edit configs open ~/.pop/PopConfig.json.
 
 `),
 	Exec: runInit,
 }
 
-// HopConfig is the json config object we generate with the init command
-type HopConfig struct {
+// PopConfig is the json config object we generate with the init command
+type PopConfig struct {
 	FilEndpoint   string `json:"fil-endpoint"`
 	FilToken      string `json:"fil-token"`
 	FilTokenType  string `json:"fil-token-type"`
@@ -52,7 +52,7 @@ func runInit(ctx context.Context, args []string) error {
 		// default configs
 		// Regions aren't set in a static config object as we aim to make them
 		// more dynamic in the future
-		config := HopConfig{
+		config := PopConfig{
 			FilEndpoint:   os.Getenv("FIL_ENDPOINT"),
 			FilToken:      os.Getenv("FIL_TOKEN"),
 			BootstrapAddr: "/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
@@ -64,7 +64,7 @@ func runInit(ctx context.Context, args []string) error {
 		if err := e.Encode(config); err != nil {
 			return err
 		}
-		c, err := os.Create(filepath.Join(path, "HopConfig.json"))
+		c, err := os.Create(filepath.Join(path, "PopConfig.json"))
 		if err != nil {
 			return err
 		}
@@ -78,5 +78,5 @@ func runInit(ctx context.Context, args []string) error {
 		log.Info().Str("path", path).Msg("initialized new IPFS repo")
 		return nil
 	}
-	return fmt.Errorf("a hop repo already exists")
+	return fmt.Errorf("a pop repo already exists")
 }

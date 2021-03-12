@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
@@ -15,7 +15,7 @@ var commitCmd = &ffcli.Command{
 	ShortHelp: "Commit the current index into a DAG archive",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop commit' command creates a single DAG with the current index of staged DAGs. 
+The 'pop commit' command creates a single DAG with the current index of staged DAGs. 
 It archives it into a CAR file ready for storage.
 
 `),

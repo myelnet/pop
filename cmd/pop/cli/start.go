@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
@@ -33,7 +33,7 @@ var startCmd = &ffcli.Command{
 	ShortHelp: "Starts an IPFS daemon",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop start' command starts an IPFS daemon service.
+The 'pop start' command starts an IPFS daemon service.
 
 `),
 	Exec: runStart,
@@ -55,7 +55,7 @@ The 'hop start' command starts an IPFS daemon service.
 			path = ""
 		}
 		return []ff.Option{
-			ff.WithConfigFile(filepath.Join(path, "HopConfig.json")),
+			ff.WithConfigFile(filepath.Join(path, "PopConfig.json")),
 			ff.WithConfigFileParser(ff.JSONParser),
 			ff.WithAllowMissingConfigFile(true),
 		}
@@ -75,13 +75,13 @@ func runStart(ctx context.Context, args []string) error {
 	}
 
 	if !exists || startArgs.temp {
-		path, err = os.MkdirTemp("", ".hop")
+		path, err = os.MkdirTemp("", ".pop")
 		if err != nil {
 			return err
 		}
 		defer os.RemoveAll(path)
 		log.Warn().
-			Msg("Creating temp repo... To create a persistent repo run `hop init`")
+			Msg("Creating temp repo... To create a persistent repo run `pop init`")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -141,12 +141,12 @@ func runStart(ctx context.Context, args []string) error {
 	return nil
 }
 
-// Repo path is akin to IPFS: ~/.hop by default or changed via $HOP_PATH
+// Repo path is akin to IPFS: ~/.pop by default or changed via $POP_PATH
 func getRepoPath() string {
-	if path, ok := os.LookupEnv("HOP_PATH"); ok {
+	if path, ok := os.LookupEnv("POP_PATH"); ok {
 		return path
 	}
-	return ".hop"
+	return ".pop"
 }
 
 // construct full path and check if a repo was initialized with a datastore

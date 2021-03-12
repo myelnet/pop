@@ -15,7 +15,7 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	pb "github.com/libp2p/go-libp2p-core/crypto/pb"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
+	fil "github.com/myelnet/pop/filecoin"
 )
 
 var ErrNoAPI = fmt.Errorf("no filecoin api connected")

@@ -19,14 +19,14 @@ import (
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/payments"
-	"github.com/myelnet/go-hop-exchange/testutil"
 	"github.com/stretchr/testify/require"
 
-	"github.com/myelnet/go-hop-exchange/retrieval/client"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
-	"github.com/myelnet/go-hop-exchange/retrieval/provider"
+	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/payments"
+	"github.com/myelnet/pop/retrieval/client"
+	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/provider"
+	"github.com/myelnet/pop/testutil"
 )
 
 var blockGen = blocksutil.NewBlockGenerator()

@@ -21,8 +21,8 @@ import (
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 )
 
 // channel manages the lifecycle of a payment channel

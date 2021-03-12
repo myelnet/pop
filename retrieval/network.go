@@ -14,7 +14,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 // We stay compatible with lotus nodes so we can retrieve from lotus providers too
@@ -23,9 +23,9 @@ import (
 // deal parameters from Filecoin storage miners
 const FilQueryProtocolID = protocol.ID("/fil/retrieval/qry/1.0.0")
 
-// HopQueryProtocolID is the protocol for exchanging information about retrieval
+// PopQueryProtocolID is the protocol for exchanging information about retrieval
 // deal parameters from retrieval providers
-const HopQueryProtocolID = protocol.ID("/myel/hop/query/1.0")
+const PopQueryProtocolID = protocol.ID("/myel/pop/query/1.0")
 
 // These are the required interfaces that must be implemented to send and receive data
 // for retrieval queries and deals.
@@ -145,7 +145,7 @@ func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
 		maxAttemptDuration:    defaultMaxAttemptDuration,
 		supportedProtocols: []protocol.ID{
 			FilQueryProtocolID,
-			HopQueryProtocolID,
+			PopQueryProtocolID,
 		},
 	}
 	for _, option := range options {

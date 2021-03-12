@@ -12,9 +12,9 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	"github.com/myelnet/go-hop-exchange"
-	"github.com/myelnet/go-hop-exchange/supply"
-	"github.com/myelnet/go-hop-exchange/testutil"
+	"github.com/myelnet/pop"
+	"github.com/myelnet/pop/supply"
+	"github.com/myelnet/pop/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +34,7 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	nd.ps, err = pubsub.NewGossipSub(ctx, nd.host)
 	require.NoError(t, err)
 
-	settings := hop.Settings{
+	settings := pop.Settings{
 		Datastore:  nd.ds,
 		Blockstore: nd.bs,
 		MultiStore: nd.ms,
@@ -46,7 +46,7 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 		Regions:    []supply.Region{supply.Regions["Global"]},
 	}
 
-	nd.exch, err = hop.NewExchange(ctx, settings)
+	nd.exch, err = pop.NewExchange(ctx, settings)
 	require.NoError(t, err)
 
 	return nd

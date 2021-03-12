@@ -24,9 +24,8 @@ import (
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,7 +96,7 @@ func TestChannel(t *testing.T) {
 		msgListeners: newMsgListeners(),
 	}
 
-	c, err := ch.create(ctx, filecoin.NewInt(123))
+	c, err := ch.create(ctx, fil.NewInt(123))
 	require.NoError(t, err)
 
 	chInfo, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
@@ -133,7 +132,7 @@ func TestChannel(t *testing.T) {
 	addChInfo, err := ch.store.OutboundActiveByFromTo(ch.from, ch.to)
 	require.NoError(t, err)
 
-	addChCid, err := ch.addFunds(ctx, addChInfo, filecoin.NewInt(123))
+	addChCid, err := ch.addFunds(ctx, addChInfo, fil.NewInt(123))
 	require.NoError(t, err)
 
 	// Check if our pending message is there
@@ -150,7 +149,7 @@ func TestChannel(t *testing.T) {
 		require.NoError(t, err)
 
 		// Our amount should be updated
-		require.Equal(t, filecoin.NewInt(246), info.Amount)
+		require.Equal(t, fil.NewInt(246), info.Amount)
 		confirmed <- true
 	})
 
@@ -189,7 +188,7 @@ func TestChannel(t *testing.T) {
 	rt.GetState(&st)
 
 	actState := fil.ActorState{
-		Balance: filecoin.NewInt(9),
+		Balance: fil.NewInt(9),
 		State:   st,
 	}
 
@@ -206,7 +205,7 @@ func TestChannel(t *testing.T) {
 
 	api.SetAccountKey(ch.from)
 
-	voucher := paych.SignedVoucher{Amount: filecoin.NewInt(123), Lane: 1}
+	voucher := paych.SignedVoucher{Amount: fil.NewInt(123), Lane: 1}
 	res, err := ch.createVoucher(ctx, chAddr, voucher)
 	require.NoError(t, err)
 	require.NotNil(t, res.Voucher)
@@ -230,7 +229,7 @@ func TestChannel(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func formatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {
+func formatMsgLookup(t *testing.T, chAddr address.Address) *fil.MsgLookup {
 	createChannelRet := init2.ExecReturn{
 		IDAddress:     chAddr,
 		RobustAddress: chAddr,
@@ -286,7 +285,7 @@ func TestLoadActorState(t *testing.T) {
 	rt.GetState(&st)
 
 	actState := fil.ActorState{
-		Balance: filecoin.NewInt(9),
+		Balance: fil.NewInt(9),
 		State:   st,
 	}
 

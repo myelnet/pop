@@ -8,7 +8,7 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipld/go-ipld-prime"
 	peer "github.com/libp2p/go-libp2p-peer"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 // StoreGetter retrieves the store for a given proposal cid

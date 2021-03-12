@@ -1,4 +1,4 @@
-package hop
+package pop
 
 import (
 	"bytes"
@@ -27,8 +27,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	"github.com/myelnet/go-hop-exchange/supply"
-	"github.com/myelnet/go-hop-exchange/testutil"
+	"github.com/myelnet/pop/supply"
+	"github.com/myelnet/pop/testutil"
 	"github.com/stretchr/testify/require"
 )
 

@@ -1,9 +1,9 @@
 <h1 align="center"> 
 	<br>
-	  	🐸
+	  	🍿
 	<br>
 	<br>
-	go-hop-exchange
+	pop
 	<br>
 	<br>
 	<br>
@@ -30,7 +30,7 @@ and more at the prototype stage so feel free to open an issue if you have any su
 
 ## Install
 
-As a cli:
+As a CLI:
 
 clone the repo then run:
 ```
@@ -40,12 +40,8 @@ $ make install
 As a library:
 
 ```
-$ go get github.com/myelnet/go-hop-exchange
+$ go get github.com/myelnet/pop
 ```
-
-As an IPFS plugin:
-
-[Please follow the instructions in the plugin repo](https://github.com/myelnet/go-ipfs-hop-plugin)
 
 ## CLI Usage
 
@@ -100,7 +96,7 @@ Check if the daemon is running and get a list of connected providers
 package main
 
 import (
-	hop "github.com/myelnet/go-hop-exchange"
+	"github.com/myelnet/pop"
 )
 
 ```
@@ -116,9 +112,9 @@ var ds datastore.Batching
 var gs graphsync.GraphExchange
 var ks keystore.Keystore
 
-exch, err := hop.NewExchange(
+exch, err := pop.NewExchange(
 		ctx,
-		hop.Settings{
+		pop.Settings{
 			Blockstore: bstore,
 			PubSub: ps,
 			Host: host,

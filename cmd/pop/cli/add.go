@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
@@ -23,7 +23,7 @@ var addCmd = &ffcli.Command{
 	ShortHelp:  "Add a file to the ipfs blockstore",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop add' command opens a given file, chunks it, links it as an ipld graph and 
+The 'pop add' command opens a given file, chunks it, links it as an ipld graph and 
 stores the blocks in the block store.
 
 `),
