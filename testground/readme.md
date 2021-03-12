@@ -18,13 +18,13 @@ Testground will use `~/testground` as directory to look for plans
 you can either import the plans in this repo:
 
 ```sh
-$ testground plan import --from ~/go-hop-exchange/testground/plans/supply
+$ testground plan import --from ~/pop/testground/plans/supply
 ```
 
 or I like to set the repo as testground home directly i.e.
 
 ```sh
-$ set -x TESTGROUND_HOME ~/go-hop-exchange/testground
+$ set -x TESTGROUND_HOME ~/pop/testground
 ```
 
 Make sure you have docker installed and running then in a different terminal run:

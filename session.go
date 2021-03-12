@@ -1,4 +1,4 @@
-package hop
+package pop
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/myelnet/go-hop-exchange/retrieval"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/retrieval"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 // Session to exchange multiple blocks with a set of connected peers

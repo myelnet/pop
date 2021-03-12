@@ -15,8 +15,8 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	dsq "github.com/ipfs/go-datastore/query"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 

@@ -7,7 +7,7 @@ import (
 
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	"github.com/myelnet/go-hop-exchange/testutil"
+	"github.com/myelnet/pop/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

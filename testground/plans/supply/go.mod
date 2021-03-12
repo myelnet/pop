@@ -1,4 +1,4 @@
-module github.com/myelnet/go-hop-exchange/testground/plans/supply
+module github.com/myelnet/pop/testground/plans/supply
 
 go 1.14
 

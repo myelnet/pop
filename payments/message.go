@@ -11,7 +11,7 @@ import (
 	init2 "github.com/filecoin-project/specs-actors/v3/actors/builtin/init"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
 
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
+	fil "github.com/myelnet/pop/filecoin"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
+	fil "github.com/myelnet/pop/filecoin"
 	"github.com/stretchr/testify/require"
 )
 

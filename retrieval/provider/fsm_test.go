@@ -12,7 +12,7 @@ import (
 	fsmtest "github.com/filecoin-project/go-statemachine/fsm/testutil"
 	"github.com/stretchr/testify/require"
 
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 func TestProviderFSM(t *testing.T) {

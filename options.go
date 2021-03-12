@@ -1,4 +1,4 @@
-package hop
+package pop
 
 import (
 	"bytes"
@@ -29,7 +29,7 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/myelnet/go-hop-exchange/supply"
+	"github.com/myelnet/pop/supply"
 )
 
 // TODO: We should be able to customize these in the options

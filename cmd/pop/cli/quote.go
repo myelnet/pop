@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
@@ -23,7 +23,7 @@ var quoteCmd = &ffcli.Command{
 	ShortHelp:  "Get a storage price quote for a given content commit",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop quote' gets a storage price quote from the market. It automatically selects reliable miners in the
+The 'pop quote' gets a storage price quote from the market. It automatically selects reliable miners in the
 given region and compiles a set of asks with size and duration parameters.
 
 `),

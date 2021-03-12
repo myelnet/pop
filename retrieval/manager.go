@@ -17,10 +17,10 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	peer "github.com/libp2p/go-libp2p-peer"
 
-	"github.com/myelnet/go-hop-exchange/payments"
-	"github.com/myelnet/go-hop-exchange/retrieval/client"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
-	"github.com/myelnet/go-hop-exchange/retrieval/provider"
+	"github.com/myelnet/pop/payments"
+	"github.com/myelnet/pop/retrieval/client"
+	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/provider"
 )
 
 // Unsubscribe is a function that unsubscribes a subscriber for either the

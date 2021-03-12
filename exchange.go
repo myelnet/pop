@@ -1,4 +1,4 @@
-package hop
+package pop
 
 import (
 	"bytes"
@@ -16,17 +16,17 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/payments"
-	"github.com/myelnet/go-hop-exchange/retrieval"
-	"github.com/myelnet/go-hop-exchange/retrieval/client"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
-	"github.com/myelnet/go-hop-exchange/supply"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/payments"
+	"github.com/myelnet/pop/retrieval"
+	"github.com/myelnet/pop/retrieval/client"
+	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/supply"
+	"github.com/myelnet/pop/wallet"
 )
 
 // RequestTopic listens for peers looking for content blocks
-const RequestTopic = "/myel/hop/request/1.0"
+const RequestTopic = "/myel/pop/request/1.0"
 
 // NewExchange creates a Hop exchange struct
 func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
@@ -131,7 +131,7 @@ func (e *Exchange) joinRegions(ctx context.Context, rgs []supply.Region) error {
 	return nil
 }
 
-// requestLoop runs by default in the background when the Hop client is initialized
+// requestLoop runs by default in the background when the pop client is initialized
 // it iterates over new gossip messages and sends a response if we have the block in store
 func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r supply.Region) {
 	for {

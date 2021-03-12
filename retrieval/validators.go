@@ -14,9 +14,9 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	peer "github.com/libp2p/go-libp2p-peer"
-	"github.com/myelnet/go-hop-exchange/payments"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
-	"github.com/myelnet/go-hop-exchange/retrieval/provider"
+	"github.com/myelnet/pop/payments"
+	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/provider"
 )
 
 var allSelectorBytes []byte

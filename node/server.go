@@ -102,7 +102,7 @@ func (s *server) writeToClients(b []byte) {
 func (s *server) localhostHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			io.WriteString(w, "<html><title>Hop</title><body><h1>Hello</h1>This is the local IPFS daemon.")
+			io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is the local IPFS daemon.")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
@@ -219,7 +219,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// Run runs a hop enabled IPFS node
+// Run runs a pop IPFS node
 func Run(ctx context.Context, opts Options) error {
 	done := make(chan struct{})
 	defer close(done)
