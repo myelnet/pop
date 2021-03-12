@@ -39,7 +39,7 @@ change in the future.
 			addCmd,
 			statusCmd,
 			quoteCmd,
-			commitCmd,
+			packCmd,
 			pushCmd,
 			getCmd,
 		},

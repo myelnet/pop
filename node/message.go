@@ -31,8 +31,8 @@ type StatusArgs struct {
 	Verbose bool
 }
 
-// CommitArgs are passed to the Commit command
-type CommitArgs struct {
+// PackArgs are passed to the Pack command
+type PackArgs struct {
 	Archive bool
 }
 
@@ -66,7 +66,7 @@ type Command struct {
 	Ping   *PingArgs
 	Add    *AddArgs
 	Status *StatusArgs
-	Commit *CommitArgs
+	Pack   *PackArgs
 	Quote  *QuoteArgs
 	Push   *PushArgs
 	Get    *GetArgs
@@ -96,8 +96,8 @@ type StatusResult struct {
 	Err    string
 }
 
-// CommitResult gives us feedback on the result of the Commit operation
-type CommitResult struct {
+// PackResult gives us feedback on the result of the Commit operation
+type PackResult struct {
 	Output string
 	Err    string
 }
@@ -133,7 +133,7 @@ type Notify struct {
 	PingResult   *PingResult
 	AddResult    *AddResult
 	StatusResult *StatusResult
-	CommitResult *CommitResult
+	PackResult   *PackResult
 	QuoteResult  *QuoteResult
 	PushResult   *PushResult
 	GetResult    *GetResult
@@ -176,8 +176,8 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.Status(ctx, c)
 		return nil
 	}
-	if c := cmd.Commit; c != nil {
-		cs.n.Commit(ctx, c)
+	if c := cmd.Pack; c != nil {
+		cs.n.Pack(ctx, c)
 		return nil
 	}
 	if c := cmd.Quote; c != nil {
@@ -261,8 +261,8 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
 }
 
-func (cc *CommandClient) Commit(args *CommitArgs) {
-	cc.send(Command{Commit: args})
+func (cc *CommandClient) Pack(args *PackArgs) {
+	cc.send(Command{Pack: args})
 }
 
 func (cc *CommandClient) Quote(args *QuoteArgs) {

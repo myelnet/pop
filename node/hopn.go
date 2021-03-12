@@ -424,11 +424,11 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	})
 }
 
-// Commit packages multiple unix FS dags into an archive for storage
-func (nd *node) Commit(ctx context.Context, args *CommitArgs) {
+// Pack packages multiple unix FS dags into an archive for storage
+func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
-			CommitResult: &CommitResult{
+			PackResult: &PackResult{
 				Err: err.Error(),
 			},
 		})
@@ -455,7 +455,7 @@ func (nd *node) Commit(ctx context.Context, args *CommitArgs) {
 	fmt.Fprintf(buf, "Piece size: %d\n", ref.PieceSize)
 
 	nd.send(Notify{
-		CommitResult: &CommitResult{
+		PackResult: &PackResult{
 			Output: buf.String(),
 		},
 	})

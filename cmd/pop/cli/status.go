@@ -13,7 +13,7 @@ import (
 
 var statusCmd = &ffcli.Command{
 	Name:      "status",
-	ShortHelp: "Show the working dag status",
+	ShortHelp: "Print the state of the working DAG",
 	LongHelp: strings.TrimSpace(`
 
 The 'pop status' command prints all the files that have been added to the blockstore. Files that have
