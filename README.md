@@ -33,13 +33,13 @@ and more at the prototype stage so feel free to open an issue if you have any su
 As a CLI:
 
 clone the repo then run:
-```
+```commandline
 $ make install
 ```
 
 As a library:
 
-```
+```commandline
 $ go get github.com/myelnet/pop
 ```
 
@@ -47,7 +47,7 @@ $ go get github.com/myelnet/pop
 
 Run any command with `-h` flag for more details.
 
-```sh
+```
 USAGE
   pop subcommand [flags]
 
@@ -76,7 +76,6 @@ package main
 import (
 	"github.com/myelnet/pop"
 )
-
 ```
 
 2. Initialize a blockstore, graphsync, libp2p host and gossipsub subscription.
@@ -109,7 +108,6 @@ exch, err := pop.NewExchange(
 			},
 		)
 	)
-
 ```
 FilecoinRPCEndpoint is optional and if not provided, the node only supports free transfers
 and will charge 0 price per byte to client requests for content it serves. This is mostly
