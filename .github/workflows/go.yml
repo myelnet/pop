@@ -26,10 +26,10 @@ jobs:
     - name: Linux deps
       run: |
         sudo apt-get update
-        sudo apt-get install ocl-icd-opencl-dev hwloc
+        sudo apt-get install ocl-icd-opencl-dev
 
     - name: FFI build
-      run: make -C ./extern/filecoin-ffi
+      run: make -C ./extern/filecoin-ffi .install-filcrypto
 
     - name: Test
       run: go test -v ./...
