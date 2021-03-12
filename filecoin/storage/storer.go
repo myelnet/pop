@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -21,6 +22,8 @@ import (
 	"github.com/ipfs/go-datastore"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	fil "github.com/myelnet/go-hop-exchange/filecoin"
 	"github.com/myelnet/go-hop-exchange/wallet"
 )
@@ -49,6 +52,7 @@ type Supplier interface {
 
 // Storage is a minimal system for creating basic storage deals on Filecoin
 type Storage struct {
+	host    host.Host
 	client  storagemarket.StorageClient
 	adapter *Adapter
 	fundmgr *FundManager
@@ -89,6 +93,7 @@ func New(
 	}
 
 	return &Storage{
+		host:    h,
 		client:  c,
 		adapter: ad,
 		fundmgr: fundmgr,
@@ -132,24 +137,47 @@ func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]M
 		return nil, err
 	}
 
-	i := 0
 	var sel []Miner
-	// We add 1 on top of the replication factor in case one deal fails
-	for len(sel) < msp.RF+2 && i < len(addrs) {
-		mi, err := s.fAPI.StateMinerInfo(ctx, addrs[i], fil.EmptyTSK)
+	lats := make(map[address.Address]time.Duration)
+	for _, a := range addrs {
+		mi, err := s.fAPI.StateMinerInfo(ctx, a, fil.EmptyTSK)
 		if err != nil {
 			return nil, err
 		}
 		// PeerId is often nil which causes panics down the road
 		if mi.PeerId == nil {
-			return nil, fmt.Errorf("no peer id for miner %v", addrs[i])
+			return nil, fmt.Errorf("no peer id for miner %v", a)
 		}
-		info := NewStorageProviderInfo(addrs[i], mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
-		i++
-		ask, err := s.client.GetAsk(ctx, info)
+		info := NewStorageProviderInfo(a, mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
+
+		ai := peer.AddrInfo{
+			ID:    info.PeerID,
+			Addrs: info.Addrs,
+		}
+		// We need to connect directly with the peer to ping them
+		err = s.host.Connect(ctx, ai)
 		if err != nil {
 			continue
 		}
+		pings := ping.Ping(ctx, s.host, *mi.PeerId)
+
+		select {
+		case p := <-pings:
+			if p.Error != nil {
+				// If any error we know they're probably not reachable
+				continue
+			}
+			lats[a] = p.RTT
+		case <-ctx.Done():
+			return sel, ctx.Err()
+		}
+
+		ask, err := s.client.GetAsk(ctx, info)
+		if err != nil {
+			fmt.Println("error", err)
+			continue
+		}
+
 		// Check miners can fit our piece
 		if msp.PieceSize > uint64(ask.MaxPieceSize) ||
 			msp.PieceSize < uint64(ask.MinPieceSize) {
@@ -161,6 +189,16 @@ func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]M
 			Info:                &info,
 			WindowPoStProofType: mi.WindowPoStProofType,
 		})
+	}
+	// Sort by latency
+	sort.Slice(sel, func(i, j int) bool {
+		return lats[sel[i].Info.Address] < lats[sel[j].Info.Address]
+	})
+	// Only keep the lowest latencies
+	// We add 2 on top of the replication factor in case some deals fails
+	l := msp.RF + 2
+	if len(sel) > l {
+		return sel[:l], nil
 	}
 	return sel, nil
 }

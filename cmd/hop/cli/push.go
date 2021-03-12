@@ -32,7 +32,7 @@ with a default level of cashing. By default it will attempt multiple storage dea
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("push", flag.ExitOnError)
 		fs.IntVar(&pushArgs.cacheRF, "cache-rf", 6, "number of cache providers to dispatch to")
-		fs.IntVar(&pushArgs.storageRF, "storage-rf", 1, "number of storage providers to start deals with")
+		fs.IntVar(&pushArgs.storageRF, "storage-rf", 6, "number of storage providers to start deals with")
 		fs.DurationVar(&pushArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
 		return fs
 	})(),
