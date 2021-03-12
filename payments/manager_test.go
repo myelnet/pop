@@ -17,9 +17,8 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -217,7 +216,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 
 	// Create a voucher in a different lane with an amount that exceeds the
 	// channel balance
-	excessAmt := filecoin.NewInt(5)
+	excessAmt := fil.NewInt(5)
 	vouchRes, err = mgr.CreateVoucher(ctx, chAddr, excessAmt, 2)
 	require.NoError(t, err)
 	require.Nil(t, vouchRes.Voucher)
@@ -231,7 +230,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	api.SetMsgLookup(lookup)
 
 	// Update actor test case balance to reflect added funds
-	newBalance := filecoin.BigAdd(createAmt, excessAmt)
+	newBalance := fil.BigAdd(createAmt, excessAmt)
 	rt.SetBalance(newBalance)
 	act = &fil.Actor{
 		Code:    blockGen.Next().Cid(),

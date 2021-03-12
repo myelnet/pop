@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
 
 var statusCmd = &ffcli.Command{
 	Name:      "status",
-	ShortHelp: "Show the working dag status",
+	ShortHelp: "Print the state of the working DAG",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop status' command prints all the files that have been added to the blockstore. Files that have
+The 'pop status' command prints all the files that have been added to the blockstore. Files that have
 been chunked and staged in the blockstore but not yet committed into a Car to be pushed to the network.
 
 `),

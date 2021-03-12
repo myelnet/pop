@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
@@ -20,11 +20,11 @@ var addArgs struct {
 var addCmd = &ffcli.Command{
 	Name:       "add",
 	ShortUsage: "add <file-path>",
-	ShortHelp:  "Add a file to the ipfs blockstore",
+	ShortHelp:  "Add a file to the working DAG",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop add' command opens a given file, chunks it, links it as an ipld graph and 
-stores the blocks in the block store.
+The 'pop add' command opens a given file, chunks it, links it as an ipld DAG and 
+stores the blocks in the block store. The DAG is then staged in the workdag index.
 
 `),
 	Exec: runAdd,

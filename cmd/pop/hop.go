@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/myelnet/go-hop-exchange/cmd/hop/cli"
+	"github.com/myelnet/pop/cmd/pop/cli"
 )
 
 func main() {

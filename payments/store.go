@@ -13,7 +13,7 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	dsq "github.com/ipfs/go-datastore/query"
 
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
+	fil "github.com/myelnet/pop/filecoin"
 )
 
 //go:generate cbor-gen-for VoucherInfo ChannelInfo MsgInfo

@@ -81,7 +81,7 @@ func unixConnect() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := net.Dial("unix", filepath.Join(home, "hopd.sock"))
+	c, err := net.Dial("unix", filepath.Join(home, "popd.sock"))
 	if err != nil {
 		return nil, err
 	}

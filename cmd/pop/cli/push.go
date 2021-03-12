@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
@@ -24,7 +24,7 @@ var pushCmd = &ffcli.Command{
 	ShortHelp:  "Push a DAG archive to storage",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop push' command deploys a DAG archive previously generated using 'hop commit' on the Filecoin storage
+The 'pop push' command deploys a DAG archive previously generated using 'pop commit' on the Filecoin storage
 with a default level of cashing. By default it will attempt multiple storage deals for 6 months with caching in the initial regions. Passing no commit CID will result in selecting the last generated commit.
 
 `),

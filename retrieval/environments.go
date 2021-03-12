@@ -18,10 +18,10 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	cbg "github.com/whyrusleeping/cbor-gen"
 
-	"github.com/myelnet/go-hop-exchange/payments"
-	"github.com/myelnet/go-hop-exchange/retrieval/client"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
-	"github.com/myelnet/go-hop-exchange/retrieval/provider"
+	"github.com/myelnet/pop/payments"
+	"github.com/myelnet/pop/retrieval/client"
+	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/provider"
 )
 
 var _ provider.DealEnvironment = new(providerDealEnvironment)

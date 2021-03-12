@@ -12,7 +12,7 @@ import (
 	"github.com/filecoin-project/go-statemachine/fsm"
 	"github.com/hannahhoward/go-pubsub"
 
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 // InternalEvent wraps a provider event and the associated deal state

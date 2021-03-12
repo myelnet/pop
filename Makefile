@@ -1,4 +1,4 @@
 install:
-	rm -f hop
-	go build -o hop ./cmd/hop
-	install -C ./hop /usr/local/bin/hop
+	rm -f pop
+	go build -o pop ./cmd/pop
+	install -C ./pop /usr/local/bin/pop

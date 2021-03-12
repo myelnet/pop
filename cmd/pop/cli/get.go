@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
@@ -26,7 +26,7 @@ var getCmd = &ffcli.Command{
 	ShortHelp:  "Retrieve content from the network",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop get' command retrieves blocks with a given root cid and an optional selector
+The 'pop get' command retrieves blocks with a given root cid and an optional selector
 (defaults retrieves all the linked blocks). Passing an output flag with a path will write the
 data to disk. Adding a miner flag will fallback to miner if content is not available on the secondary market.
 

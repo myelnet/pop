@@ -24,8 +24,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
-	fil "github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 )
 
 const dealStartBufferHours uint64 = 49

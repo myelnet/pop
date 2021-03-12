@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	peer "github.com/libp2p/go-libp2p-peer"
-	"github.com/myelnet/go-hop-exchange/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/deal"
 )
 
 // AskStore is actually for storing QueryResponse objects

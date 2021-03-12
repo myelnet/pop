@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
@@ -17,7 +17,7 @@ var pingCmd = &ffcli.Command{
 	ShortHelp:  "Ping the local daemon or a given peer",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop ping' command is a multipurpose ping request used mostly for debugging.
+The 'pop ping' command is a multipurpose ping request used mostly for debugging.
 It can be used to check info about the local running daemon, a connected provider or even a storage miner.
 
 `),

@@ -18,7 +18,7 @@ import (
 //go:generate cbor-gen-for Request
 
 // RequestProtocol labels our network for announcing new content to the network
-const RequestProtocol = "/myel/hop/supply/dispatch/1.0"
+const RequestProtocol = "/myel/pop/supply/dispatch/1.0"
 
 func protoRegions(proto string, regions []Region) []protocol.ID {
 	var pls []protocol.ID

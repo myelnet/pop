@@ -1,4 +1,4 @@
-module github.com/myelnet/go-hop-exchange/testplans/plans/transfer
+module github.com/myelnet/pop/testplans/plans/transfer
 
 go 1.14
 

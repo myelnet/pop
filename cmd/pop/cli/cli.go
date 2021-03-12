@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/myelnet/go-hop-exchange/node"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -22,11 +22,11 @@ func Run(args []string) error {
 	}
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	rootfs := flag.NewFlagSet("hop", flag.ExitOnError)
+	rootfs := flag.NewFlagSet("pop", flag.ExitOnError)
 
 	rootCmd := &ffcli.Command{
-		Name:       "hop",
-		ShortUsage: "hop subcommand [flags]",
+		Name:       "pop",
+		ShortUsage: "pop subcommand [flags]",
 		ShortHelp:  "Content delivery network for the web3.0.",
 		LongHelp: strings.TrimSpace(`
 This CLI is still under active development. Commands and flags will
@@ -39,7 +39,7 @@ change in the future.
 			addCmd,
 			statusCmd,
 			quoteCmd,
-			commitCmd,
+			packCmd,
 			pushCmd,
 			getCmd,
 		},

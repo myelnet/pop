@@ -10,11 +10,11 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	"github.com/myelnet/go-hop-exchange/filecoin"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 )
 
-// Manager is the interface required to handle payments for the hop exchange
+// Manager is the interface required to handle payments for the pop exchange
 type Manager interface {
 	GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*ChannelResponse, error)
 	WaitForChannel(context.Context, cid.Cid) (address.Address, error)
