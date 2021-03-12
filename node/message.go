@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -35,6 +36,21 @@ type CommitArgs struct {
 	Archive bool
 }
 
+// QuoteArgs are passed to the quote command
+type QuoteArgs struct {
+	Commit    string
+	StorageRF int // StorageRF is the replication factor or number of miners we will try to store with
+	Duration  time.Duration
+}
+
+// PushArgs are passed to the Push command
+type PushArgs struct {
+	Commit    string
+	CacheRF   int // CacheRF is the cache replication factor or number of cache provider will request
+	StorageRF int // StorageRF if the replication factor for storage
+	Duration  time.Duration
+}
+
 // GetArgs get passed to the Get command
 type GetArgs struct {
 	Cid     string
@@ -51,6 +67,8 @@ type Command struct {
 	Add    *AddArgs
 	Status *StatusArgs
 	Commit *CommitArgs
+	Quote  *QuoteArgs
+	Push   *PushArgs
 	Get    *GetArgs
 }
 
@@ -80,8 +98,21 @@ type StatusResult struct {
 
 // CommitResult gives us feedback on the result of the Commit operation
 type CommitResult struct {
-	DataCid string
-	Err     string
+	Output string
+	Err    string
+}
+
+// QuoteResult returns the output of the Quote request
+type QuoteResult struct {
+	Output string
+	Err    string
+}
+
+// PushResult is feedback on the push operation
+type PushResult struct {
+	Output string
+	Done   bool
+	Err    string
 }
 
 // GetResult gives us feedback on the result of the Get request
@@ -103,6 +134,8 @@ type Notify struct {
 	AddResult    *AddResult
 	StatusResult *StatusResult
 	CommitResult *CommitResult
+	QuoteResult  *QuoteResult
+	PushResult   *PushResult
 	GetResult    *GetResult
 }
 
@@ -145,6 +178,16 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Commit; c != nil {
 		cs.n.Commit(ctx, c)
+		return nil
+	}
+	if c := cmd.Quote; c != nil {
+		cs.n.Quote(ctx, c)
+		return nil
+	}
+	if c := cmd.Push; c != nil {
+		// push requests are usually quite long so we don't block the thread so users
+		// can keep adding to the workdag while their previous commit is uploading for example
+		go cs.n.Push(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -220,6 +263,14 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 
 func (cc *CommandClient) Commit(args *CommitArgs) {
 	cc.send(Command{Commit: args})
+}
+
+func (cc *CommandClient) Quote(args *QuoteArgs) {
+	cc.send(Command{Quote: args})
+}
+
+func (cc *CommandClient) Push(args *PushArgs) {
+	cc.send(Command{Push: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {

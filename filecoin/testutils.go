@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 )
@@ -17,6 +19,7 @@ type MockLotusAPI struct {
 	objReader  func(cid.Cid) []byte // bytes to return given a specific cid
 	msgLookup  chan *MsgLookup      // msgLookup to return when calling StateWaitMsg
 	accountKey address.Address      // address returned when calling StateAccountKey
+	lookupID   address.Address      // address returned when calling StateLookupID
 }
 
 func NewMockLotusAPI() *MockLotusAPI {
@@ -57,12 +60,32 @@ func (m *MockLotusAPI) StateAccountKey(ctx context.Context, addr address.Address
 	return addr, nil
 }
 
+func (m *MockLotusAPI) StateLookupID(ctx context.Context, addr address.Address, tsk TipSetKey) (address.Address, error) {
+	return m.lookupID, nil
+}
+
 func (m *MockLotusAPI) StateReadState(ctx context.Context, addr address.Address, tsk TipSetKey) (*ActorState, error) {
 	return m.actState, nil
 }
 
 func (m *MockLotusAPI) StateNetworkVersion(ctx context.Context, tsk TipSetKey) (network.Version, error) {
 	return network.Version10, nil
+}
+
+func (m *MockLotusAPI) StateMarketBalance(ctx context.Context, addr address.Address, tsk TipSetKey) (MarketBalance, error) {
+	return MarketBalance{}, nil
+}
+
+func (m *MockLotusAPI) StateDealProviderCollateralBounds(ctx context.Context, s abi.PaddedPieceSize, b bool, tsk TipSetKey) (DealCollateralBounds, error) {
+	return DealCollateralBounds{}, nil
+}
+
+func (m *MockLotusAPI) StateMinerProvingDeadline(ctx context.Context, addr address.Address, tsk TipSetKey) (*dline.Info, error) {
+	return nil, nil
+}
+
+func (m *MockLotusAPI) ChainGetMessage(ctx context.Context, c cid.Cid) (*Message, error) {
+	return nil, nil
 }
 
 func (m *MockLotusAPI) ChainReadObj(ctx context.Context, c cid.Cid) ([]byte, error) {

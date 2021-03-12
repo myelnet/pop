@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,8 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
+	"github.com/filecoin-project/go-commp-utils/writer"
 	"github.com/filecoin-project/go-multistore"
+	"github.com/filecoin-project/go-state-types/abi"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -22,7 +26,7 @@ import (
 	"github.com/ipld/go-car"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/myelnet/go-hop-exchange"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 )
 
 var (
@@ -40,6 +44,7 @@ const KIndex = "index"
 type Workdag struct {
 	storeID multistore.StoreID
 	store   *multistore.Store
+	ms      *multistore.MultiStore
 	ds      datastore.Batching
 }
 
@@ -47,6 +52,7 @@ type Workdag struct {
 func NewWorkdag(ms *multistore.MultiStore, ds datastore.Batching) (*Workdag, error) {
 	w := &Workdag{
 		ds: namespace.Wrap(ds, datastore.NewKey("/workdag")),
+		ms: ms,
 	}
 	idx, err := w.Index()
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
@@ -95,6 +101,10 @@ func (w *Workdag) Index() (*Index, error) {
 	if err := json.Unmarshal(enc, &idx); err != nil {
 		return nil, err
 	}
+	// Sort entries to make sure our commit CID will be deterministic
+	sort.Slice(idx.Entries, func(i, j int) bool {
+		return idx.Entries[i].Cid.String() > idx.Entries[j].Cid.String()
+	})
 
 	return &idx, nil
 }
@@ -220,28 +230,102 @@ func (w *Workdag) Status() (Status, error) {
 type CommitOptions struct {
 }
 
-// Commit stores the current contents of the index in a new car and loads it in the blockstore
-func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) ([]cid.Cid, error) {
+// DataRef encapsulates information about a content committed for storage
+type DataRef struct {
+	PayloadCID  cid.Cid
+	PayloadSize int64
+	// Piece is a Filecoin unit of storage
+	PieceCID  cid.Cid
+	PieceSize abi.PaddedPieceSize
+	StoreID   multistore.StoreID
+}
+
+// Commit stores the current contents of the index in an array to yield a single root CID
+func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, error) {
 	idx, err := w.Index()
 	if err != nil {
 		return nil, err
 	}
-	buf := new(bytes.Buffer)
 
-	var dags []car.Dag
-	for _, e := range idx.Entries {
-		dags = append(dags, car.Dag{Root: e.Cid, Selector: hop.AllSelector()})
-	}
+	// We need a single root CID so we make a list with the roots of all
+	// dagpb roots and use that in our CAR generation
+	nb := basicnode.Prototype.List.NewBuilder()
 
-	sc := car.NewSelectiveCar(ctx, w.store.Bstore, dags)
-	if err := sc.Write(buf); err != nil {
-		return nil, err
-	}
-	ch, err := car.LoadCar(w.store.Bstore, buf)
+	as, err := nb.BeginList(int64(len(idx.Entries)))
 	if err != nil {
 		return nil, err
 	}
-	return ch.Roots, nil
+
+	for _, e := range idx.Entries {
+		lk := cidlink.Link{Cid: e.Cid}
+		err := as.AssembleValue().AssignLink(lk)
+		if err != nil {
+			return nil, err
+		}
+	}
+	err = as.Finish()
+	if err != nil {
+		return nil, err
+	}
+
+	lb := cidlink.LinkBuilder{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    0x71, // dag-cbor as per multicodec
+			MhType:   DefaultHashFunction,
+			MhLength: -1,
+		},
+	}
+
+	lnk, err := lb.Build(
+		ctx,
+		ipld.LinkContext{},
+		nb.Build(),
+		w.store.Storer,
+	)
+	if err != nil {
+		return nil, err
+	}
+	c := lnk.(cidlink.Link)
+
+	wr := &writer.Writer{}
+	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
+
+	err = car.WriteCar(ctx, w.store.DAG, []cid.Cid{c.Cid}, wr)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := bw.Flush(); err != nil {
+		return nil, err
+	}
+
+	dataCIDSize, err := wr.Sum()
+	if err != nil {
+		return nil, err
+	}
+
+	ref := &DataRef{
+		PayloadCID:  c.Cid,
+		PayloadSize: dataCIDSize.PayloadSize,
+		PieceSize:   dataCIDSize.PieceSize,
+		PieceCID:    dataCIDSize.PieceCID,
+		StoreID:     w.storeID,
+	}
+	// First we clear the entries once they'v been committed
+	var emptyEntries []*Entry
+	idx.Entries = emptyEntries
+	// Add our new commit
+	idx.Commits = append(idx.Commits, ref)
+	// Rotate the store
+	idx.StoreID = w.ms.Next()
+	w.storeID = idx.StoreID
+	w.store, err = w.ms.Get(w.storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ref, w.SetIndex(idx)
 }
 
 // Index contains the information about which objects are currently checked out
@@ -249,9 +333,11 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) ([]cid.Cid, er
 type Index struct {
 	// StoreID is the store ID in which the indexed dags are stored
 	StoreID multistore.StoreID
-	// Entries collection of entries represented by this Index. The order of
+	// Entries is the collection of staged dags. The order of
 	// this collection is not guaranteed
 	Entries []*Entry
+	// Commits is a collection of archived dags ready to be stored.
+	Commits []*DataRef
 }
 
 // Add creates a new Entry and returns it. The caller should first check that

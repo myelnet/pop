@@ -231,6 +231,11 @@ func (e *Exchange) Retrieval() retrieval.Manager {
 	return e.retrieval
 }
 
+// FilecoinAPI exposes the low level Filecoin RPC
+func (e *Exchange) FilecoinAPI() filecoin.API {
+	return e.fAPI
+}
+
 // StoragePeerInfo resolves a Filecoin address to find the peer info and add to our address book
 func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
 	miner, err := e.fAPI.StateMinerInfo(ctx, addr, filecoin.EmptyTSK)

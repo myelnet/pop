@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/myelnet/go-hop-exchange/node"
@@ -11,11 +12,11 @@ import (
 
 var commitCmd = &ffcli.Command{
 	Name:      "commit",
-	ShortHelp: "Commit the current index into a single dag",
+	ShortHelp: "Commit the current index into a DAG archive",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop commit' command creates a single DAG with the current index of staged DAGs. It optionally
-archives it into a CAR file for storage.
+The 'hop commit' command creates a single DAG with the current index of staged DAGs. 
+It archives it into a CAR file ready for storage.
 
 `),
 	Exec: runCommit,
@@ -39,6 +40,7 @@ func runCommit(ctx context.Context, args []string) error {
 		if cr.Err != "" {
 			return errors.New(cr.Err)
 		}
+		fmt.Printf(cr.Output)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
