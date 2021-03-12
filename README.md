@@ -19,12 +19,12 @@
 - New content to cache is dispatched via Gossipsub and stored by available providers
 - Currently gossip based content routing though will be pluggable with other solutions
 - Simple API abstracting away Filecoin deal operations
-- Upload and retrieve directly from a Filecoin sotrage miner if no secondary providers cache the content (Coming Soon)
+- Upload and retrieve directly from a Filecoin storage miner if no secondary providers cache the content (Coming Soon)
 
 ## Background
 
 To speed up data retrieval from Filecoin, a secondary market allows clients to publish their content ids to a network of providers
-in order to retrieve it faster and more often at a cheaper price. This does not guarrantee data availability and so should be used
+in order to retrieve it faster and more often at a cheaper price. This does not guarantee data availability and so should be used
 in addition to a regular storage deal. You can think of this as the CDN layer of Filecoin. This library is still very experimental 
 and more at the prototype stage so feel free to open an issue if you have any suggestion or would like to contribute!
 
@@ -136,7 +136,7 @@ case <-ctx.Done():
 }
 ```
 
-4. Clients can anounce a new deal they made so the content is propagated to providers
+4. Clients can announce a new deal they made so the content is propagated to providers
 
 ```go
 var ctx context.Context
@@ -160,6 +160,5 @@ err = exch.Wallet().Transfer(ctx, from, to, "12.5")
 
 - Composable: Hop is highly modular and can be combined with any ipfs, data transfer, Filecoin or other exchange systems.
 - Lightweight: we try to limit the size of the build as we are aiming to bring this exchange to mobile devices. We do not import core implementations such as go-ipfs or lotus directly but rely on shared packages.
-- Do one thing well: there are many problems to solve in the decentralized storage space. This package only focuses on
-  routing and retrieving content from peers in the most optimal way possible.
+- Do one thing well: there are many problems to solve in the decentralized storage space. This package only focuses on routing and retrieving content from peers in the most optimal way possible.
 - KISS: Keep it simple, stupid. We take a naive approach to everything and try not to reinvent the wheel. Filecoin is already complex enough as it is.
