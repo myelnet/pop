@@ -13,6 +13,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Sync Submodule
+      run: |
+        git submodule sync
+        git submodule update --init
+
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
