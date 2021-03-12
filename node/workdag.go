@@ -310,6 +310,7 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 		PayloadSize: dataCIDSize.PayloadSize,
 		PieceSize:   dataCIDSize.PieceSize,
 		PieceCID:    dataCIDSize.PieceCID,
+		StoreID:     w.storeID,
 	}
 	// First we clear the entries once they'v been committed
 	var emptyEntries []*Entry

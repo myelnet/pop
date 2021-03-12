@@ -15,8 +15,8 @@ var commitCmd = &ffcli.Command{
 	ShortHelp: "Commit the current index into a DAG archive",
 	LongHelp: strings.TrimSpace(`
 
-The 'hop commit' command creates a single DAG with the current index of staged DAGs. It optionally
-archives it into a CAR file for storage.
+The 'hop commit' command creates a single DAG with the current index of staged DAGs. 
+It archives it into a CAR file ready for storage.
 
 `),
 	Exec: runCommit,

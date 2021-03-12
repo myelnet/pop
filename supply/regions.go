@@ -65,7 +65,7 @@ var (
 		Name: "NorthAmerica",
 		Code: NorthAmericaRegion,
 		PPB:  abi.NewTokenAmount(1),
-		// NorthAmerica region based miners pingged from Mexico City in order of most capacity to least
+		// NorthAmerica region based miners in order of most capacity to least
 		StorageMiners: []string{
 			"f02301", // topblocks
 			// "f03223",   // telos - crazy PPB not sure if error or not
@@ -92,12 +92,19 @@ var (
 		Name: "Europe",
 		Code: EuropeRegion,
 		PPB:  abi.NewTokenAmount(1),
-		// Europe first few are pinggable from Mexico
 		StorageMiners: []string{
+			"f01240",  // Dcent (Netherlands)
 			"f01234",  // Eliovp (Belgium)
 			"f022352", // TechHedge (Norway)
+			"f099608", // stander (Latvia)
 			"f02576",  // BenjaminH
+			"f023467", // PhiMining (Norway)
+			"f03624",  // ode (Germany)
 			"f081323", // Midland UK
+			"f08403",  // TippyFlits (UK)
+			"f010446", // (Belgium)
+			"f01277",  // tvsthlm (Sweden)
+			"f022163", // (Switzerland)
 		},
 	}
 	oceania = Region{

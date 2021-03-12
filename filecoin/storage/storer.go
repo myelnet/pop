@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -53,6 +54,7 @@ type Storage struct {
 	fundmgr *FundManager
 	fAPI    fil.API
 	sp      Supplier
+	disc    *discoveryimpl.Local
 }
 
 // New creates a new storage client instance
@@ -91,11 +93,18 @@ func New(
 		adapter: ad,
 		fundmgr: fundmgr,
 		sp:      sp,
+		fAPI:    api,
+		disc:    disc,
 	}, nil
 }
 
 // Start is required to launch the fund manager and storage client before making new deals
 func (s *Storage) Start(ctx context.Context) error {
+	// start discovery ds migrations
+	if err := s.disc.Start(ctx); err != nil {
+		return err
+	}
+
 	err := s.fundmgr.Start()
 	if err != nil {
 		return err
@@ -103,30 +112,55 @@ func (s *Storage) Start(ctx context.Context) error {
 	return s.client.Start(ctx)
 }
 
+// Miner encapsulates some information about a storage miner
+type Miner struct {
+	Ask                 *storagemarket.StorageAsk
+	Info                *storagemarket.StorageProviderInfo
+	WindowPoStProofType abi.RegisteredPoStProof
+}
+
+// MinerSelectionParams defines the criterias for selecting a list of miners
+type MinerSelectionParams struct {
+	PieceSize uint64
+	RF        int
+}
+
 // LoadMiners selects a set of miners to queue storage deals with
-func (s *Storage) LoadMiners(ctx context.Context) ([]*storagemarket.StorageAsk, error) {
+func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]Miner, error) {
 	addrs, err := s.sp.ListMiners(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tok, _, err := s.adapter.GetChainHead(ctx)
-	if err != nil {
-		return nil, err
-	}
+
 	i := 0
-	var sel []*storagemarket.StorageAsk
-	// We need at least 7 miners to make sure at least one deal succeeds
-	for len(sel) < 7 {
-		info, err := s.adapter.GetMinerInfo(ctx, addrs[i], tok)
+	var sel []Miner
+	// We add 1 on top of the replication factor in case one deal fails
+	for len(sel) < msp.RF+2 && i < len(addrs) {
+		mi, err := s.fAPI.StateMinerInfo(ctx, addrs[i], fil.EmptyTSK)
+		if err != nil {
+			return nil, err
+		}
+		// PeerId is often nil which causes panics down the road
+		if mi.PeerId == nil {
+			return nil, fmt.Errorf("no peer id for miner %v", addrs[i])
+		}
+		info := NewStorageProviderInfo(addrs[i], mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
 		i++
+		ask, err := s.client.GetAsk(ctx, info)
 		if err != nil {
 			continue
 		}
-		ask, err := s.client.GetAsk(ctx, *info)
-		if err != nil {
+		// Check miners can fit our piece
+		if msp.PieceSize > uint64(ask.MaxPieceSize) ||
+			msp.PieceSize < uint64(ask.MinPieceSize) {
 			continue
 		}
-		sel = append(sel, ask)
+
+		sel = append(sel, Miner{
+			Ask:                 ask,
+			Info:                &info,
+			WindowPoStProofType: mi.WindowPoStProofType,
+		})
 	}
 	return sel, nil
 }
@@ -135,7 +169,7 @@ func (s *Storage) LoadMiners(ctx context.Context) ([]*storagemarket.StorageAsk, 
 type StartDealParams struct {
 	Data               *storagemarket.DataRef
 	Wallet             address.Address
-	Miner              address.Address
+	Miner              Miner
 	EpochPrice         fil.BigInt
 	MinBlocksDuration  uint64
 	ProviderCollateral big.Int
@@ -145,22 +179,15 @@ type StartDealParams struct {
 }
 
 // StartDeal starts a new storage deal with a Filecoin storage miner
-func (s *Storage) StartDeal(ctx context.Context, params *StartDealParams) (*cid.Cid, error) {
+func (s *Storage) StartDeal(ctx context.Context, params StartDealParams) (*cid.Cid, error) {
 	storeID, err := s.sp.GetStoreID(params.Data.Root)
 	if err != nil {
 		return nil, err
 	}
-	mi, err := s.fAPI.StateMinerInfo(ctx, params.Miner, fil.EmptyTSK)
-	if err != nil {
-		return nil, fmt.Errorf("failed getting peer ID: %w", err)
-	}
-
-	md, err := s.fAPI.StateMinerProvingDeadline(ctx, params.Miner, fil.EmptyTSK)
+	md, err := s.fAPI.StateMinerProvingDeadline(ctx, params.Miner.Info.Address, fil.EmptyTSK)
 	if err != nil {
 		return nil, fmt.Errorf("failed getting miner's deadline info: %w", err)
 	}
-
-	providerInfo := NewStorageProviderInfo(params.Miner, mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
 
 	dealStart := params.DealStartEpoch
 	if dealStart <= 0 { // unset, or explicitly 'epoch undefine'
@@ -173,14 +200,14 @@ func (s *Storage) StartDeal(ctx context.Context, params *StartDealParams) (*cid.
 		dealStart = ts.Height() + abi.ChainEpoch(dealStartBufferHours*blocksPerHour) // TODO: Get this from storage ask
 	}
 
-	st, err := PreferredSealProofTypeFromWindowPoStType(mi.WindowPoStProofType)
+	st, err := PreferredSealProofTypeFromWindowPoStType(params.Miner.WindowPoStProofType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get seal proof type: %w", err)
 	}
 
 	result, err := s.client.ProposeStorageDeal(ctx, storagemarket.ProposeStorageDealParams{
 		Addr:          params.Wallet,
-		Info:          &providerInfo,
+		Info:          params.Miner.Info,
 		Data:          params.Data,
 		StartEpoch:    dealStart,
 		EndEpoch:      calcDealExpiration(params.MinBlocksDuration, md, dealStart),
@@ -203,6 +230,7 @@ func (s *Storage) StartDeal(ctx context.Context, params *StartDealParams) (*cid.
 type QuoteParams struct {
 	PieceSize uint64
 	Duration  time.Duration
+	RF        int
 }
 
 // Quote is an estimate of who can store given content and for how much
@@ -213,56 +241,109 @@ type Quote struct {
 
 // GetMarketQuote returns the costs of storing for a given CID and duration
 func (s *Storage) GetMarketQuote(ctx context.Context, params QuoteParams) (*Quote, error) {
-	asks, err := s.LoadMiners(ctx)
+	miners, err := s.LoadMiners(ctx, MinerSelectionParams{
+		PieceSize: params.PieceSize,
+		RF:        params.RF,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	gib := fil.NewInt(1 << 30)
 
-	var miners []address.Address
+	var mAddrs []address.Address
 	var epochPrices []big.Int
 
-	epochs := abi.ChainEpoch(params.Duration / (time.Duration(uint64(builtin.EpochDurationSeconds)) * time.Second))
+	epochs := calcEpochs(params.Duration)
 
 	pricePerGib := big.Zero()
 
-	for _, a := range asks {
-		miners = append(miners, a.Miner)
-		p := a.Price
+	for _, m := range miners {
+		mAddrs = append(mAddrs, m.Info.Address)
+		p := m.Ask.Price
 
 		pricePerGib = fil.BigAdd(pricePerGib, p)
 		epochPrice := fil.BigDiv(fil.BigMul(p, fil.NewInt(params.PieceSize)), gib)
 		epochPrices = append(epochPrices, epochPrice)
 
 	}
+	if len(mAddrs) == 0 {
+		return nil, errors.New("no miners fit those parameters")
+	}
 
 	epochPrice := fil.BigDiv(fil.BigMul(pricePerGib, fil.NewInt(uint64(params.PieceSize))), gib)
 	totalPrice := fil.BigMul(epochPrice, fil.NewInt(uint64(epochs)))
 	return &Quote{
 		Total:  fil.FIL(totalPrice),
-		Miners: miners,
+		Miners: mAddrs,
 	}, nil
+}
+
+// Params are the global parameters for storing on Filecoin with given replication
+type Params struct {
+	Payload  *storagemarket.DataRef
+	Duration time.Duration
+	Address  address.Address
+	RF       int
+}
+
+// NewParams creates a new Params struct for storage
+func NewParams(root cid.Cid, dur time.Duration, w address.Address, rf int) Params {
+	return Params{
+		Payload: &storagemarket.DataRef{
+			TransferType: storagemarket.TTGraphsync,
+			Root:         root,
+		},
+		Duration: dur,
+		Address:  w,
+		RF:       rf,
+	}
 }
 
 // Receipt compiles all information about our content storage contracts
 type Receipt struct {
-	Miners []address.Address
+	Miners   []address.Address
+	DealRefs []cid.Cid
 }
 
 // Store is the main storage operation which automatically stores content for a given CID
 // with the best conditions available
-func (s *Storage) Store(ctx context.Context, c cid.Cid) (*Receipt, error) {
-	asks, err := s.LoadMiners(ctx)
+func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
+	miners, err := s.LoadMiners(ctx, MinerSelectionParams{
+		PieceSize: uint64(p.Payload.PieceSize),
+		RF:        p.RF,
+	})
 	if err != nil {
 		return nil, err
 	}
-	var miners []address.Address
-	for _, a := range asks {
-		miners = append(miners, a.Miner)
+	var ma []address.Address
+	for _, m := range miners {
+		ma = append(ma, m.Info.Address)
 	}
+	epochs := calcEpochs(p.Duration)
+	var drfs []cid.Cid
+	for _, m := range miners {
+		pcid, err := s.StartDeal(ctx, StartDealParams{
+			Data:              p.Payload,
+			Wallet:            p.Address,
+			Miner:             m,
+			EpochPrice:        m.Ask.Price,
+			MinBlocksDuration: uint64(epochs),
+			DealStartEpoch:    -1,
+			FastRetrieval:     false,
+			VerifiedDeal:      false,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if pcid != nil {
+			drfs = append(drfs, *pcid)
+		}
+	}
+
 	return &Receipt{
-		Miners: miners,
+		Miners:   ma,
+		DealRefs: drfs,
 	}, nil
 }
 
@@ -289,4 +370,8 @@ func calcDealExpiration(minDuration uint64, md *dline.Info, startEpoch abi.Chain
 
 	// Align on miners ProvingPeriodBoundary
 	return minExp + md.WPoStProvingPeriod - (minExp % md.WPoStProvingPeriod) + (md.PeriodStart % md.WPoStProvingPeriod) - 1
+}
+
+func calcEpochs(t time.Duration) abi.ChainEpoch {
+	return abi.ChainEpoch(t / (time.Duration(uint64(builtin.EpochDurationSeconds)) * time.Second))
 }

@@ -20,6 +20,7 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
+	Register(cid.Cid, uint64, multistore.StoreID) error
 	// Dispatch a Request to n providers to cache our content, may expose the n as a param if need be
 	Dispatch(Request, DispatchOptions) (*Response, error)
 	GetStoreID(cid.Cid) (multistore.StoreID, error)
@@ -82,14 +83,20 @@ func New(
 	return s
 }
 
+// Register a new content record in our supply
+func (s *Supply) Register(key cid.Cid, size uint64, sid multistore.StoreID) error {
+	// Store a record of the content in our supply
+	return s.man.PutRecord(key, &ContentRecord{Labels: map[string]string{
+		KStoreID: fmt.Sprintf("%d", sid),
+		KSize:    fmt.Sprintf("%d", size),
+	}})
+}
+
 // Dispatch requests to the network until we have propagated the content to enough peers
 // it also tells the exchange we are providing this content in our supply
 func (s *Supply) Dispatch(r Request, opts DispatchOptions) (*Response, error) {
 	// Store a record of the content in our supply
-	err := s.man.PutRecord(r.PayloadCID, &ContentRecord{Labels: map[string]string{
-		KStoreID: fmt.Sprintf("%d", opts.StoreID),
-		KSize:    fmt.Sprintf("%d", r.Size),
-	}})
+	err := s.Register(r.PayloadCID, r.Size, opts.StoreID)
 	if err != nil {
 		return nil, err
 	}

@@ -42,7 +42,30 @@ type MessageSendSpec struct {
 }
 
 func (a *fundManagerAPI) MpoolPushMessage(ctx context.Context, msg *fil.Message, spec *MessageSendSpec) (*fil.SignedMessage, error) {
-	return nil, nil
+	var err error
+	msg, err = a.api.GasEstimateMessageGas(ctx, msg, nil, fil.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	act, err := a.api.StateGetActor(ctx, msg.From, fil.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	msg.Nonce = act.Nonce
+	mbl, err := msg.ToStorageBlock()
+	if err != nil {
+		return nil, err
+	}
+	sig, err := a.wallet.Sign(ctx, msg.From, mbl.Cid().Bytes())
+	if err != nil {
+		return nil, err
+	}
+	smsg := &fil.SignedMessage{
+		Message:   *msg,
+		Signature: *sig,
+	}
+	_, err = a.api.MpoolPush(ctx, smsg)
+	return smsg, err
 }
 
 func (a *fundManagerAPI) StateMarketBalance(ctx context.Context, addr address.Address, tsk fil.TipSetKey) (fil.MarketBalance, error) {
