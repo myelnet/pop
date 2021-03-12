@@ -146,13 +146,13 @@ func TestStatusAndCommit(t *testing.T) {
 	cn.Status(ctx, &StatusArgs{})
 	<-stat
 
-	com := make(chan string, 1)
+	pac := make(chan string, 1)
 	cn.notify = func(n Notify) {
-		require.Equal(t, n.CommitResult.Err, "")
+		require.Equal(t, n.PackResult.Err, "")
 
-		com <- n.CommitResult.Output
+		pac <- n.PackResult.Output
 	}
-	cn.Commit(ctx, &CommitArgs{})
-	out := <-com
+	cn.Pack(ctx, &PackArgs{})
+	out := <-pac
 	require.NotEqual(t, out, "")
 }
