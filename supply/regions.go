@@ -31,23 +31,21 @@ const (
 	CustomRegion = math.MaxUint64
 )
 
-// Region represents a CDN subnetwork
+// Region represents a CDN subnetwork.
 type Region struct {
-	// The official region name should be unique to avoid clashing with other regions
+	// The official region name should be unique to avoid clashing with other regions.
 	Name string
-	// Code is a compressed identifier for the region
+	// Code is a compressed identifier for the region.
 	Code RegionCode
 	// PPB is the minimum price per byte in FIL defined for this region. This does not account for
-	// any dynamic pricing mechanisms
+	// any dynamic pricing mechanisms.
 	PPB abi.TokenAmount
+	// StorageMiners is a list of known storage miner ids in this region. We plan
+	// to enable a better way to select new miners (maybe Textile API?) but for now we hard code an initial list.
+	StorageMiners []string
 }
 
 var (
-	global = Region{
-		Name: "Global",
-		Code: GlobalRegion,
-		PPB:  big.Zero(),
-	}
 	asia = Region{
 		Name: "Asia",
 		Code: AsiaRegion,
@@ -67,16 +65,65 @@ var (
 		Name: "NorthAmerica",
 		Code: NorthAmericaRegion,
 		PPB:  abi.NewTokenAmount(1),
+		// NorthAmerica region based miners in order of most capacity to least
+		StorageMiners: []string{
+			"f02301", // topblocks
+			// "f03223",   // telos - crazy PPB not sure if error or not
+			"f019104",  // Filswan (NBFS) Canada
+			"f02401",   // Terra Mining
+			"f02387",   // W3Bcloud
+			"f09848",   // BigBearLake
+			"f08399",   // MiningMusing
+			"f010088",  // Purumine
+			"f064218",  // Simba
+			"f02540",   // Foundry
+			"f015927",  // CDImine
+			"f0135078", // Adept
+			"f019104",  // NorthStar
+			"f047419",  // Citadel
+			"f01278",   // MiMiner
+			"f010617",  // kernelogic2
+			"f01247",   // BigChungus
+			"f022142",  // Nelson SR2
+			"f019279",  // Pd2
+		},
 	}
 	europe = Region{
 		Name: "Europe",
 		Code: EuropeRegion,
 		PPB:  abi.NewTokenAmount(1),
+		StorageMiners: []string{
+			"f01240",  // Dcent (Netherlands)
+			"f01234",  // Eliovp (Belgium)
+			"f022352", // TechHedge (Norway)
+			"f099608", // stander (Latvia)
+			"f02576",  // BenjaminH
+			"f023467", // PhiMining (Norway)
+			"f03624",  // ode (Germany)
+			"f081323", // Midland UK
+			"f08403",  // TippyFlits (UK)
+			"f010446", // (Belgium)
+			"f01277",  // tvsthlm (Sweden)
+			"f022163", // (Switzerland)
+		},
 	}
 	oceania = Region{
 		Name: "Oceania",
 		Code: OceaniaRegion,
 		PPB:  abi.NewTokenAmount(1),
+		StorageMiners: []string{
+			"f014365", // 🥭
+		},
+	}
+	global = Region{
+		Name: "Global",
+		Code: GlobalRegion,
+		PPB:  big.Zero(),
+		// Global takes all the miners
+		StorageMiners: append(
+			northAmerica.StorageMiners,
+			append(europe.StorageMiners, oceania.StorageMiners...)...,
+		),
 	}
 )
 

@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -93,4 +94,65 @@ func TestAdd(t *testing.T) {
 		ChunkSize: 1024,
 	})
 	<-added
+}
+
+func TestStatusAndCommit(t *testing.T) {
+	ctx := context.Background()
+	mn := mocknet.New(ctx)
+
+	cn := newTestNode(ctx, mn, t)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	dir := t.TempDir()
+
+	data := make([]byte, 256000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
+	p1 := filepath.Join(dir, "data1")
+	err := ioutil.WriteFile(p1, data, 0666)
+	require.NoError(t, err)
+
+	data2 := make([]byte, 512000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	p2 := filepath.Join(dir, "data2")
+	err = ioutil.WriteFile(p2, data2, 0666)
+	require.NoError(t, err)
+
+	added := make(chan string, 2)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.AddResult.Err, "")
+
+		added <- n.AddResult.Cid
+	}
+	cn.Add(ctx, &AddArgs{
+		Path:      p1,
+		ChunkSize: 1024,
+	})
+	<-added
+
+	cn.Add(ctx, &AddArgs{
+		Path:      p2,
+		ChunkSize: 1024,
+	})
+	<-added
+
+	stat := make(chan string, 1)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.StatusResult.Err, "")
+
+		stat <- n.StatusResult.Output
+	}
+	cn.Status(ctx, &StatusArgs{})
+	<-stat
+
+	com := make(chan string, 1)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.CommitResult.Err, "")
+
+		com <- n.CommitResult.Output
+	}
+	cn.Commit(ctx, &CommitArgs{})
+	out := <-com
+	require.NotEqual(t, out, "")
 }

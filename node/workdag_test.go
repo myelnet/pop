@@ -70,7 +70,33 @@ func TestWorkdag(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	roots, err := wd.Commit(ctx, CommitOptions{})
+	// save the previous store ID
+	sID := wd.StoreID()
+
+	dataCID := "bafy2bzacedppq7brujaqwwve5mxp5mp2i2zsvh2hlxpucaxrvql6bwukgxstw"
+
+	c, err := wd.Commit(ctx, CommitOptions{})
 	require.NoError(t, err)
-	require.Equal(t, len(filepaths), len(roots))
+	require.Equal(t, dataCID, c.PayloadCID.String())
+
+	_, err = wd.Add(ctx, AddOptions{Path: filepaths[0], ChunkSize: int64(1 << 10)})
+	require.NoError(t, err)
+
+	// We should have a new store with a single entry
+	status, err = wd.Status()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(status))
+
+	require.NotEqual(t, sID, wd.StoreID())
+
+	// We can load a new workdag from store as well
+	wd, err = NewWorkdag(ms, ds)
+	require.NoError(t, err)
+
+	// Our index remembers the last commit
+	idx, err := wd.Index()
+	require.NoError(t, err)
+
+	require.Equal(t, 1, len(idx.Commits))
+	require.Equal(t, idx.Commits[0].PayloadCID.String(), dataCID)
 }

@@ -1,9 +1,11 @@
 package supply
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
+	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
@@ -18,12 +20,13 @@ var ErrNoPeers = fmt.Errorf("no peers available for supply")
 
 // Manager exposes methods to manage the blocks we can serve as a provider
 type Manager interface {
+	Register(cid.Cid, uint64, multistore.StoreID) error
 	// Dispatch a Request to n providers to cache our content, may expose the n as a param if need be
 	Dispatch(Request, DispatchOptions) (*Response, error)
-	ProviderPeersForContent(cid.Cid) ([]peer.ID, error)
 	GetStoreID(cid.Cid) (multistore.StoreID, error)
 	GetStore(cid.Cid) (*multistore.Store, error)
 	RemoveContent(cid.Cid) error
+	ListMiners(context.Context) ([]address.Address, error)
 }
 
 // DispatchOptions encapsulates some options about how we want our content to be
@@ -80,19 +83,20 @@ func New(
 	return s
 }
 
-// ProviderPeersForContent gets the known providers for a given content id
-func (s *Supply) ProviderPeersForContent(c cid.Cid) ([]peer.ID, error) {
-	return nil, nil
+// Register a new content record in our supply
+func (s *Supply) Register(key cid.Cid, size uint64, sid multistore.StoreID) error {
+	// Store a record of the content in our supply
+	return s.man.PutRecord(key, &ContentRecord{Labels: map[string]string{
+		KStoreID: fmt.Sprintf("%d", sid),
+		KSize:    fmt.Sprintf("%d", size),
+	}})
 }
 
 // Dispatch requests to the network until we have propagated the content to enough peers
 // it also tells the exchange we are providing this content in our supply
 func (s *Supply) Dispatch(r Request, opts DispatchOptions) (*Response, error) {
 	// Store a record of the content in our supply
-	err := s.man.PutRecord(r.PayloadCID, &ContentRecord{Labels: map[string]string{
-		KStoreID: fmt.Sprintf("%d", opts.StoreID),
-		KSize:    fmt.Sprintf("%d", r.Size),
-	}})
+	err := s.Register(r.PayloadCID, r.Size, opts.StoreID)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +220,29 @@ func (s *Supply) RemoveContent(root cid.Cid) error {
 		return err
 	}
 	return s.man.RemoveRecord(root)
+}
+
+// ListMiners returns a list of miners based on the regions this supply is part of
+// We keep a context as this could also query a remote service or API
+func (s *Supply) ListMiners(ctx context.Context) ([]address.Address, error) {
+	var strList []string
+	for _, r := range s.regions {
+		// Global region is already a list of miners in all regions
+		if r.Name == "Global" {
+			strList = r.StorageMiners
+			break
+		}
+		strList = append(strList, r.StorageMiners...)
+	}
+	var addrList []address.Address
+	for _, s := range strList {
+		addr, err := address.NewFromString(s)
+		if err != nil {
+			return addrList, err
+		}
+		addrList = append(addrList, addr)
+	}
+	return addrList, nil
 }
 
 // StoreConfigurableTransport defines the methods needed to

@@ -65,6 +65,13 @@ func (ts *TipSet) Height() abi.ChainEpoch {
 	return ts.height
 }
 
+func (ts *TipSet) Key() TipSetKey {
+	if ts == nil {
+		return EmptyTSK
+	}
+	return NewTipSetKey(ts.cids...)
+}
+
 func tipsetSortFunc(blks []*BlockHeader) func(i, j int) bool {
 	return func(i, j int) bool {
 		ti := blks[i].LastTicket()
@@ -145,6 +152,22 @@ type TipSetKey struct {
 
 var EmptyTSK = TipSetKey{}
 
+// NewTipSetKey builds a new key from a slice of CIDs.
+// The CIDs are assumed to be ordered correctly.
+func NewTipSetKey(cids ...cid.Cid) TipSetKey {
+	encoded := encodeKey(cids)
+	return TipSetKey{string(encoded)}
+}
+
+// TipSetKeyFromBytes wraps an encoded key, validating correct decoding.
+func TipSetKeyFromBytes(encoded []byte) (TipSetKey, error) {
+	_, err := decodeKey(encoded)
+	if err != nil {
+		return TipSetKey{}, err
+	}
+	return TipSetKey{string(encoded)}, nil
+}
+
 // Cids returns a slice of the CIDs comprising this key.
 func (k TipSetKey) Cids() []cid.Cid {
 	cids, err := decodeKey([]byte(k.value))
@@ -165,6 +188,11 @@ func (k *TipSetKey) UnmarshalJSON(b []byte) error {
 	}
 	k.value = string(encodeKey(cids))
 	return nil
+}
+
+// Bytes returns a binary representation of the key.
+func (k TipSetKey) Bytes() []byte {
+	return []byte(k.value)
 }
 
 func encodeKey(cids []cid.Cid) []byte {
@@ -219,6 +247,8 @@ type ElectionProof struct {
 
 type BigInt = big2.Int
 
+var EmptyInt = BigInt{}
+
 func NewInt(i uint64) BigInt {
 	return BigInt{Int: big.NewInt(0).SetUint64(i)}
 }
@@ -229,6 +259,14 @@ func BigAdd(a, b BigInt) BigInt {
 
 func BigSub(a, b BigInt) BigInt {
 	return BigInt{Int: big.NewInt(0).Sub(a.Int, b.Int)}
+}
+
+func BigMul(a, b BigInt) BigInt {
+	return BigInt{Int: big.NewInt(0).Mul(a.Int, b.Int)}
+}
+
+func BigDiv(a, b BigInt) BigInt {
+	return BigInt{Int: big.NewInt(0).Div(a.Int, b.Int)}
 }
 
 type BlockHeader struct {
@@ -576,4 +614,16 @@ type MinerInfo struct {
 	SectorSize                 abi.SectorSize
 	WindowPoStPartitionSectors uint64
 	ConsensusFaultElapsed      abi.ChainEpoch
+}
+
+// MarketBalance formats the Escrow and Locked balances of an address in the Storage Market
+type MarketBalance struct {
+	Escrow big2.Int
+	Locked big2.Int
+}
+
+// DealCollateralBounds is the Min and Max collateral a storage provider can issue
+type DealCollateralBounds struct {
+	Min abi.TokenAmount
+	Max abi.TokenAmount
 }

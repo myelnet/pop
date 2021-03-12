@@ -13,10 +13,23 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Sync Submodule
+      run: |
+        git submodule sync
+        git submodule update --init
+
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
         go-version: 1.15
+
+    - name: Linux deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install ocl-icd-opencl-dev hwloc libhwloc-dev
+
+    - name: FFI build
+      run: make -C ./extern/filecoin-ffi
 
     - name: Test
       run: go test -v ./...
