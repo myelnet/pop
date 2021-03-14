@@ -57,6 +57,18 @@ const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
+// ErrFilecoinRPCOffline is returned when the node is running without a provided filecoin api endpoint + token
+var ErrFilecoinRPCOffline = errors.New("filecoin RPC is offline")
+
+// ErrAllDealsFailed is returned when all storage deals failed to get started
+var ErrAllDealsFailed = errors.New("all deals failed")
+
+// ErrNoDAGForPacking is returned when no DAGs are staged in the index before packing
+var ErrNoDAGForPacking = errors.New("no DAG for packing")
+
+// ErrDAGNotPacked is returned when dags have not been packed and the node attempts to start a storage deal
+var ErrDAGNotPacked = errors.New("DAG not packed")
+
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -358,40 +370,6 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
 			NumBlocks: stats.NumBlocks,
 		}})
-
-	if args.Dispatch {
-		// TODO: adjust timeout?
-		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
-		defer cancel()
-
-		res, err := nd.exch.Supply().Dispatch(
-			supply.Request{
-				PayloadCID: root,
-				Size:       uint64(stats.Size),
-			},
-			supply.DispatchOptions{
-				StoreID: w.StoreID(),
-			})
-		defer res.Close()
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		for {
-			// Right now we only wait for 1 peer to receive the content but we could wait for
-			// more peers, the question is when to stop as we don't know exactly how many will retrieve
-			rec, err := res.Next(ctx)
-			nd.send(Notify{
-				AddResult: &AddResult{
-					Cache: rec.Provider.String(),
-				},
-			})
-			if err != nil {
-				sendErr(ctx.Err())
-			}
-			return
-		}
-	}
 }
 
 // Status prints the current workdag index. It shows which files have been added but not yet committed
@@ -439,6 +417,16 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 		sendErr(err)
 		return
 	}
+	status, err := w.Status()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	if len(status) == 0 {
+		sendErr(ErrNoDAGForPacking)
+		return
+	}
+
 	ref, err := w.Commit(ctx, CommitOptions{})
 	if err != nil {
 		sendErr(err)
@@ -471,7 +459,7 @@ func (nd *node) getCommit(cstr string) (*DataRef, error) {
 		return nil, err
 	}
 	if len(idx.Commits) == 0 {
-		return nil, errors.New("no commit available")
+		return nil, ErrDAGNotPacked
 	}
 	com := idx.Commits[len(idx.Commits)-1]
 	// Select the commit with the matching CID
@@ -499,6 +487,10 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 				Err: err.Error(),
 			},
 		})
+	}
+	if !nd.exch.IsFilecoinOnline() {
+		sendErr(ErrFilecoinRPCOffline)
+		return
 	}
 	com, err := nd.getCommit(args.Commit)
 	if err != nil {
@@ -536,34 +528,82 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			},
 		})
 	}
-	com, err := nd.getCommit(args.Commit)
+	com, err := nd.getCommit(args.Ref)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-		com.PayloadCID,
-		args.Duration,
-		nd.exch.Wallet().DefaultAddress(),
-		args.StorageRF,
-	))
-	if err != nil {
-		sendErr(err)
-		return
+
+	if !args.CacheOnly && args.StorageRF > 0 {
+		if !nd.exch.IsFilecoinOnline() {
+			sendErr(ErrFilecoinRPCOffline)
+			return
+		}
+		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
+			com.PayloadCID,
+			args.Duration,
+			nd.exch.Wallet().DefaultAddress(),
+			args.StorageRF,
+		))
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		if len(rcpt.DealRefs) == 0 {
+			sendErr(ErrAllDealsFailed)
+			return
+		}
+		var pr PushResult
+		for _, m := range rcpt.Miners {
+			pr.Miners = append(pr.Miners, m.String())
+		}
+		for _, d := range rcpt.DealRefs {
+			pr.Deals = append(pr.Deals, d.String())
+		}
+		nd.send(Notify{
+			PushResult: &pr,
+		})
 	}
-	if len(rcpt.DealRefs) == 0 {
-		sendErr(errors.New("all deals failed"))
-		return
+
+	if !args.NoCache && args.CacheRF > 0 {
+		// TODO: adjust timeout?
+		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
+		defer cancel()
+
+		res, err := nd.exch.Supply().Dispatch(
+			supply.Request{
+				PayloadCID: com.PayloadCID,
+				Size:       uint64(com.PayloadSize),
+			},
+			supply.DispatchOptions{
+				StoreID: com.StoreID,
+			})
+		defer res.Close()
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		for {
+			// Right now we only wait for 1 peer to receive the content but we could wait for
+			// more peers, the question is when to stop as we don't know exactly how many will retrieve
+			rec, err := res.Next(ctx)
+			nd.send(Notify{
+				PushResult: &PushResult{
+					Caches: []string{
+						rec.Provider.String(),
+					},
+				},
+			})
+			if err != nil {
+				sendErr(ctx.Err())
+			}
+			return
+		}
 	}
-	var pr PushResult
-	for _, m := range rcpt.Miners {
-		pr.Miners = append(pr.Miners, m.String())
-	}
-	for _, d := range rcpt.DealRefs {
-		pr.Deals = append(pr.Deals, d.String())
-	}
+	// We shouldn't end up in this state as it's the command client role to
+	// validate we won't but just in case we return an empty result
 	nd.send(Notify{
-		PushResult: &pr,
+		PushResult: &PushResult{},
 	})
 }
 

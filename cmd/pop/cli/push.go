@@ -13,6 +13,8 @@ import (
 )
 
 var pushArgs struct {
+	noCache   bool
+	cacheOnly bool
 	cacheRF   int
 	storageRF int
 	duration  time.Duration
@@ -34,11 +36,16 @@ with a default level of cashing. By default it will attempt multiple storage dea
 		fs.IntVar(&pushArgs.cacheRF, "cache-rf", 6, "number of cache providers to dispatch to")
 		fs.IntVar(&pushArgs.storageRF, "storage-rf", 6, "number of storage providers to start deals with")
 		fs.DurationVar(&pushArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
+		fs.BoolVar(&pushArgs.noCache, "no-cache", false, "prevents node from dispatching content to cache providers")
+		fs.BoolVar(&pushArgs.cacheOnly, "cache-only", false, "only dispatch content for caching")
 		return fs
 	})(),
 }
 
 func runPush(ctx context.Context, args []string) error {
+	if pushArgs.noCache && pushArgs.cacheOnly {
+		return errors.New("no-cache and cache-only are incompatible")
+	}
 	c, cc, ctx, cancel := connect(ctx)
 	defer cancel()
 
@@ -50,24 +57,38 @@ func runPush(ctx context.Context, args []string) error {
 	})
 	go receive(ctx, cc, c)
 
-	com := ""
+	ref := ""
 	if len(args) > 0 {
-		com = args[0]
+		ref = args[0]
 	}
 	cc.Push(&node.PushArgs{
-		Commit:    com,
+		Ref:       ref,
+		NoCache:   pushArgs.noCache,
+		CacheOnly: pushArgs.cacheOnly,
 		CacheRF:   pushArgs.cacheRF,
 		StorageRF: pushArgs.storageRF,
 		Duration:  pushArgs.duration,
 	})
-	select {
-	case pr := <-prc:
-		if pr.Err != "" {
-			return errors.New(pr.Err)
+	for {
+		select {
+		case pr := <-prc:
+			if pr.Err != "" {
+				return errors.New(pr.Err)
+			}
+			if len(pr.Miners) > 0 {
+				fmt.Printf("Started storage deals with %s\n", pr.Miners)
+				if !pushArgs.noCache && pushArgs.cacheRF > 0 {
+					// Wait for the result of our cache dispatch
+					fmt.Printf("Dispatching to caches...\n")
+					continue
+				}
+			}
+			if len(pr.Caches) > 0 {
+				fmt.Printf("Cached by %s\n", pr.Caches)
+			}
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		fmt.Printf("Started storage deals with %s\n", pr.Miners)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
