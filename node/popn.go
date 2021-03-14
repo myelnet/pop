@@ -370,40 +370,6 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
 			NumBlocks: stats.NumBlocks,
 		}})
-
-	if args.Dispatch {
-		// TODO: adjust timeout?
-		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
-		defer cancel()
-
-		res, err := nd.exch.Supply().Dispatch(
-			supply.Request{
-				PayloadCID: root,
-				Size:       uint64(stats.Size),
-			},
-			supply.DispatchOptions{
-				StoreID: w.StoreID(),
-			})
-		defer res.Close()
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		for {
-			// Right now we only wait for 1 peer to receive the content but we could wait for
-			// more peers, the question is when to stop as we don't know exactly how many will retrieve
-			rec, err := res.Next(ctx)
-			nd.send(Notify{
-				AddResult: &AddResult{
-					Cache: rec.Provider.String(),
-				},
-			})
-			if err != nil {
-				sendErr(ctx.Err())
-			}
-			return
-		}
-	}
 }
 
 // Status prints the current workdag index. It shows which files have been added but not yet committed
@@ -562,38 +528,82 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			},
 		})
 	}
-	if !nd.exch.IsFilecoinOnline() {
-		sendErr(ErrFilecoinRPCOffline)
-		return
-	}
-	com, err := nd.getCommit(args.Commit)
+	com, err := nd.getCommit(args.Ref)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-		com.PayloadCID,
-		args.Duration,
-		nd.exch.Wallet().DefaultAddress(),
-		args.StorageRF,
-	))
-	if err != nil {
-		sendErr(err)
-		return
+
+	if !args.CacheOnly && args.StorageRF > 0 {
+		if !nd.exch.IsFilecoinOnline() {
+			sendErr(ErrFilecoinRPCOffline)
+			return
+		}
+		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
+			com.PayloadCID,
+			args.Duration,
+			nd.exch.Wallet().DefaultAddress(),
+			args.StorageRF,
+		))
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		if len(rcpt.DealRefs) == 0 {
+			sendErr(ErrAllDealsFailed)
+			return
+		}
+		var pr PushResult
+		for _, m := range rcpt.Miners {
+			pr.Miners = append(pr.Miners, m.String())
+		}
+		for _, d := range rcpt.DealRefs {
+			pr.Deals = append(pr.Deals, d.String())
+		}
+		nd.send(Notify{
+			PushResult: &pr,
+		})
 	}
-	if len(rcpt.DealRefs) == 0 {
-		sendErr(ErrAllDealsFailed)
-		return
+
+	if !args.NoCache && args.CacheRF > 0 {
+		// TODO: adjust timeout?
+		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
+		defer cancel()
+
+		res, err := nd.exch.Supply().Dispatch(
+			supply.Request{
+				PayloadCID: com.PayloadCID,
+				Size:       uint64(com.PayloadSize),
+			},
+			supply.DispatchOptions{
+				StoreID: com.StoreID,
+			})
+		defer res.Close()
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		for {
+			// Right now we only wait for 1 peer to receive the content but we could wait for
+			// more peers, the question is when to stop as we don't know exactly how many will retrieve
+			rec, err := res.Next(ctx)
+			nd.send(Notify{
+				PushResult: &PushResult{
+					Caches: []string{
+						rec.Provider.String(),
+					},
+				},
+			})
+			if err != nil {
+				sendErr(ctx.Err())
+			}
+			return
+		}
 	}
-	var pr PushResult
-	for _, m := range rcpt.Miners {
-		pr.Miners = append(pr.Miners, m.String())
-	}
-	for _, d := range rcpt.DealRefs {
-		pr.Deals = append(pr.Deals, d.String())
-	}
+	// We shouldn't end up in this state as it's the command client role to
+	// validate we won't but just in case we return an empty result
 	nd.send(Notify{
-		PushResult: &pr,
+		PushResult: &PushResult{},
 	})
 }
 

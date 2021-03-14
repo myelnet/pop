@@ -12,7 +12,6 @@ import (
 )
 
 var addArgs struct {
-	dispatch  bool
 	chunkSize int
 }
 
@@ -29,7 +28,6 @@ stores the blocks in the block store. The DAG is then staged in the workdag inde
 	Exec: runAdd,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("add", flag.ExitOnError)
-		fs.BoolVar(&addArgs.dispatch, "dispatch", false, "dispatch the blocks to edge nodes")
 		fs.IntVar(&addArgs.chunkSize, "chunk-size", 1024, "chunk size in bytes")
 		return fs
 	})(),
@@ -49,31 +47,17 @@ func runAdd(ctx context.Context, args []string) error {
 
 	cc.Add(&node.AddArgs{
 		Path:      args[0],
-		Dispatch:  addArgs.dispatch,
 		ChunkSize: addArgs.chunkSize,
 	})
-	for {
-		select {
-		case ar := <-arc:
-			if ar.Err != "" {
-				return errors.New(ar.Err)
-			}
-			if ar.Cid != "" {
-				fmt.Printf("==> Added new file to workdag\n")
-				fmt.Printf("%s  %s  %s  %d blk\n", args[0], ar.Cid, ar.Size, ar.NumBlocks)
-				if addArgs.dispatch {
-					// Let's wait for any feedback from the dispatch
-					continue
-				}
-
-			}
-			if ar.Cache != "" {
-				fmt.Printf("cached by peer %s\n", ar.Cache)
-				// TODO: wait for a given amount of caches to receive the content
-			}
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+	select {
+	case ar := <-arc:
+		if ar.Err != "" {
+			return errors.New(ar.Err)
 		}
+		fmt.Printf("==> Added new file to workdag\n")
+		fmt.Printf("%s  %s  %s  %d blk\n", args[0], ar.Cid, ar.Size, ar.NumBlocks)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

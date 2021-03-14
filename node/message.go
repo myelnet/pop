@@ -22,7 +22,6 @@ type PingArgs struct {
 // AddArgs get passed to the Add command
 type AddArgs struct {
 	Path      string
-	Dispatch  bool
 	ChunkSize int
 }
 
@@ -45,7 +44,9 @@ type QuoteArgs struct {
 
 // PushArgs are passed to the Push command
 type PushArgs struct {
-	Commit    string
+	Ref       string // Ref is the root CID of the archive to push to remote storage
+	NoCache   bool
+	CacheOnly bool
 	CacheRF   int // CacheRF is the cache replication factor or number of cache provider will request
 	StorageRF int // StorageRF if the replication factor for storage
 	Duration  time.Duration
@@ -116,6 +117,7 @@ type QuoteResult struct {
 type PushResult struct {
 	Miners []string
 	Deals  []string
+	Caches []string
 	Err    string
 }
 
