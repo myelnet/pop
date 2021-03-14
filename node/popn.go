@@ -57,6 +57,18 @@ const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
+// ErrFilecoinRPCOffline is returned when the node is running without a provided filecoin api endpoint + token
+var ErrFilecoinRPCOffline = errors.New("filecoin RPC is offline")
+
+// ErrAllDealsFailed is returned when all storage deals failed to get started
+var ErrAllDealsFailed = errors.New("all deals failed")
+
+// ErrNoDAGForPacking is returned when no DAGs are staged in the index before packing
+var ErrNoDAGForPacking = errors.New("no DAG for packing")
+
+// ErrDAGNotPacked is returned when dags have not been packed and the node attempts to start a storage deal
+var ErrDAGNotPacked = errors.New("DAG not packed")
+
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -439,6 +451,16 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 		sendErr(err)
 		return
 	}
+	status, err := w.Status()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	if len(status) == 0 {
+		sendErr(ErrNoDAGForPacking)
+		return
+	}
+
 	ref, err := w.Commit(ctx, CommitOptions{})
 	if err != nil {
 		sendErr(err)
@@ -471,7 +493,7 @@ func (nd *node) getCommit(cstr string) (*DataRef, error) {
 		return nil, err
 	}
 	if len(idx.Commits) == 0 {
-		return nil, errors.New("no commit available")
+		return nil, ErrDAGNotPacked
 	}
 	com := idx.Commits[len(idx.Commits)-1]
 	// Select the commit with the matching CID
@@ -499,6 +521,10 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 				Err: err.Error(),
 			},
 		})
+	}
+	if !nd.exch.IsFilecoinOnline() {
+		sendErr(ErrFilecoinRPCOffline)
+		return
 	}
 	com, err := nd.getCommit(args.Commit)
 	if err != nil {
@@ -536,6 +562,10 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			},
 		})
 	}
+	if !nd.exch.IsFilecoinOnline() {
+		sendErr(ErrFilecoinRPCOffline)
+		return
+	}
 	com, err := nd.getCommit(args.Commit)
 	if err != nil {
 		sendErr(err)
@@ -552,7 +582,7 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		return
 	}
 	if len(rcpt.DealRefs) == 0 {
-		sendErr(errors.New("all deals failed"))
+		sendErr(ErrAllDealsFailed)
 		return
 	}
 	var pr PushResult

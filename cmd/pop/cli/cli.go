@@ -30,8 +30,8 @@ func Run(args []string) error {
 		ShortHelp:  "Content delivery network for the web3.0.",
 		LongHelp: strings.TrimSpace(`
 This CLI is still under active development. Commands and flags will
-change in the future. To get started run 'pop init' to create a new repo to
-store your data.
+change in the future. To get started run 'pop init' to create a new repo for
+storing your data.
 `),
 		Subcommands: []*ffcli.Command{
 			initCmd,
@@ -39,8 +39,8 @@ store your data.
 			pingCmd,
 			addCmd,
 			statusCmd,
-			quoteCmd,
 			packCmd,
+			quoteCmd,
 			pushCmd,
 			getCmd,
 		},
