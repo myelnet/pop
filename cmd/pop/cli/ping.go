@@ -8,7 +8,6 @@ import (
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
-	"github.com/rs/zerolog/log"
 )
 
 var pingCmd = &ffcli.Command{
@@ -55,12 +54,12 @@ func runPing(ctx context.Context, args []string) error {
 		if pr.Err != "" {
 			return fmt.Errorf(pr.Err)
 		}
-		log.Info().
-			Str("ID", pr.ID).
-			Strs("addrs", pr.Addrs).
-			Strs("peers", pr.Peers).
-			Float64("latencySeconds", pr.LatencySeconds).
-			Msg("pong")
+		fmt.Printf(`
+PeerID         %s
+Addresses      %s
+Peers          %s
+Latency (s)    %f
+		`, pr.ID, pr.Addrs, pr.Peers, pr.LatencySeconds)
 
 	case <-ctx.Done():
 		return ctx.Err()

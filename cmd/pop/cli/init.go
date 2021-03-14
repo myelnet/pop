@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/peterbourgon/ff/v2/ffcli"
-	"github.com/rs/zerolog/log"
 )
 
 var initCmd = &ffcli.Command{
@@ -75,7 +74,7 @@ func runInit(ctx context.Context, args []string) error {
 		if err := c.Close(); err != nil {
 			return err
 		}
-		log.Info().Str("path", path).Msg("initialized new IPFS repo")
+		fmt.Printf("Initialized pop repo in %s\n", path)
 		return nil
 	}
 	return fmt.Errorf("a pop repo already exists")

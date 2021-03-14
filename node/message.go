@@ -98,20 +98,24 @@ type StatusResult struct {
 
 // PackResult gives us feedback on the result of the Commit operation
 type PackResult struct {
-	Output string
-	Err    string
+	DataCID   string
+	DataSize  int64
+	PieceCID  string
+	PieceSize int64
+	Err       string
 }
 
 // QuoteResult returns the output of the Quote request
 type QuoteResult struct {
-	Output string
+	Miners []string
+	Price  string
 	Err    string
 }
 
 // PushResult is feedback on the push operation
 type PushResult struct {
-	Output string
-	Done   bool
+	Miners []string
+	Deals  []string
 	Err    string
 }
 

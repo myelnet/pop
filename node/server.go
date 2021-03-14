@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -60,6 +61,9 @@ func (s *server) serveConn(ctx context.Context, c net.Conn) {
 
 	for ctx.Err() == nil {
 		msg, err := ReadMsg(br)
+		if errors.Is(err, io.EOF) {
+			return
+		}
 		if err != nil {
 			log.Error().Err(err).Msg("ReadMsg")
 			return
@@ -243,10 +247,11 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("node.New: %v", err)
 	}
 
-	log.Info().
-		Strs("regions", opts.Regions).
-		Bool("isFilecoinRPCOnline", nd.exch.IsFilecoinOnline()).
-		Msg("node is running")
+	fmt.Printf("==> Started pop node\n")
+	fmt.Printf("==> Joined %s regions\n", opts.Regions)
+	if nd.exch.IsFilecoinOnline() {
+		fmt.Printf("==> Connected to Filecoin RPC at %s\n", opts.FilEndpoint)
+	}
 
 	server := &server{
 		node: nd,

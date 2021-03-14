@@ -65,7 +65,7 @@ func runPush(ctx context.Context, args []string) error {
 		if pr.Err != "" {
 			return errors.New(pr.Err)
 		}
-		fmt.Printf("\n%s", pr.Output)
+		fmt.Printf("Started storage deals with %s\n", pr.Miners)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

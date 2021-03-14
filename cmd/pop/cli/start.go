@@ -63,6 +63,37 @@ The 'pop start' command starts an IPFS daemon service.
 }
 
 func runStart(ctx context.Context, args []string) error {
+	fmt.Printf(`
+. 　　   .  　 *  ✵ 　 　　 ✦ 
+　 　　　　　
+ ·  ✦  　 　　.  *  　　　　　　
+    　.  ·  ·
+  . ·   *  * ·  .  
+ ·　　 ·  ✧     　　 ·
+                                                          
+ppppp   ppppppppp      ooooooooooo   ppppp   ppppppppp   
+p::::ppp:::::::::p   oo:::::::::::oo p::::ppp:::::::::p  
+p:::::::::::::::::p o:::::::::::::::op:::::::::::::::::p 
+pp::::::ppppp::::::po:::::ooooo:::::opp::::::ppppp::::::p
+ p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
+ p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
+ p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
+ p:::::p    p::::::po::::o     o::::o p:::::p    p::::::p
+ p:::::ppppp:::::::po:::::ooooo:::::o p:::::ppppp:::::::p
+ p::::::::::::::::p o:::::::::::::::o p::::::::::::::::p 
+ p::::::::::::::pp   oo:::::::::::oo  p::::::::::::::pp  
+ p::::::pppppppp       ooooooooooo    p::::::pppppppp    
+ p:::::p                              p:::::p            
+ p:::::p                              p:::::p            
+p:::::::p                            p:::::::p           
+p:::::::p                            p:::::::p           
+p:::::::p                            p:::::::p           
+ppppppppp                            ppppppppp           
+
+-----------------------------------------------------------
+CLI for the Myel content delivery network
+-----------------------------------------------------------
+`)
 	var err error
 	path, err := repoFullPath(getRepoPath())
 	if err != nil {
@@ -80,8 +111,7 @@ func runStart(ctx context.Context, args []string) error {
 			return err
 		}
 		defer os.RemoveAll(path)
-		log.Warn().
-			Msg("Creating temp repo... To create a persistent repo run `pop init`")
+		fmt.Printf("==> Created temp repo (To create a persistent repo run `pop init`)\n")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -93,7 +123,7 @@ func runStart(ctx context.Context, args []string) error {
 	go func() {
 		select {
 		case s := <-interrupt:
-			log.Info().Str("signal", s.String()).Msg("shutting down")
+			fmt.Printf("Shutting down, reason: %s\n", s.String())
 			cancel()
 		case <-ctx.Done():
 		}
