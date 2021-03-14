@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"text/tabwriter"
 
 	"github.com/filecoin-project/go-commp-utils/writer"
 	"github.com/filecoin-project/go-multistore"
@@ -27,6 +28,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/myelnet/pop/filecoin"
 )
 
 var (
@@ -201,29 +203,35 @@ func (w *Workdag) doAddDir(ctx context.Context, dir files.Directory, opts AddOpt
 	return nil, fmt.Errorf("TODO")
 }
 
-// Status represents our staged files, the key is a string path
-type Status map[string]cid.Cid
+// Status represents our staged files
+type Status []*Entry
 
 func (s Status) String() string {
 	buf := bytes.NewBuffer(nil)
-	for path, c := range s {
-		fmt.Fprintf(buf, "%s %s\n", c, path)
+	// Format everything in a balanced table layout
+	// we might want to move this with the cli
+	w := new(tabwriter.Writer)
+	w.Init(buf, 0, 4, 0, '\t', 0)
+	for _, e := range s {
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\n",
+			e.Name,
+			e.Cid,
+			filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
+		)
 	}
-
+	w.Flush()
 	return buf.String()
 }
 
-// Status returns the current Status
+// Status returns a list of the current entries
 func (w *Workdag) Status() (Status, error) {
 	idx, err := w.Index()
 	if err != nil {
 		return nil, err
 	}
-	s := make(Status)
-	for _, e := range idx.Entries {
-		s[e.Name] = e.Cid
-	}
-	return s, nil
+	return Status(idx.Entries), nil
 }
 
 // CommitOptions might be useful later to add authorship
@@ -245,6 +253,10 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 	idx, err := w.Index()
 	if err != nil {
 		return nil, err
+	}
+
+	if len(idx.Entries) == 0 {
+		return nil, errors.New("workdag clean, nothing to commit")
 	}
 
 	// We need a single root CID so we make a list with the roots of all

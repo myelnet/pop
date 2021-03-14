@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -425,6 +424,8 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 }
 
 // Pack packages multiple unix FS dags into an archive for storage
+// it also registers it in our supply meaning from now on we can provide to
+// any peer trying to retrieve it
 func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
@@ -448,15 +449,12 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 		sendErr(err)
 		return
 	}
-	buf := bytes.NewBuffer(nil)
-	fmt.Fprintf(buf, "Data CID: %s\n", ref.PayloadCID.String())
-	fmt.Fprintf(buf, "Data size: %d\n", ref.PayloadSize)
-	fmt.Fprintf(buf, "Piece CID: %s\n", ref.PieceCID.String())
-	fmt.Fprintf(buf, "Piece size: %d\n", ref.PieceSize)
-
 	nd.send(Notify{
 		PackResult: &PackResult{
-			Output: buf.String(),
+			DataCID:   ref.PayloadCID.String(),
+			DataSize:  ref.PayloadSize,
+			PieceCID:  ref.PieceCID.String(),
+			PieceSize: int64(ref.PieceSize),
 		},
 	})
 }
@@ -516,15 +514,15 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(err)
 		return
 	}
-
-	buf := bytes.NewBuffer(nil)
-	fmt.Fprintf(buf, "Contract Duration: %s\n", args.Duration)
-	fmt.Fprintf(buf, "Miners: %v\n", quote.Miners)
-	fmt.Fprintf(buf, "Price: %s\n", quote.Total.String())
+	var miners []string
+	for _, m := range quote.Miners {
+		miners = append(miners, m.String())
+	}
 
 	nd.send(Notify{
 		QuoteResult: &QuoteResult{
-			Output: buf.String(),
+			Miners: miners,
+			Price:  quote.Total.String(),
 		},
 	})
 }
@@ -557,13 +555,15 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		sendErr(errors.New("all deals failed"))
 		return
 	}
-	buf := bytes.NewBuffer(nil)
-	fmt.Fprintf(buf, "Miners: %s\n", rcpt.Miners)
-	fmt.Fprintf(buf, "Deals: %s\n", rcpt.DealRefs)
+	var pr PushResult
+	for _, m := range rcpt.Miners {
+		pr.Miners = append(pr.Miners, m.String())
+	}
+	for _, d := range rcpt.DealRefs {
+		pr.Deals = append(pr.Deals, d.String())
+	}
 	nd.send(Notify{
-		PushResult: &PushResult{
-			Output: buf.String(),
-		},
+		PushResult: &pr,
 	})
 }
 
@@ -764,7 +764,7 @@ func (nd *node) importAddress(pk string) {
 	if err != nil {
 		log.Error().Err(err).Msg("Wallet.ImportKey")
 	} else {
-		log.Info().Str("address", addr.String()).Msg("imported private key")
+		fmt.Printf("==> Imported private key for %s.\n", addr.String())
 		err := nd.exch.Wallet().SetDefaultAddress(addr)
 		if err != nil {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
