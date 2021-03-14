@@ -8,7 +8,6 @@ import (
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
-	"github.com/rs/zerolog/log"
 )
 
 var statusCmd = &ffcli.Command{
@@ -42,10 +41,12 @@ func runStatus(ctx context.Context, args []string) error {
 			return errors.New(sr.Err)
 		}
 		if sr.Output == "" {
-			log.Info().Msg("nothing to commit, workdag clean")
+			fmt.Printf("Nothing to pack, workdag clean.\n")
 			return nil
 		}
-		log.Info().Msg(fmt.Sprintf("\n%s", sr.Output))
+		fmt.Printf("Staged for storage:\n")
+		// Output is already formatted but should move it here
+		fmt.Printf("%s\n", sr.Output)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

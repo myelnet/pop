@@ -63,7 +63,7 @@ func runQuote(ctx context.Context, args []string) error {
 		if qr.Err != "" {
 			return errors.New(qr.Err)
 		}
-		fmt.Printf(qr.Output)
+		fmt.Printf("Store with %s miners during %s for %s.\n\n", qr.Miners, quoteArgs.dur, qr.Price)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

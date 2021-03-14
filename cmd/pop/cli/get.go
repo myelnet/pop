@@ -9,7 +9,6 @@ import (
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
-	"github.com/rs/zerolog/log"
 )
 
 var getArgs struct {
@@ -71,21 +70,12 @@ func runGet(ctx context.Context, args []string) error {
 				return errors.New(gr.Err)
 			}
 			if gr.DealID != "" {
-				log.Info().
-					Str("dealID", gr.DealID).
-					Str("TotalPrice", gr.TotalPrice).
-					Str("PricePerByte", gr.PricePerByte).
-					Str("UnsealPrice", gr.UnsealPrice).
-					Str("PieceSize", gr.PieceSize).
-					Msg("started retrieval deal")
+				fmt.Printf("Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalPrice, gr.PricePerByte)
 				continue
 			}
 
-			log.Info().
-				Float64("DiscoveryLatency", gr.DiscLatSeconds).
-				Float64("TransferLatency", gr.TransLatSeconds).
-				Float64("TotalLatency", gr.DiscLatSeconds+gr.TransLatSeconds).
-				Msg("Completed")
+			fmt.Printf("Completed transfer")
+			fmt.Printf("%fs %fs %fs", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("Get operation timed out")

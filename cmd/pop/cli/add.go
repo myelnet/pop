@@ -9,7 +9,6 @@ import (
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
-	"github.com/rs/zerolog/log"
 )
 
 var addArgs struct {
@@ -60,11 +59,8 @@ func runAdd(ctx context.Context, args []string) error {
 				return errors.New(ar.Err)
 			}
 			if ar.Cid != "" {
-				log.Info().
-					Str("Cid", ar.Cid).
-					Str("Size", ar.Size).
-					Int("NumBlocks", ar.NumBlocks).
-					Msg("added")
+				fmt.Printf("==> Added new file to workdag\n")
+				fmt.Printf("%s  %s  %s  %d blk\n", args[0], ar.Cid, ar.Size, ar.NumBlocks)
 				if addArgs.dispatch {
 					// Let's wait for any feedback from the dispatch
 					continue

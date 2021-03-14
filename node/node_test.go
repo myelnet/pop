@@ -150,7 +150,7 @@ func TestStatusAndCommit(t *testing.T) {
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.PackResult.Err, "")
 
-		pac <- n.PackResult.Output
+		pac <- n.PackResult.DataCID
 	}
 	cn.Pack(ctx, &PackArgs{})
 	out := <-pac

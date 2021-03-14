@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"text/tabwriter"
 
+	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
@@ -40,7 +43,24 @@ func runCommit(ctx context.Context, args []string) error {
 		if pr.Err != "" {
 			return errors.New(pr.Err)
 		}
-		fmt.Printf(pr.Output)
+		buf := bytes.NewBuffer(nil)
+		fmt.Fprintf(buf, "==> Packed workdag into single dag for transport\n")
+		w := new(tabwriter.Writer)
+		w.Init(buf, 0, 4, 0, '\t', 0)
+		fmt.Fprintf(
+			w,
+			"Data\t%s\t%s\t\n",
+			pr.DataCID,
+			filecoin.SizeStr(filecoin.NewInt(uint64(pr.DataSize))),
+		)
+		fmt.Fprintf(
+			w,
+			"Piece\t%s\t%s\t\n",
+			pr.PieceCID,
+			filecoin.SizeStr(filecoin.NewInt(uint64(pr.PieceSize))),
+		)
+		w.Flush()
+		fmt.Printf(buf.String())
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
