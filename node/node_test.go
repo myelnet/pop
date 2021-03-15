@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -96,7 +98,7 @@ func TestAdd(t *testing.T) {
 	<-added
 }
 
-func TestStatusAndCommit(t *testing.T) {
+func TestStatusAndPack(t *testing.T) {
 	ctx := context.Background()
 	mn := mocknet.New(ctx)
 
@@ -110,13 +112,13 @@ func TestStatusAndCommit(t *testing.T) {
 	data := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
 	p1 := filepath.Join(dir, "data1")
-	err := ioutil.WriteFile(p1, data, 0666)
+	err := os.WriteFile(p1, data, 0666)
 	require.NoError(t, err)
 
 	data2 := make([]byte, 512000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
 	p2 := filepath.Join(dir, "data2")
-	err = ioutil.WriteFile(p2, data2, 0666)
+	err = os.WriteFile(p2, data2, 0666)
 	require.NoError(t, err)
 
 	added := make(chan string, 2)
@@ -155,4 +157,26 @@ func TestStatusAndCommit(t *testing.T) {
 	cn.Pack(ctx, &PackArgs{})
 	out := <-pac
 	require.NotEqual(t, out, "")
+
+	// Export back out
+	path := fmt.Sprintf("/%s/data2", out)
+	loc := make(chan bool, 1)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.GetResult.Err, "")
+
+		loc <- n.GetResult.Local
+	}
+	newp := filepath.Join(dir, "newdata2")
+	cn.Get(ctx, &GetArgs{
+		Cid: path,
+		Out: newp,
+	})
+	<-loc
+
+	f, err := os.Open(newp)
+	require.NoError(t, err)
+
+	newb, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, data2, newb)
 }
