@@ -75,7 +75,7 @@ func runGet(ctx context.Context, args []string) error {
 			}
 
 			fmt.Printf("Completed transfer")
-			fmt.Printf("%fs %fs %fs", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
+			fmt.Printf("Discovery: %fs, Transfer: %fs, Total: %fs", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("Get operation timed out")

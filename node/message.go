@@ -54,12 +54,13 @@ type PushArgs struct {
 
 // GetArgs get passed to the Get command
 type GetArgs struct {
-	Cid     string
-	Sel     string
-	Out     string
-	Timeout int
-	Verbose bool
-	Miner   string
+	Cid      string
+	Segments []string
+	Sel      string
+	Out      string
+	Timeout  int
+	Verbose  bool
+	Miner    string
 }
 
 // Command is a message sent from a client to the daemon
@@ -85,7 +86,6 @@ type PingResult struct {
 // AddResult gives us feedback on the result of the Add request
 type AddResult struct {
 	Cid       string
-	Cache     string
 	Size      string
 	NumBlocks int
 	Err       string
@@ -131,6 +131,7 @@ type GetResult struct {
 	UnsealPrice     string
 	DiscLatSeconds  float64
 	TransLatSeconds float64
+	Local           bool
 	Err             string
 }
 

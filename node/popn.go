@@ -29,7 +29,7 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
-	unixfile "github.com/ipfs/go-unixfs/file"
+	"github.com/ipfs/go-path"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
@@ -68,6 +68,9 @@ var ErrNoDAGForPacking = errors.New("no DAG for packing")
 
 // ErrDAGNotPacked is returned when dags have not been packed and the node attempts to start a storage deal
 var ErrDAGNotPacked = errors.New("DAG not packed")
+
+// ErrNodeNotFound is returned when we cannot find the node in the given root
+var ErrNodeNotFound = errors.New("node not found")
 
 // Options determines configurations for the IPFS node
 type Options struct {
@@ -616,11 +619,32 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 				Err: err.Error(),
 			}})
 	}
-	root, err := cid.Parse(args.Cid)
+	p := path.FromString(args.Cid)
+	// /<cid>/path/file.ext => cid, ["path", file.ext"]
+	root, segs, err := path.SplitAbsPath(p)
 	if err != nil {
 		sendErr(err)
 		return
 	}
+	// Check our supply if we may already have it
+	sID, err := nd.exch.Supply().GetStoreID(root)
+	if err == nil && args.Out != "" {
+		err := nd.export(ctx, root, segs[0], args.Out, sID)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+	}
+	if err == nil {
+		nd.send(Notify{
+			GetResult: &GetResult{
+				Local: true,
+			}})
+		return
+	}
+	// Only support a single segment for now
+	args.Segments = segs
+	// Log progress
 	if args.Verbose {
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
@@ -700,39 +724,70 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		},
 	})
 
-	for {
-		select {
-		case err := <-session.Done():
+	select {
+	case err := <-session.Done():
+		if err != nil {
+			return err
+		}
+		end := time.Now()
+		transDuration := end.Sub(start) - discDuration
+		if args.Out != "" {
+			err := nd.export(ctx, c, args.Segments[0], args.Out, session.StoreID())
 			if err != nil {
 				return err
 			}
-			end := time.Now()
-			transDuration := end.Sub(start) - discDuration
-			if args.Out != "" {
-				n, err := nd.dag.Get(ctx, c)
-				if err != nil {
-					return err
-				}
-				file, err := unixfile.NewUnixfsFile(ctx, nd.dag, n)
-				if err != nil {
-					return err
-				}
-				err = files.WriteTo(file, args.Out)
-				if err != nil {
-					return err
-				}
-			}
-			nd.send(Notify{
-				GetResult: &GetResult{
-					DiscLatSeconds:  discDuration.Seconds(),
-					TransLatSeconds: transDuration.Seconds(),
-				},
-			})
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
 		}
+		// Register new blocks in our supply by default
+		err = nd.exch.Supply().Register(c, offer.Response.Size, session.StoreID())
+		if err != nil {
+			return err
+		}
+		nd.send(Notify{
+			GetResult: &GetResult{
+				DiscLatSeconds:  discDuration.Seconds(),
+				TransLatSeconds: transDuration.Seconds(),
+			},
+		})
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+}
+
+// extractFile from an archive
+func (nd *node) extractFile(ctx context.Context, root cid.Cid, name string, sid multistore.StoreID) (files.Node, error) {
+	w, err := NewWorkdag(nd.ms, nd.ds)
+	if err != nil {
+		return nil, err
+	}
+
+	fls, err := w.Unpack(ctx, root, sid)
+	if err != nil {
+		return nil, err
+	}
+
+	// We only support flat structures for now
+	// would rather not add mfs into the mix
+	file, ok := fls[name]
+	// This won't be necessary once we support selectors
+	// for now we have to retrieve a whole archive to access a single file
+	if !ok {
+		return nil, ErrNodeNotFound
+	}
+	return file, nil
+}
+
+// export extracts a given file from an archive and writes it to a given path
+func (nd *node) export(ctx context.Context, root cid.Cid, name, out string, sid multistore.StoreID) error {
+	file, err := nd.extractFile(ctx, root, name, sid)
+	if err != nil {
+		return err
+	}
+	err = files.WriteTo(file, out)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // bootstrap connects to a list of provided peer addresses, libp2p then uses dht discovery

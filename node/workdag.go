@@ -22,6 +22,7 @@ import (
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
+	unixfile "github.com/ipfs/go-unixfs/file"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-car"
@@ -183,9 +184,12 @@ func (w *Workdag) doAddFile(ctx context.Context, f files.File, opts AddOptions) 
 	if err != nil {
 		return nil, err
 	}
-	e, err := idx.Entry(opts.Path)
+	// Only keep the file name
+	_, name := filepath.Split(opts.Path)
+
+	e, err := idx.Entry(name)
 	if errors.Is(err, ErrEntryNotFound) {
-		e = idx.Add(opts.Path)
+		e = idx.Add(name)
 	} else if err != nil {
 		return nil, err
 	}
@@ -211,7 +215,8 @@ func (s Status) String() string {
 	// Format everything in a balanced table layout
 	// we might want to move this with the cli
 	w := new(tabwriter.Writer)
-	w.Init(buf, 0, 4, 0, '\t', 0)
+	w.Init(buf, 0, 4, 2, ' ', 0)
+	var total int64 = 0
 	for _, e := range s {
 		fmt.Fprintf(
 			w,
@@ -220,6 +225,10 @@ func (s Status) String() string {
 			e.Cid,
 			filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
 		)
+		total += e.Size
+	}
+	if total > 0 {
+		fmt.Fprintf(w, "Total\t-\t%s\n", filecoin.SizeStr(filecoin.NewInt(uint64(total))))
 	}
 	w.Flush()
 	return buf.String()
@@ -263,23 +272,6 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 	// dagpb roots and use that in our CAR generation
 	nb := basicnode.Prototype.List.NewBuilder()
 
-	as, err := nb.BeginList(int64(len(idx.Entries)))
-	if err != nil {
-		return nil, err
-	}
-
-	for _, e := range idx.Entries {
-		lk := cidlink.Link{Cid: e.Cid}
-		err := as.AssembleValue().AssignLink(lk)
-		if err != nil {
-			return nil, err
-		}
-	}
-	err = as.Finish()
-	if err != nil {
-		return nil, err
-	}
-
 	lb := cidlink.LinkBuilder{
 		Prefix: cid.Prefix{
 			Version:  1,
@@ -287,6 +279,44 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 			MhType:   DefaultHashFunction,
 			MhLength: -1,
 		},
+	}
+
+	as, err := nb.BeginList(int64(len(idx.Entries)))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, e := range idx.Entries {
+		// Each entry is a map with 2 keys: Name and Link
+		mas, err := as.AssembleValue().BeginMap(2)
+		if err != nil {
+			return nil, err
+		}
+		nas, err := mas.AssembleEntry("Name")
+		if err != nil {
+			return nil, err
+		}
+		err = nas.AssignString(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		las, err := mas.AssembleEntry("Link")
+		if err != nil {
+			return nil, err
+		}
+		clk := cidlink.Link{Cid: e.Cid}
+		err = las.AssignLink(clk)
+		if err != nil {
+			return nil, err
+		}
+		err = mas.Finish()
+		if err != nil {
+			return nil, err
+		}
+	}
+	err = as.Finish()
+	if err != nil {
+		return nil, err
 	}
 
 	lnk, err := lb.Build(
@@ -338,6 +368,60 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 	}
 
 	return ref, w.SetIndex(idx)
+}
+
+// Unpack a DAG archive into a list of files given the data root and store ID
+// TODO: need to measure the memory footprint of returning the entire list vs a specific file
+// Right now it's useful because we can get multiple files from the same Unpack operation
+func (w *Workdag) Unpack(ctx context.Context, root cid.Cid, s multistore.StoreID) (map[string]files.Node, error) {
+	store, err := w.ms.Get(s)
+	if err != nil {
+		return nil, err
+	}
+	lk := cidlink.Link{Cid: root}
+	nb := basicnode.Prototype.List.NewBuilder()
+
+	err = lk.Load(ctx, ipld.LinkContext{}, nb, store.Loader)
+	if err != nil {
+		return nil, err
+	}
+	fls := make(map[string]files.Node)
+	nd := nb.Build()
+	itr := nd.ListIterator()
+
+	for !itr.Done() {
+		_, n, err := itr.Next()
+		if err != nil {
+			return nil, err
+		}
+		entry, err := n.LookupByString("Link")
+		if err != nil {
+			return nil, err
+		}
+		l, err := entry.AsLink()
+		if err != nil {
+			return nil, err
+		}
+		flk := l.(cidlink.Link).Cid
+		dn, err := store.DAG.Get(ctx, flk)
+		if err != nil {
+			return nil, err
+		}
+		f, err := unixfile.NewUnixfsFile(ctx, store.DAG, dn)
+		if err != nil {
+			return nil, err
+		}
+		entry, err = n.LookupByString("Name")
+		if err != nil {
+			return nil, err
+		}
+		k, err := entry.AsString()
+		if err != nil {
+			return nil, err
+		}
+		fls[k] = f
+	}
+	return fls, nil
 }
 
 // Index contains the information about which objects are currently checked out
