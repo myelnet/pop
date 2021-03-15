@@ -90,9 +90,9 @@ p:::::::p                            p:::::::p
 p:::::::p                            p:::::::p           
 ppppppppp                            ppppppppp           
 
------------------------------------------------------------
-CLI for the Myel content delivery network
------------------------------------------------------------
+-------------------------------------------------------------
+Manage your Myel CDN point of presence from the command line.
+-------------------------------------------------------------
 `)
 	var err error
 	path, err := repoFullPath(getRepoPath())
