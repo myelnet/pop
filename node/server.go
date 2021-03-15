@@ -16,9 +16,6 @@ import (
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	ipath "github.com/ipfs/go-path"
-	"github.com/ipfs/go-path/resolver"
-	unixfile "github.com/ipfs/go-unixfs/file"
-	uio "github.com/ipfs/go-unixfs/io"
 	"github.com/rs/zerolog/log"
 )
 
@@ -142,28 +139,19 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 
 	parsedPath := ipath.FromString(urlPath)
-	if err := parsedPath.IsValid(); err != nil {
-		http.Error(w, "invalid ipfs path", http.StatusBadRequest)
-		return
-	}
 
-	re := &resolver.Resolver{
-		DAG:         s.node.dag,
-		ResolveOnce: uio.ResolveUnixfsOnce,
-	}
-
-	// This doesn't actually hit the dag service but resolves a path into a cid
-	ci, _, err := re.ResolveToLastNode(r.Context(), parsedPath)
+	// Extract the CID and file path segments
+	root, segs, err := ipath.SplitAbsPath(parsedPath)
 	if err != nil {
-		http.Error(w, "ipfs resolve -r "+urlPath, http.StatusNotFound)
+		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
 	// Check if we have the blocks locally
-	nd, err := s.node.dag.Get(r.Context(), ci)
+	sID, err := s.node.exch.Supply().GetStoreID(root)
 	if err != nil {
 		if err == ipldformat.ErrNotFound {
 			// try to retrieve the blocks
-			err = s.node.get(r.Context(), ci, &GetArgs{})
+			err = s.node.get(r.Context(), root, &GetArgs{})
 			if err != nil {
 				// TODO: give better feedback into what went wrong
 				http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
@@ -171,7 +159,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// If all went well we should have the blocks now
-			nd, err = s.node.dag.Get(r.Context(), ci)
+			sID, err = s.node.exch.Supply().GetStoreID(root)
 			if err != nil {
 				http.Error(w, "Unable to find content", http.StatusNotFound)
 				return
@@ -183,7 +171,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
-	fnd, err := unixfile.NewUnixfsFile(r.Context(), s.node.dag, nd)
+	fnd, err := s.node.extractFile(r.Context(), root, segs[0], sID)
 	if err != nil {
 		http.Error(w, "Unable to create unix files", http.StatusInternalServerError)
 		return

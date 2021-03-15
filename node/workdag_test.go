@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"path/filepath"
 	"testing"
@@ -9,21 +11,23 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-datastore"
 	dss "github.com/ipfs/go-datastore/sync"
+	files "github.com/ipfs/go-ipfs-files"
+	"github.com/ipfs/go-path"
 	"github.com/stretchr/testify/require"
 )
 
-func genTestFiles(t *testing.T) []string {
+func genTestFiles(t *testing.T) (map[string]string, []string) {
 	dir := t.TempDir()
 
 	testInputs := map[string]string{
-		"1": "Two roads diverged in a yellow wood,\n",
-		"2": "And sorry I could not travel both\n",
-		"3": "And be one traveler, long I stood\n",
-		"4": "And looked down one as far as I could\n",
-		"5": "To where it bent in the undergrowth;\n",
-		"6": "Then took the other, as just as fair,\n",
-		"7": "And having perhaps the better claim,\n",
-		"8": "Because it was grassy and wanted wear;\n",
+		"line1.txt": "Two roads diverged in a yellow wood,\n",
+		"line2.txt": "And sorry I could not travel both\n",
+		"line3.txt": "And be one traveler, long I stood\n",
+		"line4.txt": "And looked down one as far as I could\n",
+		"line5.txt": "To where it bent in the undergrowth;\n",
+		"line6.txt": "Then took the other, as just as fair,\n",
+		"line7.txt": "And having perhaps the better claim,\n",
+		"line8.txt": "Because it was grassy and wanted wear;\n",
 	}
 
 	paths := make([]string, 0, len(testInputs))
@@ -36,7 +40,7 @@ func genTestFiles(t *testing.T) []string {
 		}
 		paths = append(paths, path)
 	}
-	return paths
+	return testInputs, paths
 }
 
 func TestWorkdag(t *testing.T) {
@@ -46,7 +50,7 @@ func TestWorkdag(t *testing.T) {
 	ms, err := multistore.NewMultiDstore(ds)
 	require.NoError(t, err)
 
-	filepaths := genTestFiles(t)
+	filevals, filepaths := genTestFiles(t)
 
 	wd, err := NewWorkdag(ms, ds)
 	require.NoError(t, err)
@@ -73,11 +77,8 @@ func TestWorkdag(t *testing.T) {
 	// save the previous store ID
 	sID := wd.StoreID()
 
-	dataCID := "bafy2bzacedppq7brujaqwwve5mxp5mp2i2zsvh2hlxpucaxrvql6bwukgxstw"
-
-	c, err := wd.Commit(ctx, CommitOptions{})
+	_, err = wd.Commit(ctx, CommitOptions{})
 	require.NoError(t, err)
-	require.Equal(t, dataCID, c.PayloadCID.String())
 
 	_, err = wd.Add(ctx, AddOptions{Path: filepaths[0], ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
@@ -98,5 +99,37 @@ func TestWorkdag(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(idx.Commits))
-	require.Equal(t, idx.Commits[0].PayloadCID.String(), dataCID)
+
+	// Now check if we can unpack it back into a list of files
+	com := idx.Commits[0]
+	fileNds, err := wd.Unpack(ctx, com.PayloadCID, com.StoreID)
+	require.NoError(t, err)
+	require.Equal(t, len(filepaths), len(fileNds))
+
+	for k, nd := range fileNds {
+		// Ignore the first one we read later
+		if k == "line1.txt" {
+			continue
+		}
+		f := nd.(files.File)
+		bytes, err := io.ReadAll(f)
+		require.NoError(t, err)
+
+		require.NotEqual(t, "", filevals[k])
+		require.Equal(t, bytes, []byte(filevals[k]))
+	}
+	// Generate a path to look for
+	p := fmt.Sprintf("/%s/line1.txt", com.PayloadCID.String())
+	pp := path.FromString(p)
+	root, segs, err := path.SplitAbsPath(pp)
+	require.NoError(t, err)
+	require.Equal(t, root, com.PayloadCID)
+	require.Equal(t, segs, []string{"line1.txt"})
+
+	// Verify one last time we have the right key and all
+	file := fileNds[segs[0]]
+	f := file.(files.File)
+	bytes, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, bytes, []byte(filevals["line1.txt"]))
 }
