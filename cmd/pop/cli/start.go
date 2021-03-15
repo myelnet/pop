@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,40 +14,45 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/AlecAivazis/survey/v2"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog/log"
 )
 
-var startArgs struct {
-	temp         bool
-	bootstrap    string
-	filEndpoint  string
-	filToken     string
-	filTokenType string
-	privKeyPath  string
-	regions      string
+// PopConfig is the json config object we generate with the init command
+type PopConfig struct {
+	temp        bool
+	privKeyPath string
+	regions     string
+	// Exported fields can be set by survey.Ask
+	Bootstrap    string `json:"bootstrap"`
+	FilEndpoint  string `json:"fil-endpoint"`
+	FilToken     string `json:"fil-token"`
+	FilTokenType string `json:"fil-token-type"`
 }
+
+var startArgs PopConfig
 
 var startCmd = &ffcli.Command{
 	Name:      "start",
-	ShortHelp: "Starts an IPFS daemon",
+	ShortHelp: "Starts a pop daemon",
 	LongHelp: strings.TrimSpace(`
 
-The 'pop start' command starts an IPFS daemon service.
+The 'pop start' command starts a pop daemon service.
 
 `),
 	Exec: runStart,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
-		fs.StringVar(&startArgs.bootstrap, "bootstrap", "", "bootstrap peer to discover others")
-		fs.StringVar(&startArgs.filEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
-		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
-		fs.StringVar(&startArgs.filTokenType, "fil-token-type", "Bearer", "auth token type")
+		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "", "bootstrap peer to discover others")
+		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
+		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
+		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
-		fs.StringVar(&startArgs.regions, "regions", "Global", "provider regions separated by commas")
+		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 
 		return fs
 	})(),
@@ -90,29 +97,23 @@ p:::::::p                            p:::::::p
 p:::::::p                            p:::::::p           
 ppppppppp                            ppppppppp           
 
--------------------------------------------------------------
-Manage your Myel CDN point of presence from the command line.
--------------------------------------------------------------
+-----------------------------------------------------------
+Manage your Myel point of presence from the command line.
+-----------------------------------------------------------
 `)
-	var err error
-	path, err := repoFullPath(getRepoPath())
+
+	// init returns whether we're creating a repo for the first time
+	path, init, err := setupRepo()
 	if err != nil {
 		return err
 	}
-
-	exists, err := repoExists(path)
-	if err != nil {
-		return err
-	}
-
-	if !exists || startArgs.temp {
-		path, err = os.MkdirTemp("", ".pop")
-		if err != nil {
-			return err
-		}
+	if startArgs.temp {
 		defer os.RemoveAll(path)
-		fmt.Printf("==> Created temp repo (To create a persistent repo run `pop init`)\n")
 	}
+
+	privKey := setupWallet(init)
+
+	regions := setupRegions()
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -130,37 +131,28 @@ Manage your Myel CDN point of presence from the command line.
 	}()
 
 	var filToken string
-	if startArgs.filToken != "" {
+	if startArgs.FilToken != "" {
 		// Basic auth requires base64 encoding and Infura api provides unencoded strings
-		if startArgs.filTokenType == "Basic" {
-			filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.filToken))
+		if startArgs.FilTokenType == "Basic" {
+			filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.FilToken))
 		} else {
-			filToken = startArgs.filToken
+			filToken = startArgs.FilToken
 		}
-		filToken = fmt.Sprintf("%s %s", startArgs.filTokenType, filToken)
+		filToken = fmt.Sprintf("%s %s", startArgs.FilTokenType, filToken)
 	}
 
-	var privKey string
-	if startArgs.privKeyPath != "" {
-		fdata, err := os.ReadFile(startArgs.privKeyPath)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to read private key")
-		} else {
-			privKey = strings.TrimSpace(string(fdata))
-		}
-	}
 	var bAddrs []string
-	if startArgs.bootstrap != "" {
-		bAddrs = append(bAddrs, startArgs.bootstrap)
+	if startArgs.Bootstrap != "" {
+		bAddrs = append(bAddrs, startArgs.Bootstrap)
 	}
 
 	opts := node.Options{
 		RepoPath:       path,
 		BootstrapPeers: bAddrs,
-		FilEndpoint:    startArgs.filEndpoint,
+		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,
 		PrivKey:        privKey,
-		Regions:        strings.Split(startArgs.regions, ","),
+		Regions:        regions,
 	}
 
 	err = node.Run(ctx, opts)
@@ -197,4 +189,173 @@ func repoExists(path string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// setupRepo will persist our initial configurations so we can remember them when we need to restart the node
+func setupRepo() (string, bool, error) {
+	var err error
+	path, err := repoFullPath(getRepoPath())
+	if err != nil {
+		return path, false, err
+	}
+
+	exists, err := repoExists(path)
+	if err != nil {
+		return path, false, err
+	}
+
+	if !exists && !startArgs.temp {
+		var a int
+		prompt := &survey.Select{
+			Message: "Couldn't find data repo",
+			Options: []string{
+				"Create a temporary repo",
+				"New repo at default location (~/.pop)",
+			},
+		}
+		survey.AskOne(prompt, &a)
+		startArgs.temp = a == 0
+	}
+
+	if startArgs.temp {
+		path, err = os.MkdirTemp("", ".pop")
+		if err != nil {
+			return path, false, err
+		}
+		fmt.Printf("==> Created temporary repo\n")
+		return path, !exists, nil
+	}
+
+	if exists {
+		return path, false, nil
+	}
+
+	// These prompts are only executed when starting the node for the first time
+	// and creating a new repo. Once done, the configs will be persisted into a JSON config file.
+	qs := []*survey.Question{
+		{
+			Name: "filEndpoint",
+			Prompt: &survey.Input{
+				Message: "Lotus RPC endpoint",
+				Default: os.Getenv("FIL_ENDPOINT"),
+			},
+		},
+		{
+			Name: "filToken",
+			Prompt: &survey.Input{
+				Message: "Lotus RPC auth token",
+				Default: os.Getenv("FIL_TOKEN"),
+			},
+		},
+		{
+			Name: "filTokenType",
+			Prompt: &survey.Select{
+				Message: "Authorization type",
+				Options: []string{"Basic", "Bearer"},
+				Default: "Bearer",
+			},
+		},
+		{
+			Name: "bootstrap",
+			Prompt: &survey.Multiline{
+				Message: "Bootstrap peers",
+				Default: "/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
+			},
+		},
+	}
+
+	if err := survey.Ask(qs, &startArgs); err != nil {
+		return path, false, err
+	}
+
+	// Make our root repo dir and datastore dir
+	err = os.MkdirAll(filepath.Join(path, "datastore"), 0755)
+	if err != nil {
+		return path, false, err
+	}
+	// default configs
+	// Regions aren't set in a static config object as we aim to make them
+	// more dynamic in the future
+	buf := new(bytes.Buffer)
+	e := json.NewEncoder(buf)
+	e.SetIndent("", "    ")
+	if err := e.Encode(startArgs); err != nil {
+		return path, false, err
+	}
+	c, err := os.Create(filepath.Join(path, "PopConfig.json"))
+	if err != nil {
+		return path, false, err
+	}
+	_, err = c.Write(buf.Bytes())
+	if err != nil {
+		return path, false, err
+	}
+	if err := c.Close(); err != nil {
+		return path, false, err
+	}
+	fmt.Printf("==> Initialized pop repo in %s\n", path)
+
+	return path, true, nil
+}
+
+// setupWallet prompts user to import a key or generate a new one
+func setupWallet(init bool) string {
+	// If we're not initializing the repo we don't prompt for key
+	if startArgs.privKeyPath == "" && init {
+		var a int
+		prompt := &survey.Select{
+			Message: "Setup wallet",
+			Options: []string{
+				"Generate a default address",
+				"Import a new address",
+			},
+		}
+		survey.AskOne(prompt, &a)
+		if a == 1 {
+			prompt := &survey.Input{
+				Message: "Path to hex encoded key file",
+			}
+			survey.AskOne(prompt, &startArgs.privKeyPath)
+		}
+	}
+
+	var privKey string
+	if startArgs.privKeyPath != "" {
+		fdata, err := os.ReadFile(startArgs.privKeyPath)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read private key")
+		} else {
+			privKey = strings.TrimSpace(string(fdata))
+		}
+	}
+
+	return privKey
+}
+
+// setupRegions formats the regions to join from cli flag or user prompt
+func setupRegions() []string {
+	var regions []string
+	if startArgs.regions == "" {
+		prompt := &survey.MultiSelect{
+			Message: "Choose regions to join",
+			Options: []string{
+				"Asia",
+				"Africa",
+				"SouthAmerica",
+				"NorthAmerica",
+				"Europe",
+				"Oceania",
+				"Global",
+			},
+			Help: `
+Region impact which providers server your content or which clients retrieve from your pop.
+The global region allows free transfers while specific regions offer better performance.
+`,
+		}
+		survey.AskOne(prompt, &regions, survey.WithValidator(survey.Required))
+	}
+	if startArgs.regions != "" {
+		regions = strings.Split(startArgs.regions, ",")
+	}
+	return regions
 }
