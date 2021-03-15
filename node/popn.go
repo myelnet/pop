@@ -111,6 +111,9 @@ type node struct {
 
 	mu     sync.Mutex
 	notify func(Notify)
+
+	qmu    sync.Mutex // mutex for the storage quote
+	sQuote *storage.Quote
 }
 
 // New puts together all the components of the ipfs node
@@ -495,7 +498,7 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(ErrFilecoinRPCOffline)
 		return
 	}
-	com, err := nd.getCommit(args.Commit)
+	com, err := nd.getCommit(args.Ref)
 	if err != nil {
 		sendErr(err)
 		return
@@ -504,20 +507,26 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		PieceSize: uint64(com.PieceSize),
 		Duration:  args.Duration,
 		RF:        args.StorageRF,
+		MaxPrice:  args.MaxPrice,
 	})
+	nd.qmu.Lock()
+	nd.sQuote = quote
+	nd.qmu.Unlock()
+
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	var miners []string
+	quotes := make(map[string]string)
 	for _, m := range quote.Miners {
-		miners = append(miners, m.String())
+		addr := m.Info.Address
+		quotes[addr.String()] = quote.Prices[addr].String()
 	}
 
 	nd.send(Notify{
 		QuoteResult: &QuoteResult{
-			Miners: miners,
-			Price:  quote.Total.String(),
+			Ref:    com.PayloadCID.String(),
+			Quotes: quotes,
 		},
 	})
 }
@@ -537,6 +546,23 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		return
 	}
 
+	nd.qmu.Lock()
+	if nd.sQuote == nil {
+		nd.qmu.Unlock()
+		sendErr(errors.New("no quote available"))
+		return
+	}
+	quote := nd.sQuote
+	nd.qmu.Unlock()
+
+	var miners []storage.Miner
+	for _, m := range quote.Miners {
+		addr := m.Info.Address
+		if args.Miners[addr.String()] {
+			miners = append(miners, m)
+		}
+	}
+
 	if !args.CacheOnly && args.StorageRF > 0 {
 		if !nd.exch.IsFilecoinOnline() {
 			sendErr(ErrFilecoinRPCOffline)
@@ -546,7 +572,7 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			com.PayloadCID,
 			args.Duration,
 			nd.exch.Wallet().DefaultAddress(),
-			args.StorageRF,
+			miners,
 		))
 		if err != nil {
 			sendErr(err)

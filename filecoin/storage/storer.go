@@ -126,6 +126,7 @@ type Miner struct {
 
 // MinerSelectionParams defines the criterias for selecting a list of miners
 type MinerSelectionParams struct {
+	MaxPrice  uint64
 	PieceSize uint64
 	RF        int
 }
@@ -175,6 +176,10 @@ func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]M
 		ask, err := s.client.GetAsk(ctx, info)
 		if err != nil {
 			fmt.Println("error", err)
+			continue
+		}
+
+		if fil.NewInt(msp.MaxPrice).LessThan(ask.Price) {
 			continue
 		}
 
@@ -269,12 +274,13 @@ type QuoteParams struct {
 	PieceSize uint64
 	Duration  time.Duration
 	RF        int
+	MaxPrice  uint64
 }
 
 // Quote is an estimate of who can store given content and for how much
 type Quote struct {
-	Total  fil.FIL
-	Miners []address.Address
+	Miners []Miner
+	Prices map[address.Address]fil.FIL
 }
 
 // GetMarketQuote returns the costs of storing for a given CID and duration
@@ -282,38 +288,30 @@ func (s *Storage) GetMarketQuote(ctx context.Context, params QuoteParams) (*Quot
 	miners, err := s.LoadMiners(ctx, MinerSelectionParams{
 		PieceSize: params.PieceSize,
 		RF:        params.RF,
+		MaxPrice:  params.MaxPrice,
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	gib := fil.NewInt(1 << 30)
-
-	var mAddrs []address.Address
-	var epochPrices []big.Int
-
-	epochs := calcEpochs(params.Duration)
-
-	pricePerGib := big.Zero()
-
-	for _, m := range miners {
-		mAddrs = append(mAddrs, m.Info.Address)
-		p := m.Ask.Price
-
-		pricePerGib = fil.BigAdd(pricePerGib, p)
-		epochPrice := fil.BigDiv(fil.BigMul(p, fil.NewInt(params.PieceSize)), gib)
-		epochPrices = append(epochPrices, epochPrice)
-
-	}
-	if len(mAddrs) == 0 {
+	if len(miners) == 0 {
 		return nil, errors.New("no miners fit those parameters")
 	}
 
-	epochPrice := fil.BigDiv(fil.BigMul(pricePerGib, fil.NewInt(uint64(params.PieceSize))), gib)
-	totalPrice := fil.BigMul(epochPrice, fil.NewInt(uint64(epochs)))
+	gib := fil.NewInt(1 << 30)
+
+	epochs := calcEpochs(params.Duration)
+
+	prices := make(map[address.Address]fil.FIL)
+
+	for _, m := range miners {
+		p := m.Ask.Price
+		epochPrice := fil.BigDiv(fil.BigMul(p, fil.NewInt(params.PieceSize)), gib)
+		prices[m.Info.Address] = fil.FIL(fil.BigMul(epochPrice, fil.NewInt(uint64(epochs))))
+	}
+
 	return &Quote{
-		Total:  fil.FIL(totalPrice),
-		Miners: mAddrs,
+		Miners: miners,
+		Prices: prices,
 	}, nil
 }
 
@@ -322,11 +320,11 @@ type Params struct {
 	Payload  *storagemarket.DataRef
 	Duration time.Duration
 	Address  address.Address
-	RF       int
+	Miners   []Miner
 }
 
 // NewParams creates a new Params struct for storage
-func NewParams(root cid.Cid, dur time.Duration, w address.Address, rf int) Params {
+func NewParams(root cid.Cid, dur time.Duration, w address.Address, mnrs []Miner) Params {
 	return Params{
 		Payload: &storagemarket.DataRef{
 			TransferType: storagemarket.TTGraphsync,
@@ -334,7 +332,7 @@ func NewParams(root cid.Cid, dur time.Duration, w address.Address, rf int) Param
 		},
 		Duration: dur,
 		Address:  w,
-		RF:       rf,
+		Miners:   mnrs,
 	}
 }
 
@@ -347,20 +345,13 @@ type Receipt struct {
 // Store is the main storage operation which automatically stores content for a given CID
 // with the best conditions available
 func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
-	miners, err := s.LoadMiners(ctx, MinerSelectionParams{
-		PieceSize: uint64(p.Payload.PieceSize),
-		RF:        p.RF,
-	})
-	if err != nil {
-		return nil, err
-	}
 	var ma []address.Address
-	for _, m := range miners {
+	for _, m := range p.Miners {
 		ma = append(ma, m.Info.Address)
 	}
 	epochs := calcEpochs(p.Duration)
 	var drfs []cid.Cid
-	for _, m := range miners {
+	for _, m := range p.Miners {
 		pcid, err := s.StartDeal(ctx, StartDealParams{
 			Data:              p.Payload,
 			Wallet:            p.Address,

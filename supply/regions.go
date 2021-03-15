@@ -67,8 +67,8 @@ var (
 		PPB:  abi.NewTokenAmount(1),
 		// NorthAmerica region based miners in order of most capacity to least
 		StorageMiners: []string{
-			"f02301", // topblocks
-			// "f03223",   // telos - crazy PPB not sure if error or not
+			"f02301",   // topblocks
+			"f03223",   // telos - crazy PPB not sure if error or not
 			"f019104",  // Filswan (NBFS) Canada
 			"f02401",   // Terra Mining
 			"f02387",   // W3Bcloud
@@ -103,7 +103,7 @@ var (
 			"f081323", // Midland UK
 			"f08403",  // TippyFlits (UK)
 			"f010446", // (Belgium)
-			"f01277",  // tvsthlm (Sweden)
+			"f01277",  // tvsthlm (Sweden) crazy PPB
 			"f022163", // (Switzerland)
 		},
 	}
