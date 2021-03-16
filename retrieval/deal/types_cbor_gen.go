@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 
+	address "github.com/filecoin-project/go-address"
 	piecestore "github.com/filecoin-project/go-fil-markets/piecestore"
 	multistore "github.com/filecoin-project/go-multistore"
 	paych "github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
@@ -1265,7 +1266,7 @@ func (t *ClientState) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{181}); err != nil {
+	if _, err := w.Write([]byte{180}); err != nil {
 		return err
 	}
 
@@ -1616,22 +1617,6 @@ func (t *ClientState) MarshalCBOR(w io.Writer) error {
 	if err := t.VoucherShortfall.MarshalCBOR(w); err != nil {
 		return err
 	}
-
-	// t.LegacyProtocol (bool) (bool)
-	if len("LegacyProtocol") > cbg.MaxLength {
-		return xerrors.Errorf("Value in field \"LegacyProtocol\" was too long")
-	}
-
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("LegacyProtocol"))); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(w, string("LegacyProtocol")); err != nil {
-		return err
-	}
-
-	if err := cbg.WriteBool(w, t.LegacyProtocol); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -1944,24 +1929,6 @@ func (t *ClientState) UnmarshalCBOR(r io.Reader) error {
 				}
 
 			}
-			// t.LegacyProtocol (bool) (bool)
-		case "LegacyProtocol":
-
-			maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
-			if err != nil {
-				return err
-			}
-			if maj != cbg.MajOther {
-				return fmt.Errorf("booleans must be major type 7")
-			}
-			switch extra {
-			case 20:
-				t.LegacyProtocol = false
-			case 21:
-				t.LegacyProtocol = true
-			default:
-				return fmt.Errorf("booleans are either major type 7, value 20 or 21 (got %d)", extra)
-			}
 
 		default:
 			// Field doesn't exist on this type, so ignore it
@@ -2156,19 +2123,19 @@ func (t *ProviderState) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.LegacyProtocol (bool) (bool)
-	if len("LegacyProtocol") > cbg.MaxLength {
-		return xerrors.Errorf("Value in field \"LegacyProtocol\" was too long")
+	// t.PayCh (address.Address) (struct)
+	if len("PayCh") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PayCh\" was too long")
 	}
 
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("LegacyProtocol"))); err != nil {
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PayCh"))); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, string("LegacyProtocol")); err != nil {
+	if _, err := io.WriteString(w, string("PayCh")); err != nil {
 		return err
 	}
 
-	if err := cbg.WriteBool(w, t.LegacyProtocol); err != nil {
+	if err := t.PayCh.MarshalCBOR(w); err != nil {
 		return err
 	}
 	return nil
@@ -2339,23 +2306,25 @@ func (t *ProviderState) UnmarshalCBOR(r io.Reader) error {
 				t.CurrentInterval = uint64(extra)
 
 			}
-			// t.LegacyProtocol (bool) (bool)
-		case "LegacyProtocol":
+			// t.PayCh (address.Address) (struct)
+		case "PayCh":
 
-			maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
-			if err != nil {
-				return err
-			}
-			if maj != cbg.MajOther {
-				return fmt.Errorf("booleans must be major type 7")
-			}
-			switch extra {
-			case 20:
-				t.LegacyProtocol = false
-			case 21:
-				t.LegacyProtocol = true
-			default:
-				return fmt.Errorf("booleans are either major type 7, value 20 or 21 (got %d)", extra)
+			{
+
+				b, err := br.ReadByte()
+				if err != nil {
+					return err
+				}
+				if b != cbg.CborNull[0] {
+					if err := br.UnreadByte(); err != nil {
+						return err
+					}
+					t.PayCh = new(address.Address)
+					if err := t.PayCh.UnmarshalCBOR(br); err != nil {
+						return xerrors.Errorf("unmarshaling t.PayCh pointer: %w", err)
+					}
+				}
+
 			}
 
 		default:

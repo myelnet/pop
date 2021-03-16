@@ -99,6 +99,14 @@ func (p *mockPayments) SetChannelAvailableFunds(funds payments.AvailableFunds) {
 	p.chFunds = &chFunds
 }
 
+func (p *mockPayments) Settle(ctx context.Context, addr address.Address) error {
+	return nil
+}
+
+func (p *mockPayments) StartAutoCollect(ctx context.Context) error {
+	return nil
+}
+
 type mockStoreIDGetter struct {
 	id  multistore.StoreID
 	err error

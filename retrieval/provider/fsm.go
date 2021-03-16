@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -91,16 +92,18 @@ var FSMEvents = fsm.Events{
 		Action(recordError),
 	fsm.Event(EventPartialPaymentReceived).
 		FromMany(deal.StatusFundsNeeded, deal.StatusFundsNeededLastPayment).ToNoChange().
-		Action(func(ds *deal.ProviderState, fundsReceived abi.TokenAmount) error {
+		Action(func(ds *deal.ProviderState, fundsReceived abi.TokenAmount, ch address.Address) error {
 			ds.FundsReceived = big.Add(ds.FundsReceived, fundsReceived)
+			ds.PayCh = &ch
 			return nil
 		}),
 	fsm.Event(EventPaymentReceived).
 		From(deal.StatusFundsNeeded).To(deal.StatusOngoing).
 		From(deal.StatusFundsNeededLastPayment).To(deal.StatusFinalizing).
-		Action(func(ds *deal.ProviderState, fundsReceived abi.TokenAmount) error {
+		Action(func(ds *deal.ProviderState, fundsReceived abi.TokenAmount, ch address.Address) error {
 			ds.FundsReceived = big.Add(ds.FundsReceived, fundsReceived)
 			ds.CurrentInterval += ds.PaymentIntervalIncrease
+			ds.PayCh = &ch
 			return nil
 		}),
 
