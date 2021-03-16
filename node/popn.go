@@ -72,6 +72,12 @@ var ErrDAGNotPacked = errors.New("DAG not packed")
 // ErrNodeNotFound is returned when we cannot find the node in the given root
 var ErrNodeNotFound = errors.New("node not found")
 
+// ErrQuoteNotFound is returned when we are trying to store but couldn't get a quote
+var ErrQuoteNotFound = errors.New("quote not found")
+
+// ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
+var ErrInvalidPeer = errors.New("invalid peer ID or address")
+
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -111,6 +117,9 @@ type node struct {
 
 	mu     sync.Mutex
 	notify func(Notify)
+
+	qmu    sync.Mutex // mutex for the storage quote
+	sQuote *storage.Quote
 }
 
 // New puts together all the components of the ipfs node
@@ -307,7 +316,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 		}
 		return
 	}
-	sendErr(fmt.Errorf("must be a valid id address or peer id"))
+	sendErr(ErrInvalidPeer)
 }
 
 func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
@@ -495,7 +504,7 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(ErrFilecoinRPCOffline)
 		return
 	}
-	com, err := nd.getCommit(args.Commit)
+	com, err := nd.getCommit(args.Ref)
 	if err != nil {
 		sendErr(err)
 		return
@@ -504,20 +513,26 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		PieceSize: uint64(com.PieceSize),
 		Duration:  args.Duration,
 		RF:        args.StorageRF,
+		MaxPrice:  args.MaxPrice,
 	})
+	nd.qmu.Lock()
+	nd.sQuote = quote
+	nd.qmu.Unlock()
+
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	var miners []string
+	quotes := make(map[string]string)
 	for _, m := range quote.Miners {
-		miners = append(miners, m.String())
+		addr := m.Info.Address
+		quotes[addr.String()] = quote.Prices[addr].String()
 	}
 
 	nd.send(Notify{
 		QuoteResult: &QuoteResult{
-			Miners: miners,
-			Price:  quote.Total.String(),
+			Ref:    com.PayloadCID.String(),
+			Quotes: quotes,
 		},
 	})
 }
@@ -537,6 +552,23 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		return
 	}
 
+	nd.qmu.Lock()
+	if nd.sQuote == nil {
+		nd.qmu.Unlock()
+		sendErr(ErrQuoteNotFound)
+		return
+	}
+	quote := nd.sQuote
+	nd.qmu.Unlock()
+
+	var miners []storage.Miner
+	for _, m := range quote.Miners {
+		addr := m.Info.Address
+		if args.Miners[addr.String()] {
+			miners = append(miners, m)
+		}
+	}
+
 	if !args.CacheOnly && args.StorageRF > 0 {
 		if !nd.exch.IsFilecoinOnline() {
 			sendErr(ErrFilecoinRPCOffline)
@@ -546,7 +578,7 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			com.PayloadCID,
 			args.Duration,
 			nd.exch.Wallet().DefaultAddress(),
-			args.StorageRF,
+			miners,
 		))
 		if err != nil {
 			sendErr(err)

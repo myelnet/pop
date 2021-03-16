@@ -37,9 +37,10 @@ type PackArgs struct {
 
 // QuoteArgs are passed to the quote command
 type QuoteArgs struct {
-	Commit    string
+	Ref       string
 	StorageRF int // StorageRF is the replication factor or number of miners we will try to store with
 	Duration  time.Duration
+	MaxPrice  uint64
 }
 
 // PushArgs are passed to the Push command
@@ -50,6 +51,7 @@ type PushArgs struct {
 	CacheRF   int // CacheRF is the cache replication factor or number of cache provider will request
 	StorageRF int // StorageRF if the replication factor for storage
 	Duration  time.Duration
+	Miners    map[string]bool
 }
 
 // GetArgs get passed to the Get command
@@ -108,8 +110,8 @@ type PackResult struct {
 
 // QuoteResult returns the output of the Quote request
 type QuoteResult struct {
-	Miners []string
-	Price  string
+	Ref    string
+	Quotes map[string]string
 	Err    string
 }
 

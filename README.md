@@ -34,7 +34,7 @@ As a CLI:
 
 clone the repo then run:
 ```commandline
-$ make install
+$ make
 ```
 
 As a library:
@@ -55,12 +55,10 @@ This CLI is still under active development. Commands and flags will
 change in the future.
 
 SUBCOMMANDS
-  init    Creates a new IPFS repo with a config file
   start   Starts an IPFS daemon
   ping    Ping the local daemon or a given peer
   add     Add a file to the working DAG
   status  Print the state of the working DAG
-  quote   Get a storage price quote for a given content commit
   pack    Pack the current index into a DAG archive
   push    Push a DAG archive to storage
   get     Retrieve content from the network
