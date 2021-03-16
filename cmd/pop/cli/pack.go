@@ -46,7 +46,7 @@ func runCommit(ctx context.Context, args []string) error {
 		buf := bytes.NewBuffer(nil)
 		fmt.Fprintf(buf, "==> Packed workdag into single dag for transport\n")
 		w := new(tabwriter.Writer)
-		w.Init(buf, 0, 4, 0, '\t', 0)
+		w.Init(buf, 0, 4, 2, ' ', 0)
 		fmt.Fprintf(
 			w,
 			"Data\t%s\t%s\t\n",

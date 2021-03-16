@@ -3,6 +3,7 @@ module github.com/myelnet/pop
 go 1.14
 
 require (
+	github.com/AlecAivazis/survey/v2 v2.2.9
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/filecoin-project/go-address v0.0.5-0.20201103152444-f2023ef3f5bb
 	github.com/filecoin-project/go-amt-ipld/v2 v2.1.1-0.20201006184820-924ee87a1349 // indirect

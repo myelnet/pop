@@ -27,20 +27,17 @@ func Run(args []string) error {
 	rootCmd := &ffcli.Command{
 		Name:       "pop",
 		ShortUsage: "pop subcommand [flags]",
-		ShortHelp:  "Content delivery network for the web3.0.",
+		ShortHelp:  "Manage your Myel point of presence from the command line",
 		LongHelp: strings.TrimSpace(`
 This CLI is still under active development. Commands and flags will
-change in the future. To get started run 'pop init' to create a new repo for
-storing your data.
+change in the future. To get started run 'pop start'.
 `),
 		Subcommands: []*ffcli.Command{
-			initCmd,
 			startCmd,
 			pingCmd,
 			addCmd,
 			statusCmd,
 			packCmd,
-			quoteCmd,
 			pushCmd,
 			getCmd,
 		},
