@@ -72,6 +72,12 @@ var ErrDAGNotPacked = errors.New("DAG not packed")
 // ErrNodeNotFound is returned when we cannot find the node in the given root
 var ErrNodeNotFound = errors.New("node not found")
 
+// ErrQuoteNotFound is returned when we are trying to store but couldn't get a quote
+var ErrQuoteNotFound = errors.New("quote not found")
+
+// ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
+var ErrInvalidPeer = errors.New("invalid peer ID or address")
+
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -310,7 +316,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 		}
 		return
 	}
-	sendErr(fmt.Errorf("must be a valid id address or peer id"))
+	sendErr(ErrInvalidPeer)
 }
 
 func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
@@ -549,7 +555,7 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 	nd.qmu.Lock()
 	if nd.sQuote == nil {
 		nd.qmu.Unlock()
-		sendErr(errors.New("no quote available"))
+		sendErr(ErrQuoteNotFound)
 		return
 	}
 	quote := nd.sQuote
