@@ -197,6 +197,14 @@ func New(
 	dt.SubscribeToEvents(provider.DataTransferSubscriber(p.stateMachines))
 	dt.SubscribeToEvents(client.DataTransferSubscriber(c.stateMachines))
 
+	// TODO: might want to use the cleanup function returned
+	SettlePaymentChannels(ctx, pay, p)
+
+	// Retrievals run the payment channel collection routine
+	if err := pay.StartAutoCollect(ctx); err != nil {
+		return nil, err
+	}
+
 	return &Retrieval{c, p}, nil
 }
 
@@ -279,4 +287,24 @@ func (c *Client) TryRestartInsufficientFunds(chAddr address.Address) error {
 		}
 	}
 	return nil
+}
+
+// SettlePaymentChannels subscribes to provider deals and tries to settle payments after any transfer
+// gets into a final state
+func SettlePaymentChannels(ctx context.Context, pay payments.Manager, pro *Provider) Unsubscribe {
+	return pro.SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
+		switch state.Status {
+		// In any of those cases we might be able to collect some funds
+		// since we may have received some vouchers
+		case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
+			// If state.PayCh isn't nil we should have some vouchers to redeem
+			if state.PayCh != nil {
+				err := pay.Settle(ctx, *state.PayCh)
+				if err != nil {
+					fmt.Printf("settling payment channel: %v\n", err)
+				}
+			}
+			return
+		}
+	})
 }

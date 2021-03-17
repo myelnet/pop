@@ -2,10 +2,14 @@ package payments
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -24,6 +28,8 @@ type Manager interface {
 	AllocateLane(context.Context, address.Address) (uint64, error)
 	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
 	ChannelAvailableFunds(address.Address) (*AvailableFunds, error)
+	Settle(context.Context, address.Address) error
+	StartAutoCollect(context.Context) error
 }
 
 // Payments is our full payment system, it manages payment channels,
@@ -37,10 +43,13 @@ type Payments struct {
 
 	lk       sync.RWMutex
 	channels map[string]*channel
+
+	stopmu sync.Mutex
+	stop   chan struct{}
 }
 
 // New creates a new instance of payments manager
-func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, cbors *cbor.BasicIpldStore) Manager {
+func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, cbors *cbor.BasicIpldStore) *Payments {
 	store := NewStore(ds)
 	return &Payments{
 		ctx:      ctx,
@@ -168,6 +177,214 @@ func (p *Payments) AddVoucherInbound(ctx context.Context, chAddr address.Address
 	ch.lk.Lock()
 	defer ch.lk.Unlock()
 	return ch.addVoucherUnlocked(ctx, chAddr, sv, minDelta)
+}
+
+// SubmitVoucher gets a channel from the store and submits a new voucher to the chain
+func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *paych.SignedVoucher, secret []byte, proof []byte) (cid.Cid, error) {
+	if len(proof) > 0 {
+		return cid.Undef, fmt.Errorf("err proof not supported")
+	}
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return cid.Undef, err
+	}
+	return ch.submitVoucher(ctx, addr, sv, secret)
+}
+
+// Settle a given channel and submits relevant vouchers then return the successfully submitted voucher
+func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return err
+	}
+	best, err := p.bestSpendableByLane(ctx, addr)
+	if err != nil {
+		return err
+	}
+	if len(best) == 0 {
+		// If we have no vouchers to redeem it's probably not worth settling
+		return errors.New("no vouchers to redeem")
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(best) + 1)
+
+	// We send our settle message at the same time as our voucher update messages
+	// hopefully they get on chain at the same time
+	mcid, err := ch.settle(ctx, addr)
+	if err != nil {
+		return err
+	}
+	// cancelling the context will timeout the wait function and all our goroutines will return
+	go func(sc cid.Cid) {
+		defer wg.Done()
+		lookup, err := p.api.StateWaitMsg(ctx, sc, uint64(5))
+		if err != nil {
+			fmt.Printf("settling payment channel %s failed: %v\n", addr, err)
+			return
+		}
+		if lookup.Receipt.ExitCode != 0 {
+			fmt.Printf("payment channel %s execution failed with code: %d\n", addr, lookup.Receipt.ExitCode)
+		}
+	}(mcid)
+
+	// I think all lanes should be merged so we might only get a single message but just in case
+	// we iterate over all the vouchers
+	for _, voucher := range best {
+		mcid, err := ch.submitVoucher(ctx, addr, voucher, nil)
+		if err != nil {
+			fmt.Printf("unable to submit voucher: %v\n", err)
+			continue
+		}
+		go func(vouch *paych.SignedVoucher, mcid cid.Cid) {
+			defer wg.Done()
+			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
+			if err != nil {
+				fmt.Printf("waiting for voucher to submit on channel %s: %v\n", addr, err)
+				return
+			}
+			if lookup.Receipt.ExitCode != 0 {
+				fmt.Printf("voucher update execution failed for channel %s with code %d\n", addr, lookup.Receipt.ExitCode)
+			}
+		}(voucher, mcid)
+	}
+	go func() {
+		// Wait to settle and send the last vouchers then we save the collection epoch
+		wg.Wait()
+		state, err := ch.loadActorState(addr)
+		if err != nil {
+			fmt.Printf("loading actor state: %v\n", err)
+			return
+		}
+		ci, err := p.store.ByAddress(addr)
+		if err != nil {
+			return
+		}
+		ep, err := state.SettlingAt()
+		if err != nil {
+			return
+		}
+		p.store.SetChannelSettlingAt(ci, ep)
+	}()
+	return nil
+}
+
+// StartAutoCollect is a routine that ticks every epoch and tries to collect settling payment channels
+// called usually at startup
+func (p *Payments) StartAutoCollect(ctx context.Context) error {
+	if p.api == nil {
+		return nil
+	}
+	// TODO: we may want to load all channel info into memory to avoid reading from the store every 30s
+	go p.collectLoop(ctx)
+	return nil
+}
+
+// collectLoop is the collection routine
+func (p *Payments) collectLoop(ctx context.Context) {
+	p.stopmu.Lock()
+	if p.stop != nil {
+		return // already running
+	}
+	p.stop = make(chan struct{})
+	p.stopmu.Unlock()
+
+	head, err := p.api.ChainHead(ctx)
+	if err != nil {
+		return
+	}
+	epoch := head.Height()
+	for {
+		select {
+		case <-time.Tick(builtin.EpochDurationSeconds * time.Second):
+			epoch++
+			p.collectForEpoch(ctx, epoch)
+
+			// We've prob lost sync with the clock so let's query again just in case
+			head, err := p.api.ChainHead(ctx)
+			// no need to fail the whole routine if the request fails once in a while
+			if err != nil {
+				fmt.Printf("%v\n", err)
+				continue
+			}
+			epoch = head.Height()
+
+		case <-ctx.Done():
+			return
+		case <-p.stop:
+			return
+		}
+	}
+}
+
+// collectForEpoch tries to collect any channel matching with the epoch
+func (p *Payments) collectForEpoch(ctx context.Context, epoch abi.ChainEpoch) error {
+	settling, err := p.store.ListSettlingChannels()
+	if err != nil || len(settling) == 0 {
+		return err
+	}
+	for _, sci := range settling {
+		if sci.SettlingAt < epoch {
+			// Using ByFromTo to avoid another store read
+			ch, err := p.channelByFromTo(sci.Control, sci.Target)
+			if err != nil {
+				return err
+			}
+			mcid, err := ch.collect(ctx, *sci.Channel)
+			if err != nil {
+				return err
+			}
+			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
+			if err != nil {
+				return fmt.Errorf("waiting to collect channel %s: %v", sci.Channel, err)
+			}
+			if lookup.Receipt.ExitCode != 0 {
+				return fmt.Errorf("collecting channel %s failed with code %d", sci.Channel, lookup.Receipt.ExitCode)
+			}
+			if lookup.Receipt.ExitCode == 0 {
+				ch.mutateChannelInfo(sci.ChannelID, func(ci *ChannelInfo) {
+					ci.Settling = false
+				})
+			}
+
+		}
+	}
+	return nil
+}
+
+// CheckVoucherSpendable checks if the given voucher is currently spendable
+func (p *Payments) CheckVoucherSpendable(ctx context.Context, addr address.Address, sv *paych.SignedVoucher, secret []byte, proof []byte) (bool, error) {
+	// Voucher can take proofs with a secret allowing to send vouchers securely without giving authorization
+	//  to spend them unless the secret is communicated separately
+	if len(proof) > 0 {
+		return false, fmt.Errorf("proof not supported yet")
+	}
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return false, err
+	}
+
+	return ch.checkVoucherSpendable(ctx, addr, sv, secret)
+}
+
+// bestSpendableByLane only returns the merged vouchers for each lane
+func (p *Payments) bestSpendableByLane(ctx context.Context, ch address.Address) (map[uint64]*paych.SignedVoucher, error) {
+	vouchers, err := p.ListVouchers(ctx, ch)
+	if err != nil {
+		return nil, err
+	}
+
+	bestByLane := make(map[uint64]*paych.SignedVoucher)
+	for _, vi := range vouchers {
+		spendable, err := p.CheckVoucherSpendable(ctx, ch, vi.Voucher, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		if spendable && (bestByLane[vi.Voucher.Lane] == nil || vi.Voucher.Amount.GreaterThan(bestByLane[vi.Voucher.Lane].Amount)) {
+			bestByLane[vi.Voucher.Lane] = vi.Voucher
+		}
+	}
+	return bestByLane, nil
 }
 
 // inboundChannel gets an accessor for the given channel. The channel

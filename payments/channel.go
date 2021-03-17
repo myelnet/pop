@@ -1065,6 +1065,47 @@ func (ch *channel) listVouchers(ctx context.Context, chAddr address.Address) ([]
 	return ch.store.VouchersForPaych(chAddr)
 }
 
+// checkVoucherSpendable runs a state change on the api to verify the call will succeed before sending on chain
+func (ch *channel) checkVoucherSpendable(ctx context.Context, addr address.Address, sv *paych.SignedVoucher, secret []byte) (bool, error) {
+	ch.lk.Lock()
+	defer ch.lk.Unlock()
+
+	ci, err := ch.store.ByAddress(addr)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if voucher has already been submitted
+	submitted, err := ci.wasVoucherSubmitted(sv)
+	if err != nil {
+		return false, err
+	}
+	if submitted {
+		return false, nil
+	}
+
+	mb, err := ch.messageBuilder(ctx, ch.to)
+	if err != nil {
+		return false, err
+	}
+
+	mes, err := mb.Update(addr, sv, secret)
+	if err != nil {
+		return false, err
+	}
+
+	ret, err := ch.api.StateCall(ctx, mes, filecoin.EmptyTSK)
+	if err != nil {
+		return false, err
+	}
+
+	if ret.MsgRct.ExitCode != 0 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 // settle the given channel by sending a Settle message to the chain
 func (ch *channel) settle(ctx context.Context, chAddr address.Address) (cid.Cid, error) {
 	ch.lk.Lock()
