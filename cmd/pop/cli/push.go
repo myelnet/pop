@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -51,81 +52,32 @@ func runPush(ctx context.Context, args []string) error {
 	if pushArgs.noCache && pushArgs.cacheOnly {
 		return errors.New("no-cache and cache-only are incompatible")
 	}
-	c, cc, ctx, cancel := connect(ctx)
-	defer cancel()
-
-	prc := make(chan *node.PushResult, 1)
-	qrc := make(chan *node.QuoteResult, 1)
-	cc.SetNotifyCallback(func(n node.Notify) {
-		if pr := n.PushResult; pr != nil {
-			prc <- pr
-		}
-		if qr := n.QuoteResult; qr != nil {
-			qrc <- qr
-		}
-	})
-	go receive(ctx, cc, c)
 
 	ref := ""
 	if len(args) > 0 {
 		ref = args[0]
 	}
 
-	fmt.Printf("Calculating storage price...\n")
+	c, cc, ctx, cancel := connect(ctx)
+	defer cancel()
 
-	cc.Quote(&node.QuoteArgs{
-		Ref:       ref,
-		Duration:  pushArgs.duration,
-		StorageRF: pushArgs.storageRF,
-		MaxPrice:  pushArgs.maxPrice,
+	prc := make(chan *node.PushResult, 1)
+	cc.SetNotifyCallback(func(n node.Notify) {
+		if pr := n.PushResult; pr != nil {
+			prc <- pr
+		}
 	})
+	go receive(ctx, cc, c)
 
-	miners := make(map[string]bool)
-	select {
-	case qr := <-qrc:
-		if qr.Err != "" {
-			return errors.New(qr.Err)
-		}
-		var selectn []string
-		var options []string
-		for k, p := range qr.Quotes {
-			options = append(options, fmt.Sprintf("%s - %s", k, p))
-		}
-		sel := &survey.MultiSelect{
-			Message: "Pick miners to store with",
-			Options: options,
-		}
-		survey.AskOne(sel, &selectn)
-		if len(selectn) == 0 {
-			return errors.New("push aborted")
-		}
-		total := fil.NewInt(0)
+	var miners map[string]bool
+	var err error
 
-		for _, k := range selectn {
-			sp := strings.Split(k, " - ")
-			miners[sp[0]] = true
-			f, err := fil.ParseFIL(sp[1])
-			if err != nil {
-				return err
-			}
-			total = fil.BigAdd(fil.BigInt(f), total)
+	// When only pushing content to caches we don't ask for a quote
+	if !pushArgs.cacheOnly {
+		miners, err = runQuote(ctx, c, cc, ref)
+		if err != nil {
+			return err
 		}
-		exec := false
-		conf := &survey.Confirm{
-			Message: fmt.Sprintf(
-				"Store %s during %s for %s?",
-				qr.Ref,
-				pushArgs.duration,
-				fil.FIL(total).String(),
-			),
-		}
-		survey.AskOne(conf, &exec)
-		if !exec {
-			return errors.New("push aborted")
-		}
-
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 
 	cc.Push(&node.PushArgs{
@@ -159,4 +111,72 @@ func runPush(ctx context.Context, args []string) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func runQuote(ctx context.Context, c net.Conn, cc *node.CommandClient, ref string) (map[string]bool, error) {
+	qrc := make(chan *node.QuoteResult, 1)
+	cc.SetNotifyCallback(func(n node.Notify) {
+		if qr := n.QuoteResult; qr != nil {
+			qrc <- qr
+		}
+	})
+	go receive(ctx, cc, c)
+
+	fmt.Printf("Calculating storage price...\n")
+
+	cc.Quote(&node.QuoteArgs{
+		Ref:       ref,
+		Duration:  pushArgs.duration,
+		StorageRF: pushArgs.storageRF,
+		MaxPrice:  pushArgs.maxPrice,
+	})
+
+	miners := make(map[string]bool)
+	select {
+	case qr := <-qrc:
+		if qr.Err != "" {
+			return nil, errors.New(qr.Err)
+		}
+		var selectn []string
+		var options []string
+		for k, p := range qr.Quotes {
+			options = append(options, fmt.Sprintf("%s - %s", k, p))
+		}
+		sel := &survey.MultiSelect{
+			Message: "Pick miners to store with",
+			Options: options,
+		}
+		survey.AskOne(sel, &selectn)
+		if len(selectn) == 0 {
+			return nil, errors.New("push aborted")
+		}
+		total := fil.NewInt(0)
+
+		for _, k := range selectn {
+			sp := strings.Split(k, " - ")
+			miners[sp[0]] = true
+			f, err := fil.ParseFIL(sp[1])
+			if err != nil {
+				return nil, err
+			}
+			total = fil.BigAdd(fil.BigInt(f), total)
+		}
+		exec := false
+		conf := &survey.Confirm{
+			Message: fmt.Sprintf(
+				"Store %s during %s for %s?",
+				qr.Ref,
+				pushArgs.duration,
+				fil.FIL(total).String(),
+			),
+		}
+		survey.AskOne(conf, &exec)
+		if !exec {
+			return nil, errors.New("push aborted")
+		}
+
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return miners, nil
 }
