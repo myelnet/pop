@@ -552,28 +552,29 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		return
 	}
 
-	nd.qmu.Lock()
-	if nd.sQuote == nil {
-		nd.qmu.Unlock()
-		sendErr(ErrQuoteNotFound)
-		return
-	}
-	quote := nd.sQuote
-	nd.qmu.Unlock()
-
-	var miners []storage.Miner
-	for _, m := range quote.Miners {
-		addr := m.Info.Address
-		if args.Miners[addr.String()] {
-			miners = append(miners, m)
-		}
-	}
-
 	if !args.CacheOnly && args.StorageRF > 0 {
 		if !nd.exch.IsFilecoinOnline() {
 			sendErr(ErrFilecoinRPCOffline)
 			return
 		}
+
+		nd.qmu.Lock()
+		if nd.sQuote == nil {
+			nd.qmu.Unlock()
+			sendErr(ErrQuoteNotFound)
+			return
+		}
+		quote := nd.sQuote
+		nd.qmu.Unlock()
+
+		var miners []storage.Miner
+		for _, m := range quote.Miners {
+			addr := m.Info.Address
+			if args.Miners[addr.String()] {
+				miners = append(miners, m)
+			}
+		}
+
 		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
 			com.PayloadCID,
 			args.Duration,
@@ -728,6 +729,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		discDuration = now.Sub(start)
 	}
 	if offer == nil {
+		// Gossip discovery shouldn't last more than 5 seconds
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 		offer, err = session.QueryGossip(ctx)
 		if err != nil {
 			return err

@@ -50,6 +50,14 @@ var (
 		Name: "Asia",
 		Code: AsiaRegion,
 		PPB:  abi.NewTokenAmount(1),
+		StorageMiners: []string{
+			"f0159961", // (China)
+			"f0242152", // (Korea)
+			"f0225676", // (Korea)
+			"f0165539", // (Japan)
+			"f0216138", // (China)
+			"f01272",   // StorSwift (China)
+		},
 	}
 	africa = Region{
 		Name: "Africa",
@@ -100,6 +108,7 @@ var (
 			"f02576",  // BenjaminH
 			"f023467", // PhiMining (Norway)
 			"f03624",  // ode (Germany)
+			"f062353", // P (Germany)
 			"f081323", // Midland UK
 			"f08403",  // TippyFlits (UK)
 			"f010446", // (Belgium)
