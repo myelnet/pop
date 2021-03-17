@@ -69,13 +69,27 @@ func runGet(ctx context.Context, args []string) error {
 			if gr.Err != "" {
 				return errors.New(gr.Err)
 			}
-			if gr.DealID != "" {
-				fmt.Printf("Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalPrice, gr.PricePerByte)
+			if gr.DealID != "" && gr.TotalPrice == "0" {
+				fmt.Printf("==> Started free transfer\n")
 				continue
 			}
+			if gr.DealID != "" {
+				fmt.Printf("==> Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalPrice, gr.PricePerByte)
+				continue
+			}
+			if gr.Local {
+				fmt.Printf("Blocks already in store\n")
+				return nil
+			}
 
-			fmt.Printf("Completed transfer")
-			fmt.Printf("Discovery: %fs, Transfer: %fs, Total: %fs", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
+			fmt.Printf("==> Completed\n")
+			if gr.TotalPrice != "0" {
+				fmt.Printf("Discovery: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
+			}
+
+			if getArgs.output != "" {
+				fmt.Printf("==> Exported content to disk\n")
+			}
 			return nil
 		case <-ctx.Done():
 			return fmt.Errorf("Get operation timed out")
