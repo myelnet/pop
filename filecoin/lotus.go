@@ -28,6 +28,7 @@ type LotusAPI struct {
 		StateDealProviderCollateralBounds func(context.Context, abi.PaddedPieceSize, bool, TipSetKey) (DealCollateralBounds, error)
 		StateMinerInfo                    func(context.Context, address.Address, TipSetKey) (MinerInfo, error)
 		StateMinerProvingDeadline         func(context.Context, address.Address, TipSetKey) (*dline.Info, error)
+		StateCall                         func(context.Context, *Message, TipSetKey) (*InvocResult, error)
 		ChainReadObj                      func(context.Context, cid.Cid) ([]byte, error)
 		ChainGetMessage                   func(context.Context, cid.Cid) (*Message, error)
 	}
@@ -101,6 +102,10 @@ func (a *LotusAPI) StateMinerInfo(ctx context.Context, addr address.Address, tsk
 
 func (a *LotusAPI) StateMinerProvingDeadline(ctx context.Context, addr address.Address, tsk TipSetKey) (*dline.Info, error) {
 	return a.Methods.StateMinerProvingDeadline(ctx, addr, tsk)
+}
+
+func (a *LotusAPI) StateCall(ctx context.Context, msg *Message, tsk TipSetKey) (*InvocResult, error) {
+	return a.Methods.StateCall(ctx, msg, tsk)
 }
 
 func (a *LotusAPI) ChainReadObj(ctx context.Context, c cid.Cid) ([]byte, error) {

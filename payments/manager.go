@@ -49,7 +49,7 @@ type Payments struct {
 }
 
 // New creates a new instance of payments manager
-func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, cbors *cbor.BasicIpldStore) Manager {
+func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, cbors *cbor.BasicIpldStore) *Payments {
 	store := NewStore(ds)
 	return &Payments{
 		ctx:      ctx,
@@ -179,13 +179,24 @@ func (p *Payments) AddVoucherInbound(ctx context.Context, chAddr address.Address
 	return ch.addVoucherUnlocked(ctx, chAddr, sv, minDelta)
 }
 
+// SubmitVoucher gets a channel from the store and submits a new voucher to the chain
+func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *paych.SignedVoucher, secret []byte, proof []byte) (cid.Cid, error) {
+	if len(proof) > 0 {
+		return cid.Undef, fmt.Errorf("err proof not supported")
+	}
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return cid.Undef, err
+	}
+	return ch.submitVoucher(ctx, addr, sv, secret)
+}
+
 // Settle a given channel and submits relevant vouchers then return the successfully submitted voucher
 func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 	ch, err := p.channelByAddress(addr)
 	if err != nil {
 		return err
 	}
-	var redeemedVch []*paych.SignedVoucher
 	best, err := p.bestSpendableByLane(ctx, addr)
 	if err != nil {
 		return err
@@ -210,6 +221,7 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 		lookup, err := p.api.StateWaitMsg(ctx, sc, uint64(5))
 		if err != nil {
 			fmt.Printf("settling payment channel %s failed: %v\n", addr, err)
+			return
 		}
 		if lookup.Receipt.ExitCode != 0 {
 			fmt.Printf("payment channel %s execution failed with code: %d\n", addr, lookup.Receipt.ExitCode)
@@ -229,11 +241,11 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
 			if err != nil {
 				fmt.Printf("waiting for voucher to submit on channel %s: %v\n", addr, err)
+				return
 			}
 			if lookup.Receipt.ExitCode != 0 {
 				fmt.Printf("voucher update execution failed for channel %s with code %d\n", addr, lookup.Receipt.ExitCode)
 			}
-			redeemedVch = append(redeemedVch, vouch)
 		}(voucher, mcid)
 	}
 	go func() {
@@ -292,6 +304,7 @@ func (p *Payments) collectLoop(ctx context.Context) {
 			head, err := p.api.ChainHead(ctx)
 			// no need to fail the whole routine if the request fails once in a while
 			if err != nil {
+				fmt.Printf("%v\n", err)
 				continue
 			}
 			epoch = head.Height()
@@ -311,7 +324,7 @@ func (p *Payments) collectForEpoch(ctx context.Context, epoch abi.ChainEpoch) er
 		return err
 	}
 	for _, sci := range settling {
-		if sci.SettlingAt >= epoch {
+		if sci.SettlingAt < epoch {
 			// Using ByFromTo to avoid another store read
 			ch, err := p.channelByFromTo(sci.Control, sci.Target)
 			if err != nil {
@@ -323,10 +336,10 @@ func (p *Payments) collectForEpoch(ctx context.Context, epoch abi.ChainEpoch) er
 			}
 			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
 			if err != nil {
-				fmt.Printf("waiting to collect channel %s: %v\n", sci.Channel, err)
+				return fmt.Errorf("waiting to collect channel %s: %v", sci.Channel, err)
 			}
 			if lookup.Receipt.ExitCode != 0 {
-				fmt.Printf("collecting channel %s failed with code %d\n", sci.Channel, lookup.Receipt.ExitCode)
+				return fmt.Errorf("collecting channel %s failed with code %d", sci.Channel, lookup.Receipt.ExitCode)
 			}
 			if lookup.Receipt.ExitCode == 0 {
 				ch.mutateChannelInfo(sci.ChannelID, func(ci *ChannelInfo) {
@@ -339,6 +352,21 @@ func (p *Payments) collectForEpoch(ctx context.Context, epoch abi.ChainEpoch) er
 	return nil
 }
 
+// CheckVoucherSpendable checks if the given voucher is currently spendable
+func (p *Payments) CheckVoucherSpendable(ctx context.Context, addr address.Address, sv *paych.SignedVoucher, secret []byte, proof []byte) (bool, error) {
+	// Voucher can take proofs with a secret allowing to send vouchers securely without giving authorization
+	//  to spend them unless the secret is communicated separately
+	if len(proof) > 0 {
+		return false, fmt.Errorf("proof not supported yet")
+	}
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return false, err
+	}
+
+	return ch.checkVoucherSpendable(ctx, addr, sv, secret)
+}
+
 // bestSpendableByLane only returns the merged vouchers for each lane
 func (p *Payments) bestSpendableByLane(ctx context.Context, ch address.Address) (map[uint64]*paych.SignedVoucher, error) {
 	vouchers, err := p.ListVouchers(ctx, ch)
@@ -348,8 +376,11 @@ func (p *Payments) bestSpendableByLane(ctx context.Context, ch address.Address) 
 
 	bestByLane := make(map[uint64]*paych.SignedVoucher)
 	for _, vi := range vouchers {
-		// TODO: spendable, err := PaychVoucherCheckSpendable(ctx, ch, voucher, nil, nil)
-		if bestByLane[vi.Voucher.Lane] == nil || vi.Voucher.Amount.GreaterThan(bestByLane[vi.Voucher.Lane].Amount) {
+		spendable, err := p.CheckVoucherSpendable(ctx, ch, vi.Voucher, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		if spendable && (bestByLane[vi.Voucher.Lane] == nil || vi.Voucher.Amount.GreaterThan(bestByLane[vi.Voucher.Lane].Amount)) {
 			bestByLane[vi.Voucher.Lane] = vi.Voucher
 		}
 	}
