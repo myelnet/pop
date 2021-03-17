@@ -270,7 +270,7 @@ func (pr *ProviderRevalidator) processPayment(dealID deal.ProviderDealIdentifier
 
 	// check if all payments are received to continue the deal, or send updated required payment
 	if received.LessThan(paymentOwed) {
-		_ = pr.env.SendEvent(dealID, provider.EventPartialPaymentReceived, received)
+		_ = pr.env.SendEvent(dealID, provider.EventPartialPaymentReceived, received, payment.PaymentChannel)
 		return &deal.Response{
 			ID:          d.ID,
 			Status:      d.Status,
@@ -279,7 +279,7 @@ func (pr *ProviderRevalidator) processPayment(dealID deal.ProviderDealIdentifier
 	}
 
 	// resume deal
-	_ = pr.env.SendEvent(dealID, provider.EventPaymentReceived, received)
+	_ = pr.env.SendEvent(dealID, provider.EventPaymentReceived, received, payment.PaymentChannel)
 	if d.Status == deal.StatusFundsNeededLastPayment {
 		return &deal.Response{
 			ID:     d.ID,

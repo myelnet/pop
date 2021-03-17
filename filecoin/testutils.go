@@ -13,13 +13,14 @@ import (
 
 // MockLotusAPI is for testing purposes only
 type MockLotusAPI struct {
-	act        *Actor               // actor to return when calling StateGetActor
-	actState   *ActorState          // state returned when calling StateReadState
-	obj        []byte               // bytes returned when calling ChainReadObj
-	objReader  func(cid.Cid) []byte // bytes to return given a specific cid
-	msgLookup  chan *MsgLookup      // msgLookup to return when calling StateWaitMsg
-	accountKey address.Address      // address returned when calling StateAccountKey
-	lookupID   address.Address      // address returned when calling StateLookupID
+	act         *Actor               // actor to return when calling StateGetActor
+	actState    *ActorState          // state returned when calling StateReadState
+	obj         []byte               // bytes returned when calling ChainReadObj
+	objReader   func(cid.Cid) []byte // bytes to return given a specific cid
+	msgLookup   chan *MsgLookup      // msgLookup to return when calling StateWaitMsg
+	accountKey  address.Address      // address returned when calling StateAccountKey
+	lookupID    address.Address      // address returned when calling StateLookupID
+	invocResult *InvocResult         // invocResult returned when calling StateCall
 }
 
 func NewMockLotusAPI() *MockLotusAPI {
@@ -84,6 +85,10 @@ func (m *MockLotusAPI) StateMinerProvingDeadline(ctx context.Context, addr addre
 	return nil, nil
 }
 
+func (m *MockLotusAPI) StateCall(ctx context.Context, msg *Message, tsk TipSetKey) (*InvocResult, error) {
+	return m.invocResult, nil
+}
+
 func (m *MockLotusAPI) ChainGetMessage(ctx context.Context, c cid.Cid) (*Message, error) {
 	return nil, nil
 }
@@ -126,4 +131,8 @@ func (m *MockLotusAPI) SetAccountKey(addr address.Address) {
 // SetMsgLookup to release the StateWaitMsg request
 func (m *MockLotusAPI) SetMsgLookup(lkp *MsgLookup) {
 	m.msgLookup <- lkp
+}
+
+func (m *MockLotusAPI) SetInvocResult(i *InvocResult) {
+	m.invocResult = i
 }

@@ -199,7 +199,6 @@ type ClientState struct {
 	UnsealFundsPaid      abi.TokenAmount
 	WaitMsgCID           *cid.Cid // the CID of any message the client deal is waiting for
 	VoucherShortfall     abi.TokenAmount
-	LegacyProtocol       bool
 }
 
 // ProviderState is the current state of a deal from the point of view
@@ -215,7 +214,9 @@ type ProviderState struct {
 	FundsReceived   abi.TokenAmount
 	Message         string
 	CurrentInterval uint64
-	LegacyProtocol  bool
+	// Added PayCh field so we can get the reference to the payment channel
+	// in fsm event subscriber
+	PayCh *address.Address
 }
 
 // Identifier provides a unique id for this provider deal

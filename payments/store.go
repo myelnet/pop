@@ -6,6 +6,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
+	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin/paych"
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
@@ -301,12 +302,25 @@ func (s *Store) ListChannels() ([]address.Address, error) {
 	return addrs, nil
 }
 
+// ListSettlingChannels returns the addresses of all channels that need to be collected
+func (s *Store) ListSettlingChannels() ([]ChannelInfo, error) {
+	return s.findChans(func(ci *ChannelInfo) bool {
+		return ci.Settling
+	}, 0)
+}
+
 // MarkVoucherSubmitted sets the Submitted field to true on VoucherInfo and puts it in the store
 func (s *Store) MarkVoucherSubmitted(ci *ChannelInfo, sv *paych.SignedVoucher) error {
 	err := ci.markVoucherSubmitted(sv)
 	if err != nil {
 		return err
 	}
+	return s.putChannelInfo(ci)
+}
+
+// SetChannelSettlingAt sets the epoch value at which it can be collected
+func (s *Store) SetChannelSettlingAt(ci *ChannelInfo, ep abi.ChainEpoch) error {
+	ci.SettlingAt = ep
 	return s.putChannelInfo(ci)
 }
 
@@ -363,6 +377,8 @@ type ChannelInfo struct {
 	AddFundsMsg *cid.Cid
 	// Settling indicates whether the channel has entered into the settling state
 	Settling bool
+	// SettlingAt is the height at which the channel can be 'collected'
+	SettlingAt abi.ChainEpoch
 }
 
 // MsgInfo stores information about a create channel / add funds message

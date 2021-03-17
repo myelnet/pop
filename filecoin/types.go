@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -626,4 +627,63 @@ type MarketBalance struct {
 type DealCollateralBounds struct {
 	Min abi.TokenAmount
 	Max abi.TokenAmount
+}
+
+// InvocResult is returned when calling a state change on the Filecoin blockchain
+type InvocResult struct {
+	MsgCid         cid.Cid
+	Msg            *Message
+	MsgRct         *MessageReceipt
+	GasCost        MsgGasCost
+	ExecutionTrace ExecutionTrace
+	Error          string
+	Duration       time.Duration
+}
+
+// MsgGasCost is a breakdown of all the fees paid when running a transaction on chain
+type MsgGasCost struct {
+	Message            cid.Cid // Can be different than requested, in case it was replaced, but only gas values changed
+	GasUsed            abi.TokenAmount
+	BaseFeeBurn        abi.TokenAmount
+	OverEstimationBurn abi.TokenAmount
+	MinerPenalty       abi.TokenAmount
+	MinerTip           abi.TokenAmount
+	Refund             abi.TokenAmount
+	TotalCost          abi.TokenAmount
+}
+
+// ExecutionTrace is a tree of all the call results executed during a state transition
+type ExecutionTrace struct {
+	Msg        *Message
+	MsgRct     *MessageReceipt
+	Error      string
+	Duration   time.Duration
+	GasCharges []*GasTrace
+
+	Subcalls []ExecutionTrace
+}
+
+// Loc is a locater of source code reference
+type Loc struct {
+	File     string
+	Line     int
+	Function string
+}
+
+// GasTrace is more detailed explanation of gas computation
+type GasTrace struct {
+	Name string
+
+	Location          []Loc `json:"loc"`
+	TotalGas          int64 `json:"tg"`
+	ComputeGas        int64 `json:"cg"`
+	StorageGas        int64 `json:"sg"`
+	TotalVirtualGas   int64 `json:"vtg"`
+	VirtualComputeGas int64 `json:"vcg"`
+	VirtualStorageGas int64 `json:"vsg"`
+
+	TimeTaken time.Duration `json:"tt"`
+	Extra     interface{}   `json:"ex,omitempty"`
+
+	Callers []uintptr `json:"-"`
 }
