@@ -179,7 +179,7 @@ func (s *Supply) sendAllRequests(r Request, peers []peer.ID) {
 	}
 }
 
-// GetStoreID returns the StoreID of the store which has the content
+// GetStoreID returns the StoreID of the store which has the given content
 func (s *Supply) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
 	rec, err := s.man.GetRecord(id)
 	if err != nil {

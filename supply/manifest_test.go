@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	datatransfer "github.com/filecoin-project/go-data-transfer"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -49,9 +50,24 @@ func TestHandleRequest(t *testing.T) {
 	n2.SetupDataTransfer(bgCtx, t)
 	require.NoError(t, n2.Dt.RegisterVoucherType(&Request{}, &testutil.FakeDTValidator{}))
 
+	name := n1.CreateRandomFile(t, 256000)
+
 	// n1 is our client and is adding a file to the network
-	link, origBytes := n1.LoadUnixFSFileToStore(bgCtx, t, "/supply/readme.md")
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, name)
 	rootCid := link.(cidlink.Link).Cid
+
+	// Need to tell the data transfer manager which store to use
+	err = n1.Dt.RegisterTransportConfigurer(&Request{}, func(channelID datatransfer.ChannelID, voucher datatransfer.Voucher, transport datatransfer.Transport) {
+		gsTransport, ok := transport.(StoreConfigurableTransport)
+		if !ok {
+			return
+		}
+		store, err := n1.Ms.Get(storeID)
+		require.NoError(t, err)
+		err = gsTransport.UseStore(channelID, store.Loader, store.Storer)
+		require.NoError(t, err)
+	})
+	require.NoError(t, err)
 
 	// n2 is our provider and received a request from n1 (mocked in this test)
 	// it calls HandleAddRequest to maybe retrieve it from the client

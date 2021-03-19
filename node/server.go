@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/ipfs/go-datastore"
 	files "github.com/ipfs/go-ipfs-files"
-	ipldformat "github.com/ipfs/go-ipld-format"
 	ipath "github.com/ipfs/go-path"
 	"github.com/rs/zerolog/log"
 )
@@ -149,7 +149,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if we have the blocks locally
 	sID, err := s.node.exch.Supply().GetStoreID(root)
 	if err != nil {
-		if err == ipldformat.ErrNotFound {
+		if err == datastore.ErrNotFound {
 			// try to retrieve the blocks
 			err = s.node.get(r.Context(), root, &GetArgs{})
 			if err != nil {

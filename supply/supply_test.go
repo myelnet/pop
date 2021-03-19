@@ -23,8 +23,10 @@ func TestSendRequest(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
 
+	fname := n1.CreateRandomFile(t, 512000)
+
 	// n1 is our client is adding a file to the store
-	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, "/supply/readme.md")
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, fname)
 	rootCid := link.(cidlink.Link).Cid
 
 	regions := []Region{
@@ -87,7 +89,9 @@ func TestSendRequestNoPeers(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
 
-	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, "/supply/readme.md")
+	fname := n1.CreateRandomFile(t, 256000)
+
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, fname)
 	rootCid := link.(cidlink.Link).Cid
 
 	regions := []Region{
@@ -118,8 +122,10 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
 
+	fname := n1.CreateRandomFile(t, 512000)
+
 	// n1 is our client is adding a file to the store
-	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, "/supply/readme.md")
+	link, storeID, origBytes := n1.LoadFileToNewStore(bgCtx, t, fname)
 	rootCid := link.(cidlink.Link).Cid
 
 	asia := []Region{

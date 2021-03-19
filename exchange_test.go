@@ -52,7 +52,6 @@ func TestExchangeDirect(t *testing.T) {
 			for i := 0; i < 11; i++ {
 				n := testutil.NewTestNode(mn, t)
 				n.SetupGraphSync(ctx)
-				n.SetupTempRepo(t)
 				ps, err := pubsub.NewGossipSub(ctx, n.Host)
 				require.NoError(t, err)
 
@@ -84,7 +83,8 @@ func TestExchangeDirect(t *testing.T) {
 
 			require.NoError(t, mn.ConnectAllButSelf())
 
-			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, "/README.md")
+			fname := cnode.CreateRandomFile(t, 256000)
+			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
 
 			// In this test we expect the maximum of providers to receive the content
