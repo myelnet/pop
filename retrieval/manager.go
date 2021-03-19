@@ -181,7 +181,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	err = c.dataTransfer.RegisterVoucherType(&deal.Payment{}, nil)
+	err = dt.RegisterVoucherType(&deal.Payment{}, nil)
 	if err != nil {
 		return nil, err
 	}

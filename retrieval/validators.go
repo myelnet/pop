@@ -63,16 +63,6 @@ func (rv *ProviderRequestValidator) ValidatePull(receiver peer.ID, voucher datat
 		return nil, fmt.Errorf("wrong voucher type")
 	}
 
-	response, err := rv.validatePull(receiver, proposal, baseCid, selector)
-	if response == nil {
-		return nil, err
-	}
-
-	return response, err
-}
-
-func (rv *ProviderRequestValidator) validatePull(receiver peer.ID, proposal *deal.Proposal, baseCid cid.Cid, selector ipld.Node) (*deal.Response, error) {
-
 	if proposal.PayloadCID != baseCid {
 		return nil, fmt.Errorf("incorrect CID for this proposal")
 	}

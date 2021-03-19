@@ -5,12 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	dtimpl "github.com/filecoin-project/go-data-transfer/impl"
@@ -110,6 +111,8 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 	}
 	var err error
 
+	testNode.DTTmpDir = t.TempDir()
+
 	testNode.Ds = dss.MutexWrap(datastore.NewMapDatastore())
 
 	testNode.Bs = blockstore.NewBlockstore(testNode.Ds)
@@ -137,25 +140,11 @@ func (tn *TestNode) SetupGraphSync(ctx context.Context) {
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
 }
 
-func (tn *TestNode) SetupTempRepo(t *testing.T) {
-	var err error
-	tn.DTTmpDir, err = ioutil.TempDir("", "dt-tmp")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = os.RemoveAll(tn.DTTmpDir)
-	})
-}
-
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
 	var err error
 	tn.DTStoredCounter = storedcounter.New(tn.Ds, datastore.NewKey("nextDTID"))
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
 	tn.DTStore = namespace.Wrap(tn.Ds, datastore.NewKey("DataTransfer"))
-	tn.DTTmpDir, err = ioutil.TempDir("", "dt-tmp")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = os.RemoveAll(tn.DTTmpDir)
-	})
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
 	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs)
 	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTTmpDir, tn.DTNet, dtTransport, tn.DTStoredCounter)
@@ -174,41 +163,28 @@ func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
 	}
 }
 
+func (tn *TestNode) CreateRandomFile(t *testing.T, size int) string {
+	file, err := os.CreateTemp("", "data")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		defer os.Remove(file.Name())
+	})
+
+	data := make([]byte, size)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
+	_, err = file.Write(data)
+	require.NoError(t, err)
+
+	return file.Name()
+}
+
 const unixfsChunkSize uint64 = 1 << 10
 const unixfsLinksPerLevel = 1024
 
-func (tn *TestNode) LoadUnixFSFileToStore(ctx context.Context, t *testing.T, dirPath string) (ipld.Link, []byte) {
-	fpath, err := filepath.Abs(filepath.Join(ThisDir(t), "..", dirPath))
+func (tn *TestNode) ThisDir(t *testing.T, p string) string {
+	fpath, err := filepath.Abs(filepath.Join(ThisDir(t), "..", p))
 	require.NoError(t, err)
-
-	f, err := os.Open(fpath)
-	require.NoError(t, err)
-
-	var buf bytes.Buffer
-	tr := io.TeeReader(f, &buf)
-	file := files.NewReaderFile(tr)
-
-	// import to UnixFS
-	bufferedDS := ipldformat.NewBufferedDAG(ctx, tn.DAG)
-
-	params := helpers.DagBuilderParams{
-		Maxlinks:   unixfsLinksPerLevel,
-		RawLeaves:  true,
-		CidBuilder: nil,
-		Dagserv:    bufferedDS,
-	}
-
-	db, err := params.New(chunk.NewSizeSplitter(file, int64(unixfsChunkSize)))
-	require.NoError(t, err)
-
-	nd, err := balanced.Layout(db)
-	require.NoError(t, err)
-
-	err = bufferedDS.Commit()
-	require.NoError(t, err)
-
-	// save the original files bytes
-	return cidlink.Link{Cid: nd.Cid()}, buf.Bytes()
+	return fpath
 }
 
 func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t *testing.T, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
@@ -216,10 +192,7 @@ func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t *testing.T, dirPat
 	store, err := tn.Ms.Get(stID)
 	require.NoError(t, err)
 
-	fpath, err := filepath.Abs(filepath.Join(ThisDir(t), "..", dirPath))
-	require.NoError(t, err)
-
-	f, err := os.Open(fpath)
+	f, err := os.Open(dirPath)
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
