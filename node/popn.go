@@ -444,7 +444,7 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 		sendErr(err)
 		return
 	}
-	err = nd.exch.Supply().Register(ref.PayloadCID, uint64(ref.PayloadSize), ref.StoreID)
+	err = nd.exch.Supply().Register(ref.PayloadCID, ref.StoreID)
 	if err != nil {
 		sendErr(err)
 		return
@@ -606,14 +606,10 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		res, err := nd.exch.Supply().Dispatch(
-			supply.Request{
-				PayloadCID: com.PayloadCID,
-				Size:       uint64(com.PayloadSize),
-			},
-			supply.DispatchOptions{
-				StoreID: com.StoreID,
-			})
+		res, err := nd.exch.Supply().Dispatch(supply.Request{
+			PayloadCID: com.PayloadCID,
+			Size:       uint64(com.PayloadSize),
+		})
 		defer res.Close()
 		if err != nil {
 			sendErr(err)
@@ -774,7 +770,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			}
 		}
 		// Register new blocks in our supply by default
-		err = nd.exch.Supply().Register(c, offer.Response.Size, session.StoreID())
+		err = nd.exch.Supply().Register(c, session.StoreID())
 		if err != nil {
 			return err
 		}

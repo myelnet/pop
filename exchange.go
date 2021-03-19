@@ -97,7 +97,7 @@ type Exchange struct {
 
 	retrieval retrieval.Manager
 	net       retrieval.QueryNetwork
-	supply    supply.Manager
+	supply    *supply.Supply
 	wallet    wallet.Driver
 	fAPI      filecoin.API
 
@@ -222,7 +222,7 @@ func (e *Exchange) DataTransfer() datatransfer.Manager {
 }
 
 // Supply exposes the supply manager
-func (e *Exchange) Supply() supply.Manager {
+func (e *Exchange) Supply() *supply.Supply {
 	return e.supply
 }
 
