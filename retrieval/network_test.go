@@ -8,8 +8,8 @@ import (
 	cid "github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
-	"github.com/myelnet/pop/testutil"
 	"github.com/stretchr/testify/require"
 )
 

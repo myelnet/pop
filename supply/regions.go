@@ -146,3 +146,20 @@ var Regions = map[string]Region{
 	"Europe":       europe,
 	"Oceania":      oceania,
 }
+
+// ParseRegions converts region names to region structs
+func ParseRegions(list []string) []Region {
+	var regions []Region
+	for _, rstring := range list {
+		if r := Regions[rstring]; r.Name != "" {
+			regions = append(regions, r)
+			continue
+		}
+		// We also support custom regions if users want their own provider subnet
+		regions = append(regions, Region{
+			Name: rstring,
+			Code: CustomRegion,
+		})
+	}
+	return regions
+}
