@@ -3,9 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2"
 	"github.com/peterbourgon/ff/v2/ffcli"
@@ -57,7 +56,7 @@ The 'pop start' command starts a pop daemon service.
 		return fs
 	})(),
 	Options: (func() []ff.Option {
-		path, err := repoFullPath(getRepoPath())
+		path, err := utils.FullPath(utils.RepoPath())
 		if err != nil {
 			path = ""
 		}
@@ -130,16 +129,7 @@ Manage your Myel point of presence from the command line.
 		}
 	}()
 
-	var filToken string
-	if startArgs.FilToken != "" {
-		// Basic auth requires base64 encoding and Infura api provides unencoded strings
-		if startArgs.FilTokenType == "Basic" {
-			filToken = base64.StdEncoding.EncodeToString([]byte(startArgs.FilToken))
-		} else {
-			filToken = startArgs.FilToken
-		}
-		filToken = fmt.Sprintf("%s %s", startArgs.FilTokenType, filToken)
-	}
+	filToken := utils.FormatToken(startArgs.FilToken, startArgs.FilTokenType)
 
 	var bAddrs []string
 	if startArgs.Bootstrap != "" {
@@ -163,43 +153,15 @@ Manage your Myel point of presence from the command line.
 	return nil
 }
 
-// Repo path is akin to IPFS: ~/.pop by default or changed via $POP_PATH
-func getRepoPath() string {
-	if path, ok := os.LookupEnv("POP_PATH"); ok {
-		return path
-	}
-	return ".pop"
-}
-
-// construct full path and check if a repo was initialized with a datastore
-func repoFullPath(path string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, path), nil
-}
-
-func repoExists(path string) (bool, error) {
-	_, err := os.Stat(filepath.Join(path, "datastore"))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 // setupRepo will persist our initial configurations so we can remember them when we need to restart the node
 func setupRepo() (string, bool, error) {
 	var err error
-	path, err := repoFullPath(getRepoPath())
+	path, err := utils.FullPath(utils.RepoPath())
 	if err != nil {
 		return path, false, err
 	}
 
-	exists, err := repoExists(path)
+	exists, err := utils.RepoExists(path)
 	if err != nil {
 		return path, false, err
 	}

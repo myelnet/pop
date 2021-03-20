@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,20 +31,18 @@ import (
 	"github.com/ipfs/go-path"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
-	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
-	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/pop"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/filecoin/storage"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/supply"
@@ -150,7 +147,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	priv, err := Libp2pKey(ks)
+	priv, err := utils.Libp2pKey(ks)
 	if err != nil {
 		return nil, err
 	}
@@ -194,18 +191,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	)
 
 	// Convert region names to region structs
-	var regions []supply.Region
-	for _, rstring := range opts.Regions {
-		if r := supply.Regions[rstring]; r.Name != "" {
-			regions = append(regions, r)
-			continue
-		}
-		// We also support custom regions if users want their own provider subnet
-		regions = append(regions, supply.Region{
-			Name: rstring,
-			Code: supply.CustomRegion,
-		})
-	}
+	regions := supply.ParseRegions(opts.Regions)
 
 	settings := pop.Settings{
 		Datastore:  nd.ds,
@@ -250,7 +236,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 	// start connecting with peers
-	go nd.bootstrap(ctx, opts.BootstrapPeers)
+	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
 	return nd, nil
 
@@ -822,47 +808,6 @@ func (nd *node) export(ctx context.Context, root cid.Cid, name, out string, sid 
 	return nil
 }
 
-// bootstrap connects to a list of provided peer addresses, libp2p then uses dht discovery
-// to connect with all the peers the node is aware of
-func (nd *node) bootstrap(ctx context.Context, bpeers []string) error {
-	var peers []peer.AddrInfo
-	for _, addrStr := range bpeers {
-		addr, err := ma.NewMultiaddr(addrStr)
-		if err != nil {
-			continue
-		}
-		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
-		if err != nil {
-			continue
-		}
-		peers = append(peers, *addrInfo)
-	}
-
-	var wg sync.WaitGroup
-	peerInfos := make(map[peer.ID]*peerstore.PeerInfo, len(peers))
-	for _, pii := range peers {
-		pi, ok := peerInfos[pii.ID]
-		if !ok {
-			pi = &peerstore.PeerInfo{ID: pii.ID}
-			peerInfos[pi.ID] = pi
-		}
-		pi.Addrs = append(pi.Addrs, pii.Addrs...)
-	}
-
-	wg.Add(len(peerInfos))
-	for _, peerInfo := range peerInfos {
-		go func(peerInfo *peerstore.PeerInfo) {
-			defer wg.Done()
-			err := nd.host.Connect(ctx, *peerInfo)
-			if err != nil {
-				fmt.Printf("failed to connect to %s: %s\n", peerInfo.ID, err)
-			}
-		}(peerInfo)
-	}
-	wg.Wait()
-	return nil
-}
-
 // connPeers returns a list of connected peer IDs
 func (nd *node) connPeers() []peer.ID {
 	conns := nd.host.Network().Conns()
@@ -897,23 +842,4 @@ func (nd *node) importAddress(pk string) {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
 	}
-}
-
-// Libp2pKey gets a libp2p host private key from the keystore if available or generates a new one
-func Libp2pKey(ks keystore.Keystore) (ci.PrivKey, error) {
-	k, err := ks.Get(KLibp2pHost)
-	if err == nil {
-		return k, nil
-	}
-	if !errors.Is(err, keystore.ErrNoSuchKey) {
-		return nil, err
-	}
-	pk, _, err := ci.GenerateEd25519Key(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	if err := ks.Put(KLibp2pHost, pk); err != nil {
-		return nil, err
-	}
-	return pk, nil
 }
