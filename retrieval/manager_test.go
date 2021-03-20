@@ -20,11 +20,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/retrieval/provider"
-	"github.com/myelnet/pop/testutil"
 )
 
 var blockGen = blocksutil.NewBlockGenerator()
