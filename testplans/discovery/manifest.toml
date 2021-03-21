@@ -1,0 +1,37 @@
+name = "discovery"
+[defaults]
+builder = "exec:go"
+runner = "local:exec"
+
+[builders."docker:go"]
+enabled = true
+go_version = "1.16"
+module_path = "github.com/your/module/name"
+exec_pkg = "."
+enable_go_build_cache = true
+
+[builders."exec:go"]
+enabled = true
+module_path = "github.com/your/module/name"
+
+[runners."local:docker"]
+enabled = true
+
+[runners."local:exec"]
+enabled = true
+
+[runners."cluster:k8s"]
+enabled = true
+
+[global.build_config]
+enable_go_build_cache = true
+
+[[testcases]]
+name= "gossip-single-region"
+instances = { min = 3, max = 420, default = 3 }
+
+  [testcases.params]
+  clients   = { type = "int", default = 1 }
+  providers = { type = "int", default = 1 }
+  bootstrap = { type = "int", default = 1 }
+  

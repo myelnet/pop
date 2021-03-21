@@ -1,0 +1,29 @@
+[metadata]
+  name = "single_content_copy"
+
+[global]
+  plan = "discovery"
+  case = "gossip-single-region"
+  total_instances = 4
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.run.test_params]
+  clients = "1"
+  providers = "3"
+  bootstrap = "0"
+
+[[groups]]
+  id = "bootstrap"
+  [groups.instances]
+    count = 0
+
+[[groups]]
+  id = "providers"
+   [groups.instances]
+    count = 3
+
+[[groups]]
+  id = "clients"
+  [groups.instances]
+    count = 1

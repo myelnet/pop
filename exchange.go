@@ -146,9 +146,11 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
+		fmt.Printf("received request for %s", m.PayloadCID)
 
 		store, err := e.supply.GetStore(m.PayloadCID)
 		if err != nil {
+			fmt.Printf("no store found for %s ", m.PayloadCID)
 			continue
 		}
 		// DAGStat is both a way of checking if we have the blocks and returning its size
