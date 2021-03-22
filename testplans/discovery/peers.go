@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -68,12 +70,29 @@ func waitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Cli
 	return peers, nil
 }
 
-func connectTopology(ctx context.Context, peers []peer.AddrInfo, h host.Host) error {
+func connectTopology(ctx context.Context, runenv *runtime.RunEnv, peers []peer.AddrInfo, h host.Host) error {
+	tryConnect := func(ctx context.Context, ai peer.AddrInfo, attempts int) error {
+		var err error
+		for i := 1; i <= attempts; i++ {
+			runenv.RecordMessage("dialling peer %s (attempt %d)", ai.ID, i)
+			if err = h.Connect(ctx, ai); err == nil {
+				return nil
+			} else {
+				runenv.RecordMessage("failed to dial peer %v (attempt %d), err: %s", ai.ID, i, err)
+			}
+			select {
+			case <-time.After(time.Duration(rand.Intn(3000))*time.Millisecond + 2*time.Second):
+			case <-ctx.Done():
+				return fmt.Errorf("error while dialing peer %v, attempts made: %d: %w", ai.Addrs, i, ctx.Err())
+			}
+		}
+		return fmt.Errorf("failed while dialing peer %v, attempts: %d: %w", ai.Addrs, attempts, err)
+	}
 	errgrp, ctx := errgroup.WithContext(ctx)
 	for _, p := range peers {
 		p := p
 		errgrp.Go(func() error {
-			return h.Connect(ctx, p)
+			return tryConnect(ctx, p, 3)
 		})
 	}
 	return errgrp.Wait()
