@@ -190,6 +190,7 @@ func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, prot
 		if err == nil {
 			return s, err
 		}
+		fmt.Printf("trying again %v\n", err)
 
 		nAttempts := b.Attempt()
 		if nAttempts == impl.maxStreamOpenAttempts {
@@ -214,6 +215,7 @@ func (impl *Libp2pQueryNetwork) SetDelegate(r QueryReceiver) error {
 func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
 	impl.receiver = nil
 	for _, proto := range impl.supportedProtocols {
+		fmt.Printf("protocol %s\n", proto)
 		impl.host.RemoveStreamHandler(proto)
 	}
 	return nil

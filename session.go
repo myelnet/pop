@@ -65,6 +65,8 @@ func (g *gossipSourcing) HandleQueryStream(stream retrieval.QueryStream) {
 		return
 	}
 
+	fmt.Printf("received an offer\n")
+
 	g.offers <- deal.Offer{
 		PeerID:   stream.OtherPeer(),
 		Response: response,

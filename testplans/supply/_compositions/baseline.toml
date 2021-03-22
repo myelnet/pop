@@ -16,15 +16,9 @@
   id = "providers"
   [groups.instances]
     count = 3
-  [groups.run]
-    [groups.run.test_params]
-      role = "provider"
 
 [[groups]]
   id = "clients"
   [groups.instances]
     count = 1
-  [groups.run]
-    [groups.run.test_params]
-      role = "client"
 
