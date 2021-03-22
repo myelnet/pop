@@ -4,17 +4,17 @@
 [global]
   plan = "discovery"
   case = "gossip"
-  total_instances = 4
+  total_instances = 41
   builder = "docker:go"
   runner = "local:docker"
 
 [global.run.test_params]
   clients = "1"
-  providers = "3"
+  providers = "40"
   replication = "1"
   bootstrap = "0"
   regions = '["Global"]'
-  conn_per_peer = "2"
+  conn_per_peer = "10"
 
 [[groups]]
   id = "bootstrap"
@@ -24,7 +24,7 @@
 [[groups]]
   id = "providers"
    [groups.instances]
-    count = 3
+    count = 40
 
 [[groups]]
   id = "clients"

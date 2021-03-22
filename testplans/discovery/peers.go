@@ -88,10 +88,22 @@ func connectTopology(ctx context.Context, runenv *runtime.RunEnv, peers []peer.A
 		}
 		return fmt.Errorf("failed while dialing peer %v, attempts: %d: %w", ai.Addrs, attempts, err)
 	}
+	// Default to a connect delay in the range of 0s - 1s
+	delay := time.Duration(float64(time.Second) * rand.Float64())
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		runenv.RecordMessage("connecting to peers after %s", delay)
+	}
 	errgrp, ctx := errgroup.WithContext(ctx)
 	for _, p := range peers {
 		p := p
 		errgrp.Go(func() error {
+		  // add a random delay to each connection attempt to spread the network load
+			connectDelay := time.Duration(rand.Intn(1000)) * time.Millisecond
+			<-time.After(connectDelay)
+
 			return tryConnect(ctx, p, 3)
 		})
 	}

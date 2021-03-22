@@ -45,7 +45,7 @@ var testcases = map[string]interface{}{
 }
 
 func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	group := runenv.TestGroupID
@@ -97,7 +97,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	runenv.RecordMessage("connected to %d peers", len(h.Network().Peers()))
 
 	// The content topic lets other peers know when content was imported
-	contentTopic := sync.NewTopic("content", new(cid.Cid))
+	contentTopic := sync.NewTopic("content", new(supply.PRecord))
 
 	// Get a random  provider to provide a random file
 	if group == "providers" && int(initCtx.GroupSeq) <= runenv.IntParam("replication") {
@@ -116,25 +116,38 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			return err
 		}
 
-		initCtx.SyncClient.MustPublish(ctx, contentTopic, &fid)
+		initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
+			PayloadCID: fid,
+			Provider:   h.ID(),
+		})
+		runenv.RecordMessage("published content")
 	}
 
 	if group == "clients" {
-		// need to wait a sec otherwise pubsub message might be sent too early
-		time.Sleep(1 * time.Second)
 		// We expect a single CID
-		contentCh := make(chan *cid.Cid, 1)
+		contentCh := make(chan *supply.PRecord, 1)
 		sctx, scancel := context.WithCancel(ctx)
 		defer scancel()
 		_ = initCtx.SyncClient.MustSubscribe(sctx, contentTopic, contentCh)
 
 		select {
 		case c := <-contentCh:
-			session, err := exch.NewSession(ctx, *c)
+			// need to wait a sec otherwise pubsub message might be sent too early
+			time.Sleep(1 * time.Second)
+			conns := h.Network().ConnsToPeer(c.Provider)
+			if len(conns) == 0 {
+				runenv.RecordMessage("peer not directly connected to provider")
+			}
+			for _, conn := range conns {
+				runenv.RecordMessage("connected to provider. local addr: %s remote addr: %s\n",
+					conn.LocalMultiaddr(), conn.RemoteMultiaddr())
+			}
+
+			session, err := exch.NewSession(ctx, c.PayloadCID)
 			if err != nil {
 				return err
 			}
-			runenv.RecordMessage("querying gossip for content %s", c)
+			runenv.RecordMessage("querying gossip for content %s", c.PayloadCID)
 
 			t := time.Now()
 
