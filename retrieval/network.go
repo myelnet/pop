@@ -216,6 +216,7 @@ func (impl *Libp2pQueryNetwork) SetDelegate(r QueryReceiver) error {
 func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
 	impl.receiver = nil
 	for _, proto := range impl.supportedProtocols {
+		fmt.Printf("protocol %s\n", proto)
 		impl.host.RemoveStreamHandler(proto)
 	}
 	return nil
