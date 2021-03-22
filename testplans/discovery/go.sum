@@ -898,6 +898,8 @@ github.com/myelnet/pop v0.0.0-20210322175356-ed9af9f03e62 h1:uAerNEGwEZVW9+kOIKV
 github.com/myelnet/pop v0.0.0-20210322175356-ed9af9f03e62/go.mod h1:/EFjwFuXtXrIWd1vTI8eGyt6TLIzWqLpoFpezZqHCcI=
 github.com/myelnet/pop v0.0.0-20210322180508-341347b92059 h1:+NMhfN0OpJ4MFleiiZFlQjNmR9k/fonkhncqPaNh8p8=
 github.com/myelnet/pop v0.0.0-20210322180508-341347b92059/go.mod h1:/EFjwFuXtXrIWd1vTI8eGyt6TLIzWqLpoFpezZqHCcI=
+github.com/myelnet/pop v0.0.0-20210322182312-0ffa6766639c h1:9lgIUI8gMOT3vSbYlS6JBfR9X56eRb1KqBgcSNjP71E=
+github.com/myelnet/pop v0.0.0-20210322182312-0ffa6766639c/go.mod h1:/EFjwFuXtXrIWd1vTI8eGyt6TLIzWqLpoFpezZqHCcI=
 github.com/neelance/astrewrite v0.0.0-20160511093645-99348263ae86/go.mod h1:kHJEU3ofeGjhHklVoIGuVj85JJwZ6kWPaJwCIxgnFmo=
 github.com/neelance/sourcemap v0.0.0-20151028013722-8c68805598ab/go.mod h1:Qr6/a/Q4r9LP1IltGz7tA7iOK1WonHEYhu1HRBA7ZiM=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e h1:fD57ERR4JtEqsWbfPhv4DMiApHyliiK5xCTNVSPiaAs=
