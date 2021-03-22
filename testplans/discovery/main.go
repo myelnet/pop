@@ -116,6 +116,12 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			return err
 		}
 
+		stats, err := pop.DAGStat(ctx, store.Bstore, fid, pop.AllSelector())
+		if err != nil {
+			return err
+		}
+		runenv.RecordMessage("content stats %v", stats)
+
 		initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
 			PayloadCID: fid,
 			Provider:   h.ID(),

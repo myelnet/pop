@@ -190,6 +190,7 @@ func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, prot
 		if err == nil {
 			return s, err
 		}
+		fmt.Printf("trying again\n")
 
 		nAttempts := b.Attempt()
 		if nAttempts == impl.maxStreamOpenAttempts {
