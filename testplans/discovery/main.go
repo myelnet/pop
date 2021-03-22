@@ -18,6 +18,7 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
@@ -27,7 +28,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/myelnet/go-hop-exchange/wallet"
 	"github.com/myelnet/pop"
 	"github.com/myelnet/pop/supply"
 	"github.com/testground/sdk-go/run"
@@ -66,7 +66,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		return err
 	}
 
-	ks := wallet.NewMemKeystore()
+	ks := keystore.NewMemKeystore()
 
 	// We need to listen on (and advertise) our data network IP address, so we
 	// obtain it from the NetClient.

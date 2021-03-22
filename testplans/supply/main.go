@@ -5,12 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
 	"os"
 	"time"
 
-	bserv "github.com/ipfs/go-blockservice"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -20,16 +18,16 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
+	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
-	dag "github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	lp2p "github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/myelnet/go-hop-exchange"
-	"github.com/myelnet/go-hop-exchange/supply"
-	"github.com/myelnet/go-hop-exchange/wallet"
+	"github.com/myelnet/pop"
+	"github.com/myelnet/pop/supply"
 	"github.com/testground/sdk-go/run"
 	"github.com/testground/sdk-go/runtime"
 	"github.com/testground/sdk-go/sync"
@@ -44,26 +42,29 @@ var testcases = map[string]interface{}{
 }
 
 func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
-	completed := sync.State("completed")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	role := runenv.StringParam("role")
+	group := runenv.TestGroupID
 
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
 
-	rpath, err := ioutil.TempDir("", "tmp-repo")
+	rpath, err := runenv.CreateRandomDirectory("", 0)
 	if err != nil {
 		return err
 	}
 
 	ds := dssync.MutexWrap(datastore.NewMapDatastore())
 
-	bs := blockstore.NewIdStore(blockstore.NewBlockstore(ds))
+	bs := blockstore.NewBlockstore(ds)
 
-	ks := wallet.NewMemKeystore()
+	ms, err := multistore.NewMultiDstore(ds)
+	if err != nil {
+		return err
+	}
+
+	ks := keystore.NewMemKeystore()
 
 	// We need to listen on (and advertise) our data network IP address, so we
 	// obtain it from the NetClient.
@@ -72,9 +73,7 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// create a new libp2p Host that listens on a random TCP port
 	h, err := lp2p.New(ctx,
 		lp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
-		// Running without security because of a bug
-		// see https://github.com/libp2p/go-libp2p-noise/issues/70
-		lp2p.NoSecurity,
+		lp2p.DisableRelay(),
 	)
 	if err != nil {
 		return err
@@ -85,38 +84,34 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		return err
 	}
 
-	gsNet := gsnet.NewFromLibp2pHost(h)
 	gs := gsimpl.New(ctx,
-		gsNet,
+		gsnet.NewFromLibp2pHost(h),
 		storeutil.LoaderForBlockstore(bs),
 		storeutil.StorerForBlockstore(bs),
 	)
 
-	exch, err := hop.NewExchange(
-		ctx,
-		hop.WithBlockstore(bs),
-		hop.WithPubSub(ps),
-		hop.WithHost(h),
-		hop.WithDatastore(ds),
-		hop.WithGraphSync(gs),
-		hop.WithRepoPath(rpath),
-		hop.WithKeystore(ks),
-	)
+	settings := pop.Settings{
+		Datastore:  ds,
+		Blockstore: bs,
+		MultiStore: ms,
+		Host:       h,
+		PubSub:     ps,
+		GraphSync:  gs,
+		RepoPath:   rpath,
+		Keystore:   ks,
+		Regions:    []supply.Region{supply.Regions["Global"]},
+	}
+
+	exch, err := pop.NewExchange(ctx, settings)
 	if err != nil {
 		return err
 	}
 
-	blocks := bserv.New(bs, exch)
-	DAG := dag.NewDAGService(blocks)
-
-	// Record our listen addrs.
-	runenv.RecordMessage("my listen addrs: %v", h.Addrs())
-
-	info := &peer.AddrInfo{ID: h.ID(), Addrs: h.Addrs()}
+	info := host.InfoFromHost(h)
 	// the peers topic where all instances will advertise their AddrInfo.
 	peersTopic := sync.NewTopic("peers", new(peer.AddrInfo))
 	// initialize a slice to store the AddrInfos of all other peers in the run.
-	peers := make([]*peer.AddrInfo, 0, runenv.TestInstanceCount-1)
+	peers := make([]peer.AddrInfo, 0, runenv.TestInstanceCount-1)
 
 	// Publish our own.
 	initCtx.SyncClient.MustPublish(ctx, peersTopic, info)
@@ -134,7 +129,7 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			if ai.ID == h.ID() {
 				continue // skip over ourselves.
 			}
-			peers = append(peers, ai)
+			peers = append(peers, *ai)
 		case err := <-sub.Done():
 			scancel()
 			return err
@@ -151,7 +146,7 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if ai.ID == h.ID() {
 			break
 		}
-		if err := h.Connect(ctx, *ai); err != nil {
+		if err := h.Connect(ctx, ai); err != nil {
 			return err
 		}
 	}
@@ -161,51 +156,50 @@ func runSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// Wait for all peers to signal that they're done with the connection phase.
 	initCtx.SyncClient.MustSignalAndWait(ctx, "connected", runenv.TestInstanceCount)
 
-	if role == "client" {
+	if group == "clients" {
 
-		done := make(chan bool)
-		unsub := exch.Supply().SubscribeToEvents(func(evt supply.Event) {
-			runenv.RecordMessage("done")
-			done <- true
+		fpath, err := runenv.CreateRandomFile("", 16000)
+		if err != nil {
+			return err
+		}
+		storeID := ms.Next()
+		store, err := ms.Get(storeID)
+		if err != nil {
+			return err
+		}
+
+		fid, err := importFile(ctx, fpath, store.DAG)
+		if err != nil {
+			return err
+		}
+
+		if err := exch.Supply().Register(fid, storeID); err != nil {
+			return err
+		}
+
+		runenv.RecordMessage("dispatching to providers")
+
+		res, err := exch.Supply().Dispatch(supply.Request{
+			PayloadCID: fid,
+			Size:       uint64(16000),
 		})
-		defer unsub()
-
-		// generate 1600 bytes of random data
-		data := make([]byte, 1600)
-		rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
-
-		file, err := ioutil.TempFile("/tmp", "data")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(file.Name())
-
-		_, err = file.Write(data)
-		if err != nil {
-			return err
-		}
-		_, err = importFile(ctx, file.Name(), DAG)
 		if err != nil {
 			return err
 		}
 
-		runenv.RecordMessage("waiting for done signal")
-
-		select {
-		case <-done:
-			initCtx.SyncClient.MustSignalEntry(ctx, completed)
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+		for i := 0; i < res.Count; i++ {
+			rec, err := res.Next(ctx)
+			if err != nil {
+				return err
+			}
+			runenv.RecordMessage("sent to peer %s", rec.Provider)
 		}
 	}
 
-	err = <-initCtx.SyncClient.MustBarrier(ctx, completed, runenv.IntParam("clients")).C
+	_, err = initCtx.SyncClient.SignalAndWait(ctx, "completed", runenv.TestInstanceCount)
 	if err != nil {
 		return err
 	}
-
-	_ = h.Close()
 	return nil
 }
 
