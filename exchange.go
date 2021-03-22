@@ -155,6 +155,9 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		// DAGStat is both a way of checking if we have the blocks and returning its size
 		// TODO: support selector in Query
 		stats, err := DAGStat(ctx, store.Bstore, m.PayloadCID, AllSelector())
+		if err != nil {
+			fmt.Printf("failed to get content stat: %s\n", err)
+		}
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && stats.Size > 0 {
@@ -171,6 +174,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
 			}
+			fmt.Printf("sending response\n")
 			if err := qs.WriteQueryResponse(answer); err != nil {
 				fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
 				return
