@@ -1,4 +1,4 @@
-name = "transfer"
+name = "supply"
 [defaults]
 builder = "exec:go"
 runner = "local:exec"
@@ -23,20 +23,12 @@ enabled = true
 enabled = true
 
 [[testcases]]
-name= "pick_role"
-instances = { min = 2, max = 100, default = 2 }
+name= "supply"
+instances = { min = 1, max = 100, default = 6 }
 
   [testcases.params]
   clients   = { type = "int", default = 1 }
   providers = { type = "int", default = 1 }
-  role      = { type = "string" }
-  
-[[testcases]]
-name = "duo_role"
-instances = { min = 2, max = 100, default = 2 }
-
-  [testcases.params]
-  role = { type = "string" }
 
 # Add more testcases here...
 # [[testcases]]
