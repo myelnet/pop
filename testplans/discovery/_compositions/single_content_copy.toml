@@ -11,7 +11,10 @@
 [global.run.test_params]
   clients = "1"
   providers = "3"
+  replication = "1"
   bootstrap = "0"
+  regions = '["Global"]'
+  conn_per_peer = "2"
 
 [[groups]]
   id = "bootstrap"

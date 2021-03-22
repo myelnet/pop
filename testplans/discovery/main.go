@@ -45,7 +45,7 @@ var testcases = map[string]interface{}{
 }
 
 func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	group := runenv.TestGroupID
@@ -68,6 +68,8 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	h := settings.Host
 	ms := settings.MultiStore
 
+	settings.Regions = supply.ParseRegions(runenv.StringArrayParam("regions"))
+
 	exch, err := pop.NewExchange(ctx, settings)
 	if err != nil {
 		return err
@@ -84,7 +86,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		return err
 	}
 
-	peers = RandomTopology{2}.SelectPeers(peers)
+	peers = RandomTopology{runenv.IntParam("conn_per_peer")}.SelectPeers(peers)
 
 	if err := connectTopology(ctx, runenv, peers, h); err != nil {
 		return err
@@ -98,7 +100,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	contentTopic := sync.NewTopic("content", new(cid.Cid))
 
 	// Get a random  provider to provide a random file
-	if group == "providers" && initCtx.GroupSeq == 1 {
+	if group == "providers" && int(initCtx.GroupSeq) <= runenv.IntParam("replication") {
 		fpath, err := runenv.CreateRandomFile("", 256000)
 		if err != nil {
 			return err
@@ -181,6 +183,9 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP) (pop.Settings
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
 			return dht.New(ctx, h)
 		}),
+		// Running without security because of a bug
+		// see https://github.com/libp2p/go-libp2p-noise/issues/70
+		libp2p.NoSecurity,
 	)
 	if err != nil {
 		return pop.Settings{}, err

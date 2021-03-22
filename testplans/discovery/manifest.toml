@@ -34,4 +34,7 @@ instances = { min = 3, max = 420, default = 3 }
   clients   = { type = "int", default = 1 }
   providers = { type = "int", default = 1 }
   bootstrap = { type = "int", default = 1 }
+  replication = { type = "int", default = 1 }
+  regions = { type = "array", default = ["Global"] }
+  conn_per_peer = { type = "int", default = 2 }
   
