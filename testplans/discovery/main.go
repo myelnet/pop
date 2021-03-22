@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"time"
 
@@ -40,7 +41,7 @@ func main() {
 }
 
 var testcases = map[string]interface{}{
-	"gossip-single-region": run.InitializedTestCaseFn(runGossip),
+	"gossip": run.InitializedTestCaseFn(runGossip),
 }
 
 func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
@@ -56,66 +57,16 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	if err != nil {
 		return err
 	}
-
-	ds := dssync.MutexWrap(datastore.NewMapDatastore())
-
-	bs := blockstore.NewBlockstore(ds)
-
-	ms, err := multistore.NewMultiDstore(ds)
-	if err != nil {
-		return err
-	}
-
-	ks := keystore.NewMemKeystore()
-
 	// We need to listen on (and advertise) our data network IP address, so we
 	// obtain it from the NetClient.
 	ip := initCtx.NetClient.MustGetDataNetworkIP()
 
-	var idht *dht.IpfsDHT
-
-	// create a new libp2p Host that listens on a random TCP port
-	h, err := libp2p.New(ctx,
-		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
-		// Control the maximum number of simultaneous connections a node can have
-		libp2p.ConnectionManager(connmgr.NewConnManager(
-			20,            // Lowwater
-			60,            // HighWater,
-			1*time.Second, // GracePeriod
-		)),
-		libp2p.DisableRelay(),
-		// All peer discovery happens via the dht and a single bootstrap peer
-		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
-			idht, err = dht.New(ctx, h)
-			return idht, err
-		}),
-	)
+	settings, err := defaultSettings(ctx, rpath, ip)
 	if err != nil {
 		return err
 	}
-
-	ps, err := pubsub.NewGossipSub(ctx, h)
-	if err != nil {
-		return err
-	}
-
-	gs := gsimpl.New(ctx,
-		gsnet.NewFromLibp2pHost(h),
-		storeutil.LoaderForBlockstore(bs),
-		storeutil.StorerForBlockstore(bs),
-	)
-
-	settings := pop.Settings{
-		Datastore:  ds,
-		Blockstore: bs,
-		MultiStore: ms,
-		Host:       h,
-		PubSub:     ps,
-		GraphSync:  gs,
-		RepoPath:   rpath,
-		Keystore:   ks,
-		Regions:    []supply.Region{supply.Regions["Global"]},
-	}
+	h := settings.Host
+	ms := settings.MultiStore
 
 	exch, err := pop.NewExchange(ctx, settings)
 	if err != nil {
@@ -202,6 +153,62 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	}
 	runenv.RecordSuccess()
 	return nil
+}
+
+func defaultSettings(ctx context.Context, rpath string, ip net.IP) (pop.Settings, error) {
+	ds := dssync.MutexWrap(datastore.NewMapDatastore())
+
+	bs := blockstore.NewBlockstore(ds)
+
+	ms, err := multistore.NewMultiDstore(ds)
+	if err != nil {
+		return pop.Settings{}, err
+	}
+
+	ks := keystore.NewMemKeystore()
+
+	// create a new libp2p Host that listens on a random TCP port
+	h, err := libp2p.New(ctx,
+		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
+		// Control the maximum number of simultaneous connections a node can have
+		libp2p.ConnectionManager(connmgr.NewConnManager(
+			20,            // Lowwater
+			60,            // HighWater,
+			1*time.Second, // GracePeriod
+		)),
+		libp2p.DisableRelay(),
+		// All peer discovery happens via the dht and a single bootstrap peer
+		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
+			return dht.New(ctx, h)
+		}),
+	)
+	if err != nil {
+		return pop.Settings{}, err
+	}
+
+	ps, err := pubsub.NewGossipSub(ctx, h)
+	if err != nil {
+		return pop.Settings{}, err
+	}
+
+	gs := gsimpl.New(ctx,
+		gsnet.NewFromLibp2pHost(h),
+		storeutil.LoaderForBlockstore(bs),
+		storeutil.StorerForBlockstore(bs),
+	)
+
+	return pop.Settings{
+		Datastore:  ds,
+		Blockstore: bs,
+		MultiStore: ms,
+		Host:       h,
+		PubSub:     ps,
+		GraphSync:  gs,
+		RepoPath:   rpath,
+		Keystore:   ks,
+		Regions:    []supply.Region{supply.Regions["Global"]},
+	}, nil
+
 }
 
 func importFile(ctx context.Context, fpath string, dg ipldformat.DAGService) (cid.Cid, error) {

@@ -3,7 +3,7 @@
 
 [global]
   plan = "discovery"
-  case = "gossip-single-region"
+  case = "gossip"
   total_instances = 4
   builder = "docker:go"
   runner = "local:docker"

@@ -27,7 +27,7 @@ enabled = true
 enable_go_build_cache = true
 
 [[testcases]]
-name= "gossip-single-region"
+name= "gossip"
 instances = { min = 3, max = 420, default = 3 }
 
   [testcases.params]
