@@ -116,12 +116,6 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			return err
 		}
 
-		stats, err := pop.DAGStat(ctx, store.Bstore, fid, pop.AllSelector())
-		if err != nil {
-			return err
-		}
-		runenv.RecordMessage("content stats %v", stats)
-
 		initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
 			PayloadCID: fid,
 			Provider:   h.ID(),
@@ -204,7 +198,7 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP) (pop.Settings
 		}),
 		// Running without security because of a bug
 		// see https://github.com/libp2p/go-libp2p-noise/issues/70
-		libp2p.NoSecurity,
+		// libp2p.NoSecurity,
 	)
 	if err != nil {
 		return pop.Settings{}, err

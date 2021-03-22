@@ -188,7 +188,6 @@ func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, prot
 	for {
 		s, err := impl.host.NewStream(ctx, id, protocols...)
 		if err == nil {
-			fmt.Printf("success\n")
 			return s, err
 		}
 		fmt.Printf("trying again %v\n", err)
