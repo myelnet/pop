@@ -55,9 +55,6 @@ type QueryNetwork interface {
 	//  NewQueryStream creates a new RetrievalQueryStream implementer using the provided peer.ID
 	NewQueryStream(peer.ID) (QueryStream, error)
 
-	// SetDelegate sets a QueryReceiver implementer to handle stream data
-	SetDelegate(QueryReceiver) error
-
 	// StopHandlingRequests unsets the RetrievalReceiver and would perform any other necessary
 	// shutdown logic.
 	StopHandlingRequests() error
@@ -67,6 +64,9 @@ type QueryNetwork interface {
 
 	// AddAddrs adds the given multi-addrs to the peerstore for the passed peer ID
 	AddAddrs(peer.ID, []ma.Multiaddr)
+
+	// Receiver returns the channel
+	Receiver() chan deal.Offer
 }
 
 type queryStream struct {
@@ -147,10 +147,16 @@ func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
 			FilQueryProtocolID,
 			PopQueryProtocolID,
 		},
+		receiver: make(chan deal.Offer, 10),
 	}
 	for _, option := range options {
 		option(impl)
 	}
+
+	for _, proto := range impl.supportedProtocols {
+		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
+	}
+
 	return impl
 }
 
@@ -158,13 +164,12 @@ func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
 // NetMessage objects, into the graphsync network interface.
 // It implements the QueryNetwork API.
 type Libp2pQueryNetwork struct {
-	host host.Host
-	// inbound messages from the network are forwarded to the receiver
-	receiver              QueryReceiver
+	host                  host.Host
 	maxStreamOpenAttempts float64
 	minAttemptDuration    time.Duration
 	maxAttemptDuration    time.Duration
 	supportedProtocols    []protocol.ID
+	receiver              chan deal.Offer
 }
 
 // NewQueryStream creates a new QueryStream using the provided peer.ID
@@ -201,37 +206,33 @@ func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, prot
 	}
 }
 
-// SetDelegate sets a RetrievalReceiver to handle stream data
-func (impl *Libp2pQueryNetwork) SetDelegate(r QueryReceiver) error {
-	impl.receiver = r
-	for _, proto := range impl.supportedProtocols {
-		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
-	}
-	return nil
-}
-
 // StopHandlingRequests unsets the RetrievalReceiver and would perform any other necessary
 // shutdown logic.
 func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
-	impl.receiver = nil
 	for _, proto := range impl.supportedProtocols {
-		fmt.Printf("protocol %s\n", proto)
 		impl.host.RemoveStreamHandler(proto)
 	}
 	return nil
 }
 
 func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
-	if impl.receiver == nil {
-		fmt.Printf("no receiver set")
-		s.Reset()
+	qs := &queryStream{
+		p:        s.Conn().RemotePeer(),
+		rw:       s,
+		buffered: bufio.NewReaderSize(s, 16),
+	}
+	defer qs.Close()
+
+	response, err := qs.ReadQueryResponse()
+	if err != nil {
+		fmt.Printf("failed to read query response %s\n", err)
 		return
 	}
-	remotePID := s.Conn().RemotePeer()
-	buffered := bufio.NewReaderSize(s, 16)
-	var qs QueryStream
-	qs = &queryStream{remotePID, s, buffered}
-	impl.receiver.HandleQueryStream(qs)
+
+	impl.receiver <- deal.Offer{
+		PeerID:   qs.OtherPeer(),
+		Response: response,
+	}
 }
 
 // ID returns the host peer ID
@@ -242,4 +243,8 @@ func (impl *Libp2pQueryNetwork) ID() peer.ID {
 // AddAddrs adds a new peer into the host peerstore
 func (impl *Libp2pQueryNetwork) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
 	impl.host.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
+}
+
+func (impl *Libp2pQueryNetwork) Receiver() chan deal.Offer {
+	return impl.receiver
 }

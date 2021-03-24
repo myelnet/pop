@@ -99,13 +99,54 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*deal.Offer, err
 	}, nil
 }
 
+// Offers is a queue containing a list of asynchronously loaded offers
+type Offers struct {
+	updates chan deal.Offer
+	closing chan struct{}
+}
+
+// Next waits and returns the next offer in line
+func (o *Offers) Next(ctx context.Context) (deal.Offer, error) {
+	select {
+	case of := <-o.updates:
+		return of, nil
+	case <-ctx.Done():
+		return deal.Offer{}, ctx.Err()
+	}
+}
+
+// Close clears out the offers queue
+func (o *Offers) Close() {
+	o.closing <- struct{}{}
+}
+
 // QueryGossip asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
-func (s *Session) QueryGossip(ctx context.Context) (*deal.Offer, error) {
-	offers := make(chan deal.Offer, 1)
-	disc := &gossipSourcing{offers}
-	s.net.SetDelegate(disc)
+func (s *Session) QueryGossip(ctx context.Context) (*Offers, error) {
+	oq := &Offers{
+		updates: make(chan deal.Offer),
+		closing: make(chan struct{}),
+	}
+	go func() {
+		var pending []deal.Offer
+		for {
+			var first deal.Offer
+			var updates chan deal.Offer
+			if len(pending) > 0 {
+				first = pending[0]
+				updates = oq.updates
+			}
 
+			select {
+			case <-oq.closing:
+				return
+			case o := <-s.net.Receiver():
+				pending = append(pending, o)
+			case updates <- first:
+				pending = pending[1:]
+			}
+		}
+	}()
 	m := deal.Query{
 		PayloadCID:  s.root,
 		QueryParams: deal.QueryParams{},
@@ -123,20 +164,16 @@ func (s *Session) QueryGossip(ctx context.Context) (*deal.Offer, error) {
 		}
 	}
 
-	// TODO: add custom logic to select the right offer
-	// for now we always take the first one we get = lowest latency
-	for {
-		select {
-		case offer := <-offers:
-			return &offer, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
+	return oq, nil
 }
 
 // SyncBlocks will trigger a retrieval without returning the blocks
-func (s *Session) SyncBlocks(ctx context.Context, of *deal.Offer) error {
+func (s *Session) SyncBlocks(ctx context.Context, ofs *Offers) error {
+	of, err := ofs.Next(ctx)
+	if err != nil {
+		return err
+	}
+
 	params, err := deal.NewParams(
 		of.Response.MinPricePerByte,
 		of.Response.MaxPaymentInterval,
