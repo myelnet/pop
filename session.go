@@ -163,3 +163,8 @@ func (s *Session) SetAddress(addr address.Address) {
 func (s *Session) StoreID() multistore.StoreID {
 	return s.storeID
 }
+
+// OfferQueue returns the global offer queue
+func (s *Session) OfferQueue() *OfferQueue {
+	return s.offers
+}

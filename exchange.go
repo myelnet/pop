@@ -118,6 +118,7 @@ type OfferQueue struct {
 	offers  chan deal.Offer
 	results chan JobResult
 	jobs    chan Job
+	peek    chan chan deal.Offer
 }
 
 // JobResult tells us if our job was started successfully
@@ -134,6 +135,7 @@ func NewOfferQueue(ctx context.Context) *OfferQueue {
 	oq := &OfferQueue{
 		offers:  make(chan deal.Offer),
 		results: make(chan JobResult),
+		peek:    make(chan chan deal.Offer),
 		jobs:    make(chan Job, 8),
 	}
 	go oq.processOffers(ctx)
@@ -153,6 +155,19 @@ func (oq *OfferQueue) Receive(p peer.ID, res deal.QueryResponse) {
 	}
 }
 
+// Peek returns the first item in the queue
+func (oq *OfferQueue) Peek(ctx context.Context) (deal.Offer, error) {
+	result := make(chan deal.Offer)
+	oq.peek <- result
+
+	select {
+	case r := <-result:
+		return r, nil
+	case <-ctx.Done():
+		return deal.Offer{}, ctx.Err()
+	}
+}
+
 // processOffers receives jobs to handle queued up offers
 // TODO: we need to make sure we are matching the job with the right offer
 func (oq *OfferQueue) processOffers(ctx context.Context) {
@@ -163,9 +178,11 @@ func (oq *OfferQueue) processOffers(ctx context.Context) {
 		// if there are no offers the jobs channel should be
 		// nil so wait for the next offer to execute it
 		var jobs chan Job
+		var peek chan chan deal.Offer
 		if len(q) > 0 {
 			first = q[0]
 			jobs = oq.jobs
+			peek = oq.peek
 		}
 		select {
 		// If we have a job and a queued up offer we run the job on the first offer
@@ -178,6 +195,9 @@ func (oq *OfferQueue) processOffers(ctx context.Context) {
 			// If we receive a new offer we append it to the queue
 		case of := <-oq.offers:
 			q = append(q, of)
+		// if we get a peerk request we send our first item to it
+		case req := <-peek:
+			req <- first
 		case <-ctx.Done():
 			// exit when the context is done
 		}

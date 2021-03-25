@@ -690,7 +690,6 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	if err != nil {
 		return err
 	}
-	var offer *deal.Offer
 	var discDuration time.Duration
 	if args.Miner != "" {
 		miner, err := address.NewFromString(args.Miner)
@@ -703,18 +702,18 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			return err
 		}
 
-		offer, err = session.QueryMiner(ctx, info.ID)
+		err = session.QueryMiner(ctx, info.ID)
 		if err != nil {
 			return err
 		}
 		now := time.Now()
 		discDuration = now.Sub(start)
 	}
-	if offer == nil {
+	if args.Miner == "" {
 		// Gossip discovery shouldn't last more than 5 seconds
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		offer, err = session.QueryGossip(ctx)
+		err = session.QueryGossip(ctx)
 		if err != nil {
 			return err
 		}
@@ -722,10 +721,12 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		discDuration = now.Sub(start)
 	}
 
-	err = session.SyncBlocks(ctx, offer)
+	offer, err := session.OfferQueue().Peek(ctx)
 	if err != nil {
 		return err
 	}
+
+	session.StartTransfer()
 
 	did, err := session.DealID()
 	if err != nil {

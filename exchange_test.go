@@ -125,6 +125,9 @@ func TestGossipQuery(t *testing.T) {
 			err = session.QueryGossip(ctx)
 			require.NoError(t, err)
 
+			offer, err := session.OfferQueue().Peek(ctx)
+			require.NoError(t, err)
+
 			// @FIXME: For some reason channels aren't working properly and we can't get all the
 			// offers to process jobs
 			session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
@@ -133,6 +136,7 @@ func TestGossipQuery(t *testing.T) {
 			select {
 			case r := <-session.offers.results:
 				require.Equal(t, r.DealID, deal.ID(i))
+				require.Equal(t, offer.Response.Size, uint64(268009))
 			case <-ctx.Done():
 				require.NoError(t, ctx.Err())
 			}
@@ -142,7 +146,7 @@ func TestGossipQuery(t *testing.T) {
 
 func TestExchangeDirect(t *testing.T) {
 	// Iterating a ton helps weed out false positives
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 1; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
 			bgCtx := context.Background()
 
