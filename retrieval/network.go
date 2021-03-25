@@ -41,12 +41,11 @@ type QueryStream interface {
 	OtherPeer() peer.ID
 }
 
-// QueryReceiver is the API for handling data coming in on
+// OfferReceiver is the API for handling data coming in on
 // both query and deal streams
-type QueryReceiver interface {
-	// HandleQueryStream sends and receives data-transfer data via the
-	// RetrievalQueryStream provided
-	HandleQueryStream(QueryStream)
+type OfferReceiver interface {
+	// Receive queues up an offer
+	Receive(peer.ID, deal.QueryResponse)
 }
 
 // QueryNetwork is the API for creating query and deal streams and
@@ -66,7 +65,10 @@ type QueryNetwork interface {
 	AddAddrs(peer.ID, []ma.Multiaddr)
 
 	// Receiver returns the channel
-	Receiver() chan deal.Offer
+	Receiver() OfferReceiver
+
+	// Start receiving offers
+	Start(OfferReceiver)
 }
 
 type queryStream struct {
@@ -147,14 +149,9 @@ func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
 			FilQueryProtocolID,
 			PopQueryProtocolID,
 		},
-		receiver: make(chan deal.Offer, 10),
 	}
 	for _, option := range options {
 		option(impl)
-	}
-
-	for _, proto := range impl.supportedProtocols {
-		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
 	}
 
 	return impl
@@ -169,7 +166,14 @@ type Libp2pQueryNetwork struct {
 	minAttemptDuration    time.Duration
 	maxAttemptDuration    time.Duration
 	supportedProtocols    []protocol.ID
-	receiver              chan deal.Offer
+	receiver              OfferReceiver
+}
+
+func (impl *Libp2pQueryNetwork) Start(r OfferReceiver) {
+	impl.receiver = r
+	for _, proto := range impl.supportedProtocols {
+		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
+	}
 }
 
 // NewQueryStream creates a new QueryStream using the provided peer.ID
@@ -229,10 +233,7 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 		return
 	}
 
-	impl.receiver <- deal.Offer{
-		PeerID:   qs.OtherPeer(),
-		Response: response,
-	}
+	impl.receiver.Receive(qs.OtherPeer(), response)
 }
 
 // ID returns the host peer ID
@@ -245,6 +246,6 @@ func (impl *Libp2pQueryNetwork) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
 	impl.host.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
 }
 
-func (impl *Libp2pQueryNetwork) Receiver() chan deal.Offer {
+func (impl *Libp2pQueryNetwork) Receiver() OfferReceiver {
 	return impl.receiver
 }

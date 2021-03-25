@@ -42,42 +42,19 @@ type Session struct {
 	// unsubscribes is used to clear any subscriptions to our retrieval events when we have received
 	// all the content
 	unsub retrieval.Unsubscribe
+	// offers it the global offer queue
+	offers *OfferQueue
 
 	mu sync.Mutex
-	// responses is a list of all the responses peers sent us back for a gossip query
-	responses map[peer.ID]deal.QueryResponse
 	// dealID is the ID of any ongoing deal we might have with a provider during this session
 	dealID *deal.ID
 }
 
-type gossipSourcing struct {
-	offers chan deal.Offer // stream of offers coming from a gossip query
-}
-
-// HandleQueryStream for direct provider queries
-func (g *gossipSourcing) HandleQueryStream(stream retrieval.QueryStream) {
-
-	defer stream.Close()
-
-	response, err := stream.ReadQueryResponse()
-	if err != nil {
-		fmt.Println("unable to read query response", err)
-		return
-	}
-
-	fmt.Printf("received an offer\n")
-
-	g.offers <- deal.Offer{
-		PeerID:   stream.OtherPeer(),
-		Response: response,
-	}
-}
-
 // QueryMiner asks a storage miner for retrieval conditions
-func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*deal.Offer, error) {
+func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) error {
 	stream, err := s.net.NewQueryStream(pid)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer stream.Close()
 
@@ -86,67 +63,20 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) (*deal.Offer, err
 		QueryParams: deal.QueryParams{},
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	res, err := stream.ReadQueryResponse()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &deal.Offer{
-		PeerID:   pid,
-		Response: res,
-	}, nil
-}
-
-// Offers is a queue containing a list of asynchronously loaded offers
-type Offers struct {
-	updates chan deal.Offer
-	closing chan struct{}
-}
-
-// Next waits and returns the next offer in line
-func (o *Offers) Next(ctx context.Context) (deal.Offer, error) {
-	select {
-	case of := <-o.updates:
-		return of, nil
-	case <-ctx.Done():
-		return deal.Offer{}, ctx.Err()
-	}
-}
-
-// Close clears out the offers queue
-func (o *Offers) Close() {
-	o.closing <- struct{}{}
+	s.offers.Receive(pid, res)
+	return nil
 }
 
 // QueryGossip asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
-func (s *Session) QueryGossip(ctx context.Context) (*Offers, error) {
-	oq := &Offers{
-		updates: make(chan deal.Offer),
-		closing: make(chan struct{}),
-	}
-	go func() {
-		var pending []deal.Offer
-		for {
-			var first deal.Offer
-			var updates chan deal.Offer
-			if len(pending) > 0 {
-				first = pending[0]
-				updates = oq.updates
-			}
-
-			select {
-			case <-oq.closing:
-				return
-			case o := <-s.net.Receiver():
-				pending = append(pending, o)
-			case updates <- first:
-				pending = pending[1:]
-			}
-		}
-	}()
+func (s *Session) QueryGossip(ctx context.Context) error {
 	m := deal.Query{
 		PayloadCID:  s.root,
 		QueryParams: deal.QueryParams{},
@@ -154,52 +84,46 @@ func (s *Session) QueryGossip(ctx context.Context) (*Offers, error) {
 
 	buf := new(bytes.Buffer)
 	if err := m.MarshalCBOR(buf); err != nil {
-		return nil, err
+		return err
 	}
 
 	// publish to all regions this exchange joined
 	for _, topic := range s.regionTopics {
 		if err := topic.Publish(ctx, buf.Bytes()); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	return oq, nil
+	return nil
 }
 
-// SyncBlocks will trigger a retrieval without returning the blocks
-func (s *Session) SyncBlocks(ctx context.Context, ofs *Offers) error {
-	of, err := ofs.Next(ctx)
-	if err != nil {
-		return err
-	}
+func (s *Session) StartTransfer() {
+	// Queue the job to handle once we get an offer
+	job := func(ctx context.Context, of deal.Offer) (deal.ID, error) {
+		params, err := deal.NewParams(
+			of.Response.MinPricePerByte,
+			of.Response.MaxPaymentInterval,
+			of.Response.MaxPaymentIntervalIncrease,
+			AllSelector(),
+			nil,
+			of.Response.UnsealPrice,
+		)
+		if err != nil {
+			return 0, err
+		}
 
-	params, err := deal.NewParams(
-		of.Response.MinPricePerByte,
-		of.Response.MaxPaymentInterval,
-		of.Response.MaxPaymentIntervalIncrease,
-		AllSelector(),
-		nil,
-		of.Response.UnsealPrice,
-	)
-
-	id, err := s.retriever.Retrieve(
-		ctx,
-		s.root,
-		params,
-		of.Response.PieceRetrievalPrice(),
-		of.PeerID,
-		s.clientAddr,
-		of.Response.PaymentAddress,
-		&s.storeID,
-	)
-	if err != nil {
-		return err
+		return s.retriever.Retrieve(
+			ctx,
+			s.root,
+			params,
+			of.Response.PieceRetrievalPrice(),
+			of.PeerID,
+			s.clientAddr,
+			of.Response.PaymentAddress,
+			&s.storeID,
+		)
 	}
-	s.mu.Lock()
-	s.dealID = &id
-	s.mu.Unlock()
-	return nil
+	s.offers.HandleNext(job)
 }
 
 // AllSelector to get all the nodes for now. TODO` support custom selectors

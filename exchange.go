@@ -57,7 +57,10 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	}
 	// Setup the messaging protocol for communicating retrieval deals
 	ex.net = retrieval.NewQueryNetwork(ex.h)
-
+	// We must start the offer queue now otherwise there is a race condition when trying to set it
+	// at the moment we're querying for offers
+	ex.ofq = NewOfferQueue(ctx)
+	ex.net.Start(ex.ofq)
 	// Retrieval data transfer setup
 	ex.dataTransfer, err = NewDataTransfer(ctx, ex.h, set.GraphSync, set.Datastore, "retrieval", set.RepoPath)
 	if err != nil {
@@ -100,10 +103,85 @@ type Exchange struct {
 	supply    *supply.Supply
 	wallet    wallet.Driver
 	fAPI      filecoin.API
+	ofq       *OfferQueue
 
 	mu           sync.Mutex
 	regionSubs   map[string]*pubsub.Subscription
 	regionTopics map[string]*pubsub.Topic
+}
+
+// OfferQueue receives query responses from the network and queues them up in a buffer
+// the goal is to fallback on other offers if a transfer goes wrong which means being able
+// to seemlessly continue the transfer with another peer
+// Eventually we will want to function with multiple providers at once
+type OfferQueue struct {
+	offers  chan deal.Offer
+	results chan JobResult
+	jobs    chan Job
+}
+
+// JobResult tells us if our job was started successfully
+type JobResult struct {
+	DealID deal.ID
+	Err    error
+}
+
+// Job is a retrieval operation to be performed on an offer
+type Job func(context.Context, deal.Offer) (deal.ID, error)
+
+// NewOfferQueue starts a worker to process received offers and run jobs on queued up offers
+func NewOfferQueue(ctx context.Context) *OfferQueue {
+	oq := &OfferQueue{
+		offers:  make(chan deal.Offer),
+		results: make(chan JobResult),
+		jobs:    make(chan Job, 8),
+	}
+	go oq.processOffers(ctx)
+	return oq
+}
+
+// HandleNext adds a job in the queue to run on the next available offer
+func (oq *OfferQueue) HandleNext(fn Job) {
+	oq.jobs <- fn
+}
+
+// Receive sends a new offer to the queue
+func (oq *OfferQueue) Receive(p peer.ID, res deal.QueryResponse) {
+	oq.offers <- deal.Offer{
+		PeerID:   p,
+		Response: res,
+	}
+}
+
+// processOffers receives jobs to handle queued up offers
+// TODO: we need to make sure we are matching the job with the right offer
+func (oq *OfferQueue) processOffers(ctx context.Context) {
+	// This is our offer queue
+	var q []deal.Offer
+	for {
+		var first deal.Offer
+		// if there are no offers the jobs channel should be
+		// nil so wait for the next offer to execute it
+		var jobs chan Job
+		if len(q) > 0 {
+			first = q[0]
+			jobs = oq.jobs
+		}
+		select {
+		// If we have a job and a queued up offer we run the job on the first offer
+		case j := <-jobs:
+			did, err := j(ctx, first)
+			oq.results <- JobResult{did, err}
+
+			// remove the offer from the queue
+			q = q[1:]
+			// If we receive a new offer we append it to the queue
+		case of := <-oq.offers:
+			q = append(q, of)
+		case <-ctx.Done():
+			// exit when the context is done
+		}
+	}
 }
 
 // joinRegions allows a provider to handle request in specific CDN regions
@@ -210,6 +288,7 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 		clientAddr:   e.wallet.DefaultAddress(),
 		done:         done,
 		unsub:        unsubscribe,
+		offers:       e.ofq,
 		// We create a fresh new store for this session
 		storeID: e.multiStore.Next(),
 	}
