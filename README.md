@@ -32,7 +32,19 @@ and more at the prototype stage so feel free to open an issue if you have any su
 
 As a CLI:
 
-clone the repo then run:
+Install dependencies:
+
+```commandline
+brew install go bzr jq pkg-config rustup hwloc
+```
+
+Clone the repo. You may need to include submodules:
+
+```commandline
+git submodule update --init --recursive
+```
+
+run:
 ```commandline
 $ make
 ```
