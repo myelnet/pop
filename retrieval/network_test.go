@@ -3,79 +3,85 @@ package retrieval
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/filecoin-project/go-address"
-	cid "github.com/ipfs/go-cid"
-	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
+	peer "github.com/libp2p/go-libp2p-peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/stretchr/testify/require"
 )
 
-var blockGenerator = blocksutil.NewBlockGenerator()
-
-type testhandler struct {
-	net  QueryNetwork
-	root cid.Cid
-	t    *testing.T
+type receiver struct {
+	offers chan deal.Offer
 }
 
-func (h *testhandler) HandleQueryStream(stream QueryStream) {
-	defer stream.Close()
-
-	query, err := stream.ReadQuery()
-	require.NoError(h.t, err)
-	require.Equal(h.t, h.root, query.PayloadCID)
-
-	addr, _ := address.NewIDAddress(uint64(10))
-
-	answer := deal.QueryResponse{
-		Status:                     deal.QueryResponseAvailable,
-		Size:                       1600,
-		PaymentAddress:             addr,
-		MinPricePerByte:            deal.DefaultPricePerByte,
-		MaxPaymentInterval:         deal.DefaultPaymentInterval,
-		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+// Receive sends a new offer to the queue
+func (r receiver) Receive(p peer.ID, res deal.QueryResponse) {
+	r.offers <- deal.Offer{
+		PeerID:   p,
+		Response: res,
 	}
-	err = stream.WriteQueryResponse(answer)
-	require.NoError(h.t, err)
 }
 
 func TestNetwork(t *testing.T) {
 	bgCtx := context.Background()
+	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+	defer cancel()
 
 	mn := mocknet.New(bgCtx)
 
-	root := blockGenerator.Next().Cid()
-
 	cnode := testutil.NewTestNode(mn, t)
-	pnode := testutil.NewTestNode(mn, t)
-
 	cnet := NewQueryNetwork(cnode.Host)
-	pnet := NewQueryNetwork(pnode.Host)
+	r := receiver{make(chan deal.Offer)}
+	cnet.Start(r)
 
-	phandler := &testhandler{pnet, root, t}
-	pnet.SetDelegate(phandler)
+	pnodes := make(map[peer.ID]*testutil.TestNode)
+	pnets := make(map[peer.ID]*Libp2pQueryNetwork)
+
+	for i := 0; i < 11; i++ {
+		pnode := testutil.NewTestNode(mn, t)
+		pnet := NewQueryNetwork(pnode.Host)
+		pnodes[pnode.Host.ID()] = pnode
+		pnets[pnode.Host.ID()] = pnet
+	}
 
 	require.NoError(t, mn.LinkAll())
 
 	require.NoError(t, mn.ConnectAllButSelf())
 
-	stream, err := cnet.NewQueryStream(pnode.Host.ID())
-	require.NoError(t, err)
-	defer stream.Close()
+	// Simulating a bunch of nodes sending responses at the same time
+	for _, net := range pnets {
+		net := net
+		go func() {
+			stream, err := net.NewQueryStream(cnode.Host.ID())
+			require.NoError(t, err)
+			defer stream.Close()
 
-	err = stream.WriteQuery(deal.Query{
-		PayloadCID:  root,
-		QueryParams: deal.QueryParams{},
-	})
-	require.NoError(t, err)
+			addr, _ := address.NewIDAddress(uint64(10))
 
-	res, err := stream.ReadQueryResponse()
-	require.NoError(t, err)
+			answer := deal.QueryResponse{
+				Status:                     deal.QueryResponseAvailable,
+				Size:                       1600,
+				PaymentAddress:             addr,
+				MinPricePerByte:            deal.DefaultPricePerByte,
+				MaxPaymentInterval:         deal.DefaultPaymentInterval,
+				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+			}
+			err = stream.WriteQueryResponse(answer)
+			require.NoError(t, err)
+		}()
+	}
 
-	require.Equal(t, res.Status, deal.QueryResponseAvailable)
+	for i := 0; i < 11; i++ {
+		select {
+		case of := <-r.offers:
+			require.Equal(t, of.Response.Size, uint64(1600))
+		case <-ctx.Done():
+			require.NoError(t, ctx.Err())
+		}
+	}
 }
 
 /****
