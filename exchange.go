@@ -195,6 +195,7 @@ func (oq *OfferQueue) processOffers(ctx context.Context) {
 			// If we receive a new offer we append it to the queue
 		case of := <-oq.offers:
 			q = append(q, of)
+			fmt.Println("received offer")
 		// if we get a peerk request we send our first item to it
 		case req := <-peek:
 			req <- first
