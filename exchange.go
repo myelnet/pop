@@ -3,6 +3,7 @@ package pop
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -110,6 +111,9 @@ type Exchange struct {
 	regionTopics map[string]*pubsub.Topic
 }
 
+// ErrQueueEmpty is returned when peeking if the queue is empty
+var ErrQueueEmpty = errors.New("queue is empty")
+
 // OfferQueue receives query responses from the network and queues them up in a buffer
 // the goal is to fallback on other offers if a transfer goes wrong which means being able
 // to seemlessly continue the transfer with another peer
@@ -122,8 +126,10 @@ type OfferQueue struct {
 }
 
 // JobResult tells us if our job was started successfully
+// and the offer it's running on
 type JobResult struct {
 	DealID deal.ID
+	Offer  deal.Offer
 	Err    error
 }
 
@@ -155,7 +161,7 @@ func (oq *OfferQueue) Receive(p peer.ID, res deal.QueryResponse) {
 	}
 }
 
-// Peek returns the first item in the queue
+// Peek returns the first item in the queue or an error if no item is loaded yet
 func (oq *OfferQueue) Peek(ctx context.Context) (deal.Offer, error) {
 	result := make(chan deal.Offer)
 	oq.peek <- result
@@ -168,10 +174,11 @@ func (oq *OfferQueue) Peek(ctx context.Context) (deal.Offer, error) {
 	}
 }
 
-// processOffers receives jobs to handle queued up offers
+// processOffers  is a worker that receives jobs to handle queued up offers
 // TODO: we need to make sure we are matching the job with the right offer
 func (oq *OfferQueue) processOffers(ctx context.Context) {
 	// This is our offer queue
+	maxQSize := 17
 	var q []deal.Offer
 	for {
 		var first deal.Offer
@@ -188,19 +195,22 @@ func (oq *OfferQueue) processOffers(ctx context.Context) {
 		// If we have a job and a queued up offer we run the job on the first offer
 		case j := <-jobs:
 			did, err := j(ctx, first)
-			oq.results <- JobResult{did, err}
+			oq.results <- JobResult{did, first, err}
 
 			// remove the offer from the queue
 			q = q[1:]
 			// If we receive a new offer we append it to the queue
 		case of := <-oq.offers:
-			q = append(q, of)
-			fmt.Println("received offer")
-		// if we get a peerk request we send our first item to it
+			// If we already have too many offers we drop them
+			if len(q) < maxQSize {
+				q = append(q, of)
+			}
+		// if we get a peek request we send our first item to it
 		case req := <-peek:
 			req <- first
 		case <-ctx.Done():
 			// exit when the context is done
+			return
 		}
 	}
 }
@@ -241,7 +251,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		if msg.ReceivedFrom == e.h.ID() {
 			continue
 		}
-		m := new(deal.Query)
+		m := new(deal.GossipQuery)
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
@@ -261,7 +271,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && stats.Size > 0 {
-			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
+			qs, err := e.net.NewQueryStream(m.PublisherID)
 			if err != nil {
 				fmt.Println("error", err)
 				continue

@@ -75,7 +75,7 @@ type TestNode struct {
 	Counter         *storedcounter.StoredCounter
 }
 
-func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
+func NewTestNode(mn mocknet.Mocknet, t testing.TB) *TestNode {
 	testNode := &TestNode{}
 
 	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
@@ -128,7 +128,8 @@ func NewTestNode(mn mocknet.Mocknet, t *testing.T) *TestNode {
 	testNode.Storer = makeStorer(testNode.Bs)
 
 	// We generate our own peer to avoid the default bogus private key
-	peer := tnet.RandPeerNetParamsOrFatal(t)
+	peer, err := tnet.RandPeerNetParams()
+	require.NoError(t, err)
 
 	testNode.Host, err = mn.AddPeer(peer.PrivKey, peer.Addr)
 	require.NoError(t, err)
@@ -140,7 +141,7 @@ func (tn *TestNode) SetupGraphSync(ctx context.Context) {
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
 }
 
-func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
+func (tn *TestNode) SetupDataTransfer(ctx context.Context, t testing.TB) {
 	var err error
 	tn.DTStoredCounter = storedcounter.New(tn.Ds, datastore.NewKey("nextDTID"))
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
@@ -163,7 +164,7 @@ func (tn *TestNode) SetupDataTransfer(ctx context.Context, t *testing.T) {
 	}
 }
 
-func (tn *TestNode) CreateRandomFile(t *testing.T, size int) string {
+func (tn *TestNode) CreateRandomFile(t testing.TB, size int) string {
 	file, err := os.CreateTemp("", "data")
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -181,13 +182,13 @@ func (tn *TestNode) CreateRandomFile(t *testing.T, size int) string {
 const unixfsChunkSize uint64 = 1 << 10
 const unixfsLinksPerLevel = 1024
 
-func (tn *TestNode) ThisDir(t *testing.T, p string) string {
+func (tn *TestNode) ThisDir(t testing.TB, p string) string {
 	fpath, err := filepath.Abs(filepath.Join(ThisDir(t), "..", p))
 	require.NoError(t, err)
 	return fpath
 }
 
-func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t *testing.T, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
+func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t testing.TB, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
 	stID := tn.Ms.Next()
 	store, err := tn.Ms.Get(stID)
 	require.NoError(t, err)
@@ -222,7 +223,7 @@ func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t *testing.T, dirPat
 	return cidlink.Link{Cid: nd.Cid()}, stID, buf.Bytes()
 }
 
-func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t *testing.T, dag ipldformat.DAGService, link cid.Cid, origBytes []byte) {
+func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t testing.TB, dag ipldformat.DAGService, link cid.Cid, origBytes []byte) {
 
 	n, err := dag.Get(ctx, link)
 	require.NoError(t, err)
@@ -242,7 +243,7 @@ func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t *testing.T, dag
 	require.EqualValues(t, origBytes, b)
 }
 
-func (tn *TestNode) NukeBlockstore(ctx context.Context, t *testing.T) {
+func (tn *TestNode) NukeBlockstore(ctx context.Context, t testing.TB) {
 	cids, err := tn.Bs.AllKeysChan(ctx)
 	require.NoError(t, err)
 
@@ -252,7 +253,7 @@ func (tn *TestNode) NukeBlockstore(ctx context.Context, t *testing.T) {
 	}
 }
 
-func ThisDir(t *testing.T) string {
+func ThisDir(t testing.TB) string {
 	_, fname, _, ok := runtime.Caller(1)
 	require.True(t, ok)
 	return path.Dir(fname)

@@ -232,6 +232,150 @@ func (t *Query) UnmarshalCBOR(r io.Reader) error {
 
 	return nil
 }
+func (t *GossipQuery) MarshalCBOR(w io.Writer) error {
+	if t == nil {
+		_, err := w.Write(cbg.CborNull)
+		return err
+	}
+	if _, err := w.Write([]byte{163}); err != nil {
+		return err
+	}
+
+	scratch := make([]byte, 9)
+
+	// t.PayloadCID (cid.Cid) (struct)
+	if len("PayloadCID") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PayloadCID\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PayloadCID"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PayloadCID")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteCidBuf(scratch, w, t.PayloadCID); err != nil {
+		return xerrors.Errorf("failed to write cid field t.PayloadCID: %w", err)
+	}
+
+	// t.PublisherID (peer.ID) (string)
+	if len("PublisherID") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PublisherID\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PublisherID"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PublisherID")); err != nil {
+		return err
+	}
+
+	if len(t.PublisherID) > cbg.MaxLength {
+		return xerrors.Errorf("Value in field t.PublisherID was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(t.PublisherID))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string(t.PublisherID)); err != nil {
+		return err
+	}
+
+	// t.QueryParams (deal.QueryParams) (struct)
+	if len("QueryParams") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"QueryParams\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("QueryParams"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("QueryParams")); err != nil {
+		return err
+	}
+
+	if err := t.QueryParams.MarshalCBOR(w); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *GossipQuery) UnmarshalCBOR(r io.Reader) error {
+	*t = GossipQuery{}
+
+	br := cbg.GetPeeker(r)
+	scratch := make([]byte, 8)
+
+	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajMap {
+		return fmt.Errorf("cbor input should be of type map")
+	}
+
+	if extra > cbg.MaxLength {
+		return fmt.Errorf("GossipQuery: map struct too large (%d)", extra)
+	}
+
+	var name string
+	n := extra
+
+	for i := uint64(0); i < n; i++ {
+
+		{
+			sval, err := cbg.ReadStringBuf(br, scratch)
+			if err != nil {
+				return err
+			}
+
+			name = string(sval)
+		}
+
+		switch name {
+		// t.PayloadCID (cid.Cid) (struct)
+		case "PayloadCID":
+
+			{
+
+				c, err := cbg.ReadCid(br)
+				if err != nil {
+					return xerrors.Errorf("failed to read cid field t.PayloadCID: %w", err)
+				}
+
+				t.PayloadCID = c
+
+			}
+			// t.PublisherID (peer.ID) (string)
+		case "PublisherID":
+
+			{
+				sval, err := cbg.ReadStringBuf(br, scratch)
+				if err != nil {
+					return err
+				}
+
+				t.PublisherID = peer.ID(sval)
+			}
+			// t.QueryParams (deal.QueryParams) (struct)
+		case "QueryParams":
+
+			{
+
+				if err := t.QueryParams.UnmarshalCBOR(br); err != nil {
+					return xerrors.Errorf("unmarshaling t.QueryParams: %w", err)
+				}
+
+			}
+
+		default:
+			// Field doesn't exist on this type, so ignore it
+			cbg.ScanForLinks(r, func(cid.Cid) {})
+		}
+	}
+
+	return nil
+}
 func (t *QueryResponse) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)

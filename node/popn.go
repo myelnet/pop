@@ -726,7 +726,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		return err
 	}
 
-	session.StartTransfer()
+	if err := session.StartTransfer(ctx); err != nil {
+		return err
+	}
 
 	did, err := session.DealID()
 	if err != nil {

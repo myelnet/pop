@@ -77,8 +77,9 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) error {
 // QueryGossip asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
 func (s *Session) QueryGossip(ctx context.Context) error {
-	m := deal.Query{
+	m := deal.GossipQuery{
 		PayloadCID:  s.root,
+		PublisherID: s.net.ID(),
 		QueryParams: deal.QueryParams{},
 	}
 
@@ -97,7 +98,10 @@ func (s *Session) QueryGossip(ctx context.Context) error {
 	return nil
 }
 
-func (s *Session) StartTransfer() {
+// StartTransfer sends a transfer job to the offer queue worker and waits for it to start
+// it will get assigned to the first offer in the queue
+// TODO: we should be able to pass some rules to select a best offer
+func (s *Session) StartTransfer(ctx context.Context) error {
 	// Queue the job to handle once we get an offer
 	job := func(ctx context.Context, of deal.Offer) (deal.ID, error) {
 		params, err := deal.NewParams(
@@ -124,6 +128,16 @@ func (s *Session) StartTransfer() {
 		)
 	}
 	s.offers.HandleNext(job)
+	select {
+	case r := <-s.offers.results:
+		if r.Err != nil {
+			return r.Err
+		}
+		s.setDealID(r.DealID)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // AllSelector to get all the nodes for now. TODO` support custom selectors
@@ -136,6 +150,12 @@ func AllSelector() iprime.Node {
 // Done returns a channel that receives any resulting error from the latest operation
 func (s *Session) Done() <-chan error {
 	return s.done
+}
+
+func (s *Session) setDealID(d deal.ID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dealID = &d
 }
 
 // DealID returns the id of the current deal if any
