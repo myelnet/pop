@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ipfs/go-blockservice"
+	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dss "github.com/ipfs/go-datastore/sync"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
@@ -28,9 +29,125 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/supply"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfferQueue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	q := NewOfferQueue(ctx)
+
+	for i := 0; i < 11; i++ {
+		i := i
+		go func() {
+			q.Receive(peer.ID(fmt.Sprintf("%d", i)), deal.QueryResponse{})
+		}()
+	}
+
+	for i := 0; i < 11; i++ {
+		q.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
+			return deal.ID(0), nil
+		})
+		select {
+		case <-q.results:
+		case <-ctx.Done():
+			require.NoError(t, ctx.Err())
+		}
+	}
+}
+
+func TestGossipQuery(t *testing.T) {
+	bgCtx := context.Background()
+
+	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+	defer cancel()
+
+	mn := mocknet.New(bgCtx)
+
+	var client *Exchange
+	var cnode *testutil.TestNode
+
+	providers := make(map[peer.ID]*Exchange)
+	pnodes := make(map[peer.ID]*testutil.TestNode)
+
+	// This just creates the file without adding it
+	fname := cnode.CreateRandomFile(t, 256000)
+
+	var rootCid cid.Cid
+
+	for i := 0; i < 11; i++ {
+		n := testutil.NewTestNode(mn, t)
+		n.SetupGraphSync(ctx)
+		ps, err := pubsub.NewGossipSub(ctx, n.Host)
+		require.NoError(t, err)
+
+		settings := Settings{
+			Datastore:  n.Ds,
+			Blockstore: n.Bs,
+			MultiStore: n.Ms,
+			Host:       n.Host,
+			PubSub:     ps,
+			GraphSync:  n.Gs,
+			RepoPath:   n.DTTmpDir,
+			Keystore:   keystore.NewMemKeystore(),
+			Regions:    []supply.Region{supply.Regions["Global"]},
+		}
+
+		exch, err := NewExchange(bgCtx, settings)
+		require.NoError(t, err)
+
+		if i == 0 {
+			client = exch
+			cnode = n
+		} else {
+			providers[n.Host.ID()] = exch
+			pnodes[n.Host.ID()] = n
+			link, storeID, _ := n.LoadFileToNewStore(ctx, t, fname)
+			rootCid = link.(cidlink.Link).Cid
+			require.NoError(t, exch.Supply().Register(rootCid, storeID))
+		}
+	}
+
+	require.NoError(t, mn.LinkAll())
+
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Now we fetch it again from our providers
+	session, err := client.NewSession(ctx, rootCid)
+	require.NoError(t, err)
+	defer session.Close()
+
+	err = session.QueryGossip(ctx)
+	require.NoError(t, err)
+
+	// execute a job for each offer
+	for i := 0; i < 10; i++ {
+		offer, err := session.OfferQueue().Peek(ctx)
+		require.NoError(t, err)
+		require.Equal(t, offer.Response.Size, uint64(268009))
+
+		session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
+			return deal.ID(i), nil
+		})
+		select {
+		case r := <-session.offers.results:
+			require.Equal(t, r.DealID, deal.ID(i))
+			// first offer in the queue should be different now that we launched a job on it
+			if i < 9 {
+				noffer, err := session.OfferQueue().Peek(ctx)
+				// if it's the last item the queue should be empty
+				require.NoError(t, err)
+				require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+			}
+
+		case <-ctx.Done():
+			require.NoError(t, ctx.Err())
+		}
+	}
+}
 
 func TestExchangeDirect(t *testing.T) {
 	// Iterating a ton helps weed out false positives
@@ -123,11 +240,14 @@ func TestExchangeDirect(t *testing.T) {
 			require.NoError(t, err)
 			defer session.Close()
 
-			offer, err := session.QueryGossip(ctx)
+			err = session.QueryGossip(ctx)
 			require.NoError(t, err)
 
-			err = session.SyncBlocks(ctx, offer)
+			require.NoError(t, session.StartTransfer(ctx))
+
+			d, err := session.DealID()
 			require.NoError(t, err)
+			require.Equal(t, d, deal.ID(0))
 
 			select {
 			case err := <-session.Done():

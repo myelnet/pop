@@ -18,7 +18,7 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
-//go:generate cbor-gen-for --map-encoding QueryParams Query QueryResponse Proposal Response Params Payment ClientState ProviderState PaymentInfo
+//go:generate cbor-gen-for --map-encoding QueryParams Query GossipQuery QueryResponse Proposal Response Params Payment ClientState ProviderState PaymentInfo
 
 // QueryParams - indicate what specific information about a piece that a retrieval
 // client is interested in, as well as specific parameters the client is seeking
@@ -35,6 +35,14 @@ type QueryParams struct {
 // If we don't have a specific provider in mind we can use gossip Hop to find one
 type Query struct {
 	PayloadCID cid.Cid
+	QueryParams
+}
+
+// GossipQuery is a query to any provider which may be relayed by other peers
+// hence it needs to provide information about the publisher
+type GossipQuery struct {
+	PayloadCID  cid.Cid
+	PublisherID peer.ID
 	QueryParams
 }
 
