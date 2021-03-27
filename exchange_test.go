@@ -25,8 +25,10 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	bhost "github.com/libp2p/go-libp2p-blankhost"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
@@ -59,93 +61,148 @@ func TestOfferQueue(t *testing.T) {
 	}
 }
 
-func TestGossipQuery(t *testing.T) {
-	bgCtx := context.Background()
+type Topology func(*testing.T, mocknet.Mocknet, *testutil.TestNode, []*testutil.TestNode)
 
-	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
-	defer cancel()
-
-	mn := mocknet.New(bgCtx)
-
-	var client *Exchange
-	var cnode *testutil.TestNode
-
-	providers := make(map[peer.ID]*Exchange)
-	pnodes := make(map[peer.ID]*testutil.TestNode)
-
-	// This just creates the file without adding it
-	fname := cnode.CreateRandomFile(t, 256000)
-
-	var rootCid cid.Cid
-
-	for i := 0; i < 11; i++ {
-		n := testutil.NewTestNode(mn, t)
-		n.SetupGraphSync(ctx)
-		ps, err := pubsub.NewGossipSub(ctx, n.Host)
-		require.NoError(t, err)
-
-		settings := Settings{
-			Datastore:  n.Ds,
-			Blockstore: n.Bs,
-			MultiStore: n.Ms,
-			Host:       n.Host,
-			PubSub:     ps,
-			GraphSync:  n.Gs,
-			RepoPath:   n.DTTmpDir,
-			Keystore:   keystore.NewMemKeystore(),
-			Regions:    []supply.Region{supply.Regions["Global"]},
-		}
-
-		exch, err := NewExchange(bgCtx, settings)
-		require.NoError(t, err)
-
-		if i == 0 {
-			client = exch
-			cnode = n
-		} else {
-			providers[n.Host.ID()] = exch
-			pnodes[n.Host.ID()] = n
-			link, storeID, _ := n.LoadFileToNewStore(ctx, t, fname)
-			rootCid = link.(cidlink.Link).Cid
-			require.NoError(t, exch.Supply().Register(rootCid, storeID))
-		}
-	}
-
+func All(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*testutil.TestNode) {
 	require.NoError(t, mn.LinkAll())
-
 	require.NoError(t, mn.ConnectAllButSelf())
+}
 
-	// Now we fetch it again from our providers
-	session, err := client.NewSession(ctx, rootCid)
-	require.NoError(t, err)
-	defer session.Close()
+func OneToOne(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*testutil.TestNode) {
+	require.NoError(t, testutil.Connect(rn, prs[0]))
+	time.Sleep(time.Second)
+}
 
-	err = session.QueryGossip(ctx)
-	require.NoError(t, err)
+func Markov(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*testutil.TestNode) {
+	prevPeer := rn
+	for _, tn := range prs {
+		require.NoError(t, testutil.Connect(prevPeer, tn))
+		prevPeer = tn
+	}
+	time.Sleep(time.Second)
+}
 
-	// execute a job for each offer
-	for i := 0; i < 10; i++ {
-		offer, err := session.OfferQueue().Peek(ctx)
-		require.NoError(t, err)
-		require.Equal(t, offer.Response.Size, uint64(268009))
+func TestGossipQuery(t *testing.T) {
+	noop := func(tn *testutil.TestNode) {}
+	// For some reason the other testnet doesn't behave so well with complex topologies
+	withSwarmT := func(tn *testutil.TestNode) {
+		netw := swarmt.GenSwarm(t, context.Background())
+		h := bhost.NewBlankHost(netw)
+		tn.Host = h
+	}
+	testCases := []struct {
+		name     string
+		topology Topology
+		peers    int
+		netOpts  func(*testutil.TestNode)
+	}{
+		{
+			name:     "Connect all",
+			topology: All,
+			peers:    11,
+			netOpts:  noop,
+		},
+		{
+			name:     "One to one",
+			topology: OneToOne,
+			peers:    2,
+			netOpts:  withSwarmT,
+		},
+		{
+			name:     "Markov",
+			topology: Markov,
+			peers:    6,
+			netOpts:  withSwarmT,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			bgCtx := context.Background()
 
-		session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
-			return deal.ID(i), nil
-		})
-		select {
-		case r := <-session.offers.results:
-			require.Equal(t, r.DealID, deal.ID(i))
-			// first offer in the queue should be different now that we launched a job on it
-			if i < 9 {
-				noffer, err := session.OfferQueue().Peek(ctx)
-				// if it's the last item the queue should be empty
+			ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+			defer cancel()
+
+			mn := mocknet.New(bgCtx)
+
+			var client *Exchange
+			var cnode *testutil.TestNode
+
+			providers := make(map[peer.ID]*Exchange)
+			var pnodes []*testutil.TestNode
+
+			// This just creates the file without adding it
+			fname := cnode.CreateRandomFile(t, 256000)
+
+			var rootCid cid.Cid
+
+			for i := 0; i < testCase.peers; i++ {
+				n := testutil.NewTestNode(mn, t, testCase.netOpts)
+				n.SetupGraphSync(ctx)
+				ps, err := pubsub.NewGossipSub(ctx, n.Host)
 				require.NoError(t, err)
-				require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+
+				settings := Settings{
+					Datastore:  n.Ds,
+					Blockstore: n.Bs,
+					MultiStore: n.Ms,
+					Host:       n.Host,
+					PubSub:     ps,
+					GraphSync:  n.Gs,
+					RepoPath:   n.DTTmpDir,
+					Keystore:   keystore.NewMemKeystore(),
+					Regions:    []supply.Region{supply.Regions["Global"]},
+				}
+
+				exch, err := NewExchange(bgCtx, settings)
+				require.NoError(t, err)
+
+				if i == 0 {
+					client = exch
+					cnode = n
+				} else {
+					providers[n.Host.ID()] = exch
+					pnodes = append(pnodes, n)
+					link, storeID, _ := n.LoadFileToNewStore(ctx, t, fname)
+					rootCid = link.(cidlink.Link).Cid
+					require.NoError(t, exch.Supply().Register(rootCid, storeID))
+				}
 			}
 
-		case <-ctx.Done():
-			require.NoError(t, ctx.Err())
-		}
+			testCase.topology(t, mn, cnode, pnodes)
+
+			// Now we fetch it again from our providers
+			session, err := client.NewSession(ctx, rootCid)
+			require.NoError(t, err)
+			defer session.Close()
+
+			err = session.QueryGossip(ctx)
+			require.NoError(t, err)
+
+			// execute a job for each offer
+			for i := 0; i < testCase.peers-1; i++ {
+				offer, err := session.OfferQueue().Peek(ctx)
+				require.NoError(t, err)
+				require.Equal(t, offer.Response.Size, uint64(268009))
+
+				session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
+					return deal.ID(i), nil
+				})
+				select {
+				case r := <-session.offers.results:
+					require.Equal(t, r.DealID, deal.ID(i))
+					// first offer in the queue should be different now that we launched a job on it
+					if i < testCase.peers-2 {
+						noffer, err := session.OfferQueue().Peek(ctx)
+						// if it's the last item the queue should be empty
+						require.NoError(t, err)
+						require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+					}
+
+				case <-ctx.Done():
+					require.NoError(t, ctx.Err())
+				}
+			}
+		})
 	}
 }
 
