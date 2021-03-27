@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"time"
+	goruntime "runtime"
 
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
@@ -143,6 +144,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 					conn.LocalMultiaddr(), conn.RemoteMultiaddr())
 			}
 
+			goruntime.GC()
 			session, err := exch.NewSession(ctx, c.PayloadCID)
 			if err != nil {
 				return err
@@ -151,7 +153,12 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 			t := time.Now()
 
-			offer, err := session.QueryGossip(ctx)
+			err = session.QueryGossip(ctx)
+			if err != nil {
+				return err
+			}
+
+			offer, err := session.OfferQueue().Peek(ctx)
 			if err != nil {
 				return err
 			}
