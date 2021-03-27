@@ -61,6 +61,9 @@ type QueryNetwork interface {
 	// ID returns the peer id of the host for this network
 	ID() peer.ID
 
+	// Addrs returns the host addresses
+	Addrs() ([]ma.Multiaddr, error)
+
 	// AddAddrs adds the given multi-addrs to the peerstore for the passed peer ID
 	AddAddrs(peer.ID, []ma.Multiaddr)
 
@@ -248,4 +251,9 @@ func (impl *Libp2pQueryNetwork) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
 
 func (impl *Libp2pQueryNetwork) Receiver() OfferReceiver {
 	return impl.receiver
+}
+
+// Addrs returns the host's p2p addresses
+func (impl *Libp2pQueryNetwork) Addrs() ([]ma.Multiaddr, error) {
+	return peer.AddrInfoToP2pAddrs(host.InfoFromHost(impl.host))
 }

@@ -46,6 +46,7 @@ require (
 	github.com/ipld/go-ipld-prime-proto v0.1.1
 	github.com/jpillora/backoff v1.0.0
 	github.com/libp2p/go-libp2p v0.13.0
+	github.com/libp2p/go-libp2p-blankhost v0.2.0
 	github.com/libp2p/go-libp2p-connmgr v0.2.4
 	github.com/libp2p/go-libp2p-core v0.8.5
 	github.com/libp2p/go-libp2p-kad-dht v0.11.1
@@ -53,6 +54,7 @@ require (
 	github.com/libp2p/go-libp2p-peer v0.2.0
 	github.com/libp2p/go-libp2p-peerstore v0.2.6
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
+	github.com/libp2p/go-libp2p-swarm v0.4.0
 	github.com/libp2p/go-libp2p-testing v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
 	github.com/multiformats/go-multiaddr v0.3.1

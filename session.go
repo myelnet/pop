@@ -3,6 +3,7 @@ package pop
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -77,9 +78,17 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) error {
 // QueryGossip asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
 func (s *Session) QueryGossip(ctx context.Context) error {
+	addrs, err := s.net.Addrs()
+	if err != nil {
+		return err
+	}
+	// Prob would never happen but you never know
+	if len(addrs) == 0 {
+		return errors.New("no host address")
+	}
 	m := deal.GossipQuery{
 		PayloadCID:  s.root,
-		PublisherID: s.net.ID(),
+		Publisher:   addrs[0].Bytes(),
 		QueryParams: deal.QueryParams{},
 	}
 

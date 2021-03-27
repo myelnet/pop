@@ -79,11 +79,7 @@ func Libp2pKey(ks keystore.Keystore) (ci.PrivKey, error) {
 func Bootstrap(ctx context.Context, h host.Host, bpeers []string) error {
 	var peers []peer.AddrInfo
 	for _, addrStr := range bpeers {
-		addr, err := ma.NewMultiaddr(addrStr)
-		if err != nil {
-			continue
-		}
-		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+		addrInfo, err := AddrStringToAddrInfo(addrStr)
 		if err != nil {
 			continue
 		}
@@ -152,4 +148,31 @@ func (l listValue) Set(v string) error {
 	}
 	*l.val = strings.Split(v, ",")
 	return nil
+}
+
+// AddrStringToAddrInfo turns a string address of format /p2p/<addr>/<peerid> to AddrInfo struct
+func AddrStringToAddrInfo(s string) (*peer.AddrInfo, error) {
+	addr, err := ma.NewMultiaddr(s)
+	if err != nil {
+		return nil, err
+	}
+	addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return addrInfo, nil
+}
+
+// AddrBytesToAddrInfo tunrs a compressed address into addrInfo struct
+func AddrBytesToAddrInfo(b []byte) (*peer.AddrInfo, error) {
+	addr, err := ma.NewMultiaddrBytes(b)
+	if err != nil {
+		return nil, err
+	}
+	addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	return addrInfo, nil
 }

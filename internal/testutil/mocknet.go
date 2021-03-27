@@ -75,7 +75,7 @@ type TestNode struct {
 	Counter         *storedcounter.StoredCounter
 }
 
-func NewTestNode(mn mocknet.Mocknet, t testing.TB) *TestNode {
+func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *TestNode {
 	testNode := &TestNode{}
 
 	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
@@ -133,6 +133,10 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB) *TestNode {
 
 	testNode.Host, err = mn.AddPeer(peer.PrivKey, peer.Addr)
 	require.NoError(t, err)
+
+	for _, opt := range opts {
+		opt(testNode)
+	}
 
 	return testNode
 }
@@ -267,4 +271,9 @@ func (v *FakeDTValidator) ValidatePush(sender peer.ID, voucher datatransfer.Vouc
 
 func (v *FakeDTValidator) ValidatePull(receiver peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
 	return nil, nil
+}
+
+func Connect(tn1, tn2 *TestNode) error {
+	pinfo := host.InfoFromHost(tn1.Host)
+	return tn2.Host.Connect(context.Background(), *pinfo)
 }

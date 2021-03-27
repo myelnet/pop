@@ -259,26 +259,27 @@ func (t *GossipQuery) MarshalCBOR(w io.Writer) error {
 		return xerrors.Errorf("failed to write cid field t.PayloadCID: %w", err)
 	}
 
-	// t.PublisherID (peer.ID) (string)
-	if len("PublisherID") > cbg.MaxLength {
-		return xerrors.Errorf("Value in field \"PublisherID\" was too long")
+	// t.Publisher ([]uint8) (slice)
+	if len("Publisher") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"Publisher\" was too long")
 	}
 
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PublisherID"))); err != nil {
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("Publisher"))); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, string("PublisherID")); err != nil {
+	if _, err := io.WriteString(w, string("Publisher")); err != nil {
 		return err
 	}
 
-	if len(t.PublisherID) > cbg.MaxLength {
-		return xerrors.Errorf("Value in field t.PublisherID was too long")
+	if len(t.Publisher) > cbg.ByteArrayMaxLen {
+		return xerrors.Errorf("Byte array in field t.Publisher was too long")
 	}
 
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(t.PublisherID))); err != nil {
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(t.Publisher))); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, string(t.PublisherID)); err != nil {
+
+	if _, err := w.Write(t.Publisher[:]); err != nil {
 		return err
 	}
 
@@ -346,16 +347,27 @@ func (t *GossipQuery) UnmarshalCBOR(r io.Reader) error {
 				t.PayloadCID = c
 
 			}
-			// t.PublisherID (peer.ID) (string)
-		case "PublisherID":
+			// t.Publisher ([]uint8) (slice)
+		case "Publisher":
 
-			{
-				sval, err := cbg.ReadStringBuf(br, scratch)
-				if err != nil {
-					return err
-				}
+			maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+			if err != nil {
+				return err
+			}
 
-				t.PublisherID = peer.ID(sval)
+			if extra > cbg.ByteArrayMaxLen {
+				return fmt.Errorf("t.Publisher: byte array too large (%d)", extra)
+			}
+			if maj != cbg.MajByteString {
+				return fmt.Errorf("expected byte array")
+			}
+
+			if extra > 0 {
+				t.Publisher = make([]uint8, extra)
+			}
+
+			if _, err := io.ReadFull(br, t.Publisher[:]); err != nil {
+				return err
 			}
 			// t.QueryParams (deal.QueryParams) (struct)
 		case "QueryParams":
