@@ -163,3 +163,16 @@ func AddrStringToAddrInfo(s string) (*peer.AddrInfo, error) {
 
 	return addrInfo, nil
 }
+
+// AddrBytesToAddrInfo tunrs a compressed address into addrInfo struct
+func AddrBytesToAddrInfo(b []byte) (*peer.AddrInfo, error) {
+	addr, err := ma.NewMultiaddrBytes(b)
+	if err != nil {
+		return nil, err
+	}
+	addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	return addrInfo, nil
+}

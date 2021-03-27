@@ -273,7 +273,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		// On the client side we assume no response means they don't have it
 		if err == nil && stats.Size > 0 {
 			// Only parse the addr info if we're gonna reply
-			pi, err := utils.AddrStringToAddrInfo(m.Publisher)
+			pi, err := utils.AddrBytesToAddrInfo(m.Publisher)
 			if err != nil {
 				fmt.Println("invalid p2p addr", err)
 				continue

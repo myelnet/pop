@@ -42,7 +42,7 @@ type Query struct {
 // hence it needs to provide information about the publisher
 type GossipQuery struct {
 	PayloadCID cid.Cid
-	Publisher  string // p2p address string seems to be the most compressed way to send that over
+	Publisher  []byte // p2p address bytes
 	QueryParams
 }
 

@@ -88,7 +88,7 @@ func (s *Session) QueryGossip(ctx context.Context) error {
 	}
 	m := deal.GossipQuery{
 		PayloadCID:  s.root,
-		Publisher:   addrs[0].String(),
+		Publisher:   addrs[0].Bytes(),
 		QueryParams: deal.QueryParams{},
 	}
 
@@ -96,6 +96,8 @@ func (s *Session) QueryGossip(ctx context.Context) error {
 	if err := m.MarshalCBOR(buf); err != nil {
 		return err
 	}
+
+	fmt.Println("size", buf.Len())
 
 	// publish to all regions this exchange joined
 	for _, topic := range s.regionTopics {
