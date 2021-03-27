@@ -97,8 +97,6 @@ func (s *Session) QueryGossip(ctx context.Context) error {
 		return err
 	}
 
-	fmt.Println("size", buf.Len())
-
 	// publish to all regions this exchange joined
 	for _, topic := range s.regionTopics {
 		if err := topic.Publish(ctx, buf.Bytes()); err != nil {
