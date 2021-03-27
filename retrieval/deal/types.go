@@ -41,8 +41,8 @@ type Query struct {
 // GossipQuery is a query to any provider which may be relayed by other peers
 // hence it needs to provide information about the publisher
 type GossipQuery struct {
-	PayloadCID  cid.Cid
-	PublisherID peer.ID
+	PayloadCID cid.Cid
+	Publisher  string // p2p address string seems to be the most compressed way to send that over
 	QueryParams
 }
 

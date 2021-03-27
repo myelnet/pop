@@ -18,6 +18,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
@@ -271,7 +272,15 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && stats.Size > 0 {
-			qs, err := e.net.NewQueryStream(m.PublisherID)
+			// Only parse the addr info if we're gonna reply
+			pi, err := utils.AddrStringToAddrInfo(m.Publisher)
+			if err != nil {
+				fmt.Println("invalid p2p addr", err)
+				continue
+			}
+			e.net.AddAddrs(pi.ID, pi.Addrs)
+
+			qs, err := e.net.NewQueryStream(pi.ID)
 			if err != nil {
 				fmt.Println("error", err)
 				continue
@@ -290,7 +299,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 			}
 			// We need to remember the offer we made so we can validate against it once
 			// clients start the retrieval
-			e.retrieval.Provider().SetAsk(m.PublisherID, answer)
+			e.retrieval.Provider().SetAsk(pi.ID, answer)
 		}
 	}
 }
