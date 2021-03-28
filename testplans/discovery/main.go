@@ -56,9 +56,9 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
 
-	// if err := shapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
-	// 	return err
-	// }
+	if err := shapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
+		return err
+	}
 
 	rpath, err := runenv.CreateRandomDirectory("", 0)
 	if err != nil {

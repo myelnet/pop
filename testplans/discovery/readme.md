@@ -1,4 +1,4 @@
-# Content Dicovery
+# Content Discovery
 
 This plan evaluates different strategies for content discovery.
 For more information on how to run it please follow instructions on the testplans [readme](/testplans).
@@ -12,7 +12,7 @@ in the Myel network. These groups are defined in regards to the session we run i
 - Nodes in the `providers` group store the content requested by clients and reply to client queries.
 - Nodes in the `bystanders` group may be client or provider nodes though aren't actively querying for content
 or storing the content clients in our session are looking for. Since all nodes in the network won't be storing
-or requesting the same content we assume a majority of node are bystanders to given session.
+or requesting the same content we assume a majority of node are bystanders to a given session.
 
 ### Connections
 The way peers are connected in the network heavily influences the performance of discovery sessions.
