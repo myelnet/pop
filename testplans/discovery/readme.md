@@ -46,9 +46,9 @@ Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
 
 Typical time to first offer: mean ± standard deviations
 
-| Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
-| :--- | ---: | ---: | ---: |
-| `gossip`         |     `825` `±104`  |     `1337` `±1071` |    `2111` `±1376` |    `2081` `±1275` | 
+| Solution        | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
+| :--- | ---: | ---: | ---: | ---: |
+| `gossip`        |     `825` `±104`  |     `1337` `±1071` |    `2111` `±1376` |    `2081` `±1275` | 
 
 
 ### [High Content Replication](/testplans/discovery/_compositions/high_content_replication.toml)
@@ -63,7 +63,7 @@ Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
 Typical time to first offer: mean ± standard deviations
 
 | Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
-| :--- | ---: | ---: | ---: |
+| :--- | ---: | ---: | ---: | ---: |
 | `gossip`         |       `697` `±25` |     	`720` `±40` |      `844` `±499` |      `776` `±101` | 
 
 
