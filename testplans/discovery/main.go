@@ -56,9 +56,9 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
 
-	if err := shapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
-		return err
-	}
+	// if err := shapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
+	// 	return err
+	// }
 
 	rpath, err := runenv.CreateRandomDirectory("", 0)
 	if err != nil {
@@ -110,10 +110,20 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	// Any node part of the provider to provide a random file
 	if group == "providers" {
+		file, err := os.Create("fixture")
+		if err != nil {
+			return err
+		}
+		data := make([]byte, 256000)
+		_, err = file.Write(data)
+		if err != nil {
+			return err
+		}
+
 		storeID := ms.Next()
 		store, err := ms.Get(storeID)
 
-		fid, err := importFile(ctx, "/fixture.jpeg", store.DAG)
+		fid, err := importFile(ctx, file.Name(), store.DAG)
 		if err != nil {
 			return err
 		}
@@ -122,13 +132,13 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		}
 
 		// Only the first one in the group needs to publish the CID as it's the same file
-		if int(initCtx.GroupSeq) == 0 {
+		if int(initCtx.GroupSeq) == 1 {
 			initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
 				PayloadCID: fid,
 				Provider:   h.ID(),
 			})
 		}
-		runenv.RecordMessage("imported content")
+		runenv.RecordMessage("imported content %s", fid)
 		initCtx.SyncClient.MustSignalEntry(ctx, imported)
 	}
 

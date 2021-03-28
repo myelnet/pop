@@ -59,7 +59,7 @@ devices that have been online for a while and are able to maintain a very large 
 ### Network Segmentation By Region
 
 This composition demonstrates the segmentation of the gossip network into different topics based on geographic
-regions. Messages are only published to a topic in which the subscribers have relatively the same low latency.
+regions. Messages are only published to a topic in which the subscribers have relatively similar latency.
 
 ## Netwotk Segmentation By Content
 

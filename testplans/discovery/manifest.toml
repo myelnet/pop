@@ -26,11 +26,6 @@ enabled = true
 [global.build_config]
 enable_go_build_cache = true
 
-[extra_sources]
-  docker_go = [
-    "../fixtures"
-  ]
-
 [[testcases]]
 name= "gossip"
 instances = { min = 3, max = 420, default = 3 }

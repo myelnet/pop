@@ -1,6 +1,6 @@
-module github.com/myelnet/pop/testplans/transfer
+module github.com/myelnet/pop/testplans/discovery
 
-go 1.14
+go 1.16
 
 require (
 	github.com/filecoin-project/go-multistore v0.0.3
