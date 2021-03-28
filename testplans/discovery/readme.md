@@ -35,33 +35,33 @@ The main solution is currently based on gossip messaging though we may add other
 solutions down the line as we believe different solutions may be best fit for different use cases.
 Each composition should be run at different scales.
 
-### Low Content Replication
+### [Low Content Replication](/testplans/discovery/_compositions/low_content_replication.toml)
 
 This composition evaluates the performance of the network with low to no content replication over a
 large network.
 
-### High Content Replication
+### [High Content Replication](/testplans/discovery/_compositions/high_content_replication.toml)
 
 This composition evaluates the performance of the network with high content replication over a large 
 network.
 
-### Low network density
+### [Low network density](/testplans/discovery/_compositions/low_network_density.toml)
 
 This composition evaluates the performance of the network in a low density topology. This means peers may be 
 limiting connections to a small amount of peers or not have had time to bootstrap and increasing the size of 
 the routing table.
 
-### High network density
+### [High network density](/testplans/discovery/_compositions/high_network_density.toml)
 
 This composition evaluates the performance of the network in a high density topology. This means users are running
 devices that have been online for a while and are able to maintain a very large number of connections.
 
-### Network Segmentation By Region
+### [Network Segmentation By Region](/testplans/discovery/_compositions/network_segment_region.toml)
 
 This composition demonstrates the segmentation of the gossip network into different topics based on geographic
 regions. Messages are only published to a topic in which the subscribers have relatively similar latency.
 
-## Netwotk Segmentation By Content
+### [Network Segmentation By Content](/testplans/discovery/_compositions/network_segment_content.toml)
 
 This composition demonstrates the segmentation of the gossip network by type of content. I.e. an application
 has created its own subnetwork in which clients can query the topic to find their content.

@@ -1,0 +1,61 @@
+[metadata]
+  name = "network_segment_content"
+
+[global]
+  plan = "discovery"
+  case = "gossip"
+  total_instances = 50
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.run.test_params]
+  bootstrap = "10"
+
+[[groups]]
+  id = "bystanders_glob"
+    [groups.instances]
+    count = 12
+    [groups.run.test_params]
+    regions = ['Global']
+
+[[groups]]
+  id = "bystanders_as"
+    [groups.instances]
+    count = 11
+    [groups.run.test_params]
+    regions = ['Asia']
+
+[[groups]]
+  id = "bystanders_oc"
+    [groups.instances]
+    count = 10
+    [groups.run.test_params]
+    regions = ['Oceania']
+
+[[groups]]
+  id = "bystanders_us"
+    [groups.instances]
+    count = 9
+    [groups.run.test_params]
+    regions = ['NorthAmerica']
+
+[[groups]]
+  id = "bystanders_eur"
+    [groups.instances]
+    count = 4
+    [groups.run.test_params]
+    regions = ['Europe']
+
+[[groups]]
+  id = "providers"
+   [groups.instances]
+    count = 3
+  [groups.run.test_params]
+    regions = ['Europe']
+
+[[groups]]
+  id = "clients"
+  [groups.instances]
+    count = 1
+  [groups.run.test_params]
+    regions = ['Europe']
