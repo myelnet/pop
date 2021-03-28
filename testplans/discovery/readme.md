@@ -3,6 +3,10 @@
 This plan evaluates different strategies for content discovery.
 For more information on how to run it please follow instructions on the testplans [readme](/testplans).
 
+The main solution is currently based on gossip messaging though we may add other
+solutions down the line as we believe different solutions may be best fit for different use cases.
+Each composition should be run at different scales.
+
 ## Global parameters
 
 ### Groups
@@ -31,19 +35,38 @@ We assume peers will have different network conditions and randomly generate par
 - `jitter` is generated based on typical values encountered in real world situations in which users maybe using more brittle wireless connections over Ethernet connected servers.
 
 ## Gossip
-The main solution is currently based on gossip messaging though we may add other
-solutions down the line as we believe different solutions may be best fit for different use cases.
-Each composition should be run at different scales.
 
 ### [Low Content Replication](/testplans/discovery/_compositions/low_content_replication.toml)
 
 This composition evaluates the performance of the network with low to no content replication over a
 large network.
 
+#### Results
+
+Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
+
+Typical time to first offer: mean ± standard deviations
+
+| Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
+| :--- | ---: | ---: | ---: |
+| `gossip`         |     `825` `±104`  |     `1337` `±1071` |    `2111` `±1376` |    `2081` `±1275` | 
+
+
 ### [High Content Replication](/testplans/discovery/_compositions/high_content_replication.toml)
 
 This composition evaluates the performance of the network with high content replication over a large 
 network.
+
+#### Results
+
+Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
+
+Typical time to first offer: mean ± standard deviations
+
+| Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
+| :--- | ---: | ---: | ---: |
+| `gossip`         |       `697` `±25` |     	`720` `±40` |      `844` `±499` |      `776` `±101` | 
+
 
 ### [Low network density](/testplans/discovery/_compositions/low_network_density.toml)
 
