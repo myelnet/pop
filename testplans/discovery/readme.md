@@ -4,8 +4,7 @@ This plan evaluates different strategies for content discovery.
 For more information on how to run it please follow instructions on the testplans [readme](/testplans).
 
 The main solution is currently based on gossip messaging though we may add other
-solutions down the line as we believe different solutions may be best fit for different use cases.
-Each composition should be run at different scales.
+solutions in the future for different use cases.
 
 ## Global parameters
 
