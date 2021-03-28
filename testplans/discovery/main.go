@@ -7,8 +7,8 @@ import (
 	"io"
 	"net"
 	"os"
-	"time"
 	goruntime "runtime"
+	"time"
 
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
@@ -46,6 +46,8 @@ var testcases = map[string]interface{}{
 }
 
 func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
+	imported := sync.State("imported")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -53,6 +55,10 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
+
+	if err := shapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
+		return err
+	}
 
 	rpath, err := runenv.CreateRandomDirectory("", 0)
 	if err != nil {
@@ -62,7 +68,9 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// obtain it from the NetClient.
 	ip := initCtx.NetClient.MustGetDataNetworkIP()
 
-	settings, err := defaultSettings(ctx, rpath, ip)
+	low := runenv.IntParam("min_conns")
+	hiw := runenv.IntParam("max_conns")
+	settings, err := defaultSettings(ctx, rpath, ip, low, hiw)
 	if err != nil {
 		return err
 	}
@@ -87,7 +95,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		return err
 	}
 
-	peers = RandomTopology{runenv.IntParam("conn_per_peer")}.SelectPeers(peers)
+	peers = RandomTopology{runenv.IntParam("bootstrap")}.SelectPeers(peers)
 
 	if err := connectTopology(ctx, runenv, peers, h); err != nil {
 		return err
@@ -100,16 +108,12 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// The content topic lets other peers know when content was imported
 	contentTopic := sync.NewTopic("content", new(supply.PRecord))
 
-	// Get a random  provider to provide a random file
-	if group == "providers" && int(initCtx.GroupSeq) <= runenv.IntParam("replication") {
-		fpath, err := runenv.CreateRandomFile("", 256000)
-		if err != nil {
-			return err
-		}
+	// Any node part of the provider to provide a random file
+	if group == "providers" {
 		storeID := ms.Next()
 		store, err := ms.Get(storeID)
 
-		fid, err := importFile(ctx, fpath, store.DAG)
+		fid, err := importFile(ctx, "/fixture.jpeg", store.DAG)
 		if err != nil {
 			return err
 		}
@@ -117,19 +121,26 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			return err
 		}
 
-		initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
-			PayloadCID: fid,
-			Provider:   h.ID(),
-		})
-		runenv.RecordMessage("published content")
+		// Only the first one in the group needs to publish the CID as it's the same file
+		if int(initCtx.GroupSeq) == 0 {
+			initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
+				PayloadCID: fid,
+				Provider:   h.ID(),
+			})
+		}
+		runenv.RecordMessage("imported content")
+		initCtx.SyncClient.MustSignalEntry(ctx, imported)
 	}
 
 	if group == "clients" {
-		// We expect a single CID
+		// We expect a CID published by only one of the providers
 		contentCh := make(chan *supply.PRecord, 1)
 		sctx, scancel := context.WithCancel(ctx)
 		defer scancel()
 		_ = initCtx.SyncClient.MustSubscribe(sctx, contentTopic, contentCh)
+
+		// Wait for all providers to have imported the file
+		<-initCtx.SyncClient.MustBarrier(ctx, imported, runenv.IntParam("providers")).C
 
 		select {
 		case c := <-contentCh:
@@ -177,7 +188,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	return nil
 }
 
-func defaultSettings(ctx context.Context, rpath string, ip net.IP) (pop.Settings, error) {
+func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int) (pop.Settings, error) {
 	ds := dssync.MutexWrap(datastore.NewMapDatastore())
 
 	bs := blockstore.NewBlockstore(ds)
@@ -194,8 +205,8 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP) (pop.Settings
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
 		// Control the maximum number of simultaneous connections a node can have
 		libp2p.ConnectionManager(connmgr.NewConnManager(
-			20,            // Lowwater
-			60,            // HighWater,
+			low,           // Lowwater
+			hiw,           // HighWater,
 			1*time.Second, // GracePeriod
 		)),
 		libp2p.DisableRelay(),
@@ -203,9 +214,6 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP) (pop.Settings
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
 			return dht.New(ctx, h)
 		}),
-		// Running without security because of a bug
-		// see https://github.com/libp2p/go-libp2p-noise/issues/70
-		// libp2p.NoSecurity,
 	)
 	if err != nil {
 		return pop.Settings{}, err

@@ -1,26 +1,27 @@
 [metadata]
-  name = "single_content_copy"
+  name = "low_content_replication"
 
 [global]
   plan = "discovery"
   case = "gossip"
-  total_instances = 51
+  total_instances = 12
   builder = "docker:go"
   runner = "local:docker"
 
 [global.run.test_params]
   regions = '["Global"]'
-  conn_per_peer = "10"
+  bootstrap = "10"
+  providers = "1"
 
 [[groups]]
-  id = "bootstrap"
-  [groups.instances]
-    count = 0
+  id = "bystanders"
+    [groups.instances]
+    count = 10
 
 [[groups]]
   id = "providers"
    [groups.instances]
-    count = 50
+    count = 1
 
 [[groups]]
   id = "clients"
