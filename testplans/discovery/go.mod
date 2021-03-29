@@ -1,6 +1,6 @@
-module github.com/myelnet/pop/testplans/transfer
+module github.com/myelnet/pop/testplans/discovery
 
-go 1.14
+go 1.16
 
 require (
 	github.com/filecoin-project/go-multistore v0.0.3
@@ -13,7 +13,7 @@ require (
 	github.com/ipfs/go-ipfs-keystore v0.0.2
 	github.com/ipfs/go-ipld-format v0.2.0
 	github.com/ipfs/go-unixfs v0.2.4
-	github.com/libp2p/go-libp2p v0.13.0
+	github.com/libp2p/go-libp2p v0.13.1-0.20210319000852-ffd67fd3dcf6
 	github.com/libp2p/go-libp2p-connmgr v0.2.4
 	github.com/libp2p/go-libp2p-core v0.8.5
 	github.com/libp2p/go-libp2p-kad-dht v0.11.1

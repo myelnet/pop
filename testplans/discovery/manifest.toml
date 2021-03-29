@@ -6,13 +6,13 @@ runner = "local:exec"
 [builders."docker:go"]
 enabled = true
 go_version = "1.16"
-module_path = "github.com/your/module/name"
+module_path = "github.com/myelnet/pop/testplans/discovery"
 exec_pkg = "."
 enable_go_build_cache = true
 
 [builders."exec:go"]
 enabled = true
-module_path = "github.com/your/module/name"
+module_path = "github.com/myelnet/pop/testplans/discovery"
 
 [runners."local:docker"]
 enabled = true
@@ -31,10 +31,14 @@ name= "gossip"
 instances = { min = 3, max = 420, default = 3 }
 
   [testcases.params]
-  clients   = { type = "int", default = 1 }
   providers = { type = "int", default = 1 }
-  bootstrap = { type = "int", default = 1 }
-  replication = { type = "int", default = 1 }
   regions = { type = "array", default = ["Global"] }
-  conn_per_peer = { type = "int", default = 2 }
-  
+  bootstrap = { type = "int" , default = 1 }
+  min_conns = { type = "int", default = 20 }
+  max_conns = { type = "int", default = 40 }
+  min_latency = { type = "duration", default="50ms" }
+  max_latency = { type = "duration", default="300ms" }
+  min_jitter = { type = "duration", default="30ms" }
+  max_jitter = { type = "duration", default="50ms" }
+  min_bandwidth = { type = "int", default="500000" }
+  max_bandwidth = { type = "int", default="10000000" }
