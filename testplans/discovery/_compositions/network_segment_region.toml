@@ -1,0 +1,75 @@
+[metadata]
+  name = "network_segment_region"
+
+[global]
+  plan = "discovery"
+  case = "gossip"
+  total_instances = 50
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.run.test_params]
+  bootstrap = "10"
+
+[[groups]]
+  id = "bystanders_glob"
+    [groups.instances]
+    count = 12
+    [groups.run.test_params]
+    regions = ['Global']
+    min_latency = "500ms"
+    max_latency = "1100ms"
+
+[[groups]]
+  id = "bystanders_as"
+    [groups.instances]
+    count = 11
+    [groups.run.test_params]
+    regions = ['Asia']
+    max_latency = "900ms"
+    min_latency = "1100ms"
+
+[[groups]]
+  id = "bystanders_oc"
+    [groups.instances]
+    count = 10
+    [groups.run.test_params]
+    regions = ['Oceania']
+    max_latency = "700ms"
+    min_latency = "900ms"
+
+[[groups]]
+  id = "bystanders_us"
+    [groups.instances]
+    count = 9
+    [groups.run.test_params]
+    regions = ['NorthAmerica']
+    min_latency = "300ms"
+    max_latency = "600ms"
+
+[[groups]]
+  id = "bystanders_eur"
+    [groups.instances]
+    count = 4
+    [groups.run.test_params]
+    regions = ['Europe']
+    min_latency = "30ms"
+    max_latency = "50ms"
+
+[[groups]]
+  id = "providers"
+   [groups.instances]
+    count = 3
+  [groups.run.test_params]
+    regions = ['Europe']
+    min_latency = "30ms"
+    max_latency = "50ms"
+
+[[groups]]
+  id = "clients"
+  [groups.instances]
+    count = 1
+  [groups.run.test_params]
+    regions = ['Europe']
+    min_latency = "30ms"
+    max_latency = "50ms"

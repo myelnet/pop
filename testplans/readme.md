@@ -7,33 +7,27 @@ Hop Exchange development is made against testground plans to immediately test ne
 Install testground from the source
 
 ```sh
-$ git clone https://github.com/testground/testground.git
+git clone https://github.com/testground/testground.git
 
-$ cd testground
+cd testground
 
-$ make install
+make install
 ```
 
 Testground will use `~/testground` as directory to look for plans
 you can either import the plans in this repo:
 
-```sh
-$ testground plan import --from ~/pop/testground/plans/supply
-```
-
-or I like to set the repo as testground home directly i.e.
-
-```sh
-$ set -x TESTGROUND_HOME ~/pop/testground
+```commandline
+testground plan import --from ~/pop/testplans/discovery
 ```
 
 Make sure you have docker installed and running then in a different terminal run:
 
-```sh
-$ testground daemon
+```commandline
+testground daemon
 ```
 
-Testground plans can be found in /testground/plans. Each plan is go module with a main.go
+Testground plans can be found in /testplans. Each plan is go module with a main.go
 entry point. A plan can have multiple cases set in a map like:
 
 ```go
@@ -60,8 +54,8 @@ our code can be run such as in local:docker or with remote AWS instances.
 
 To run a composition: (Make sure you are in your test plan's directory)
 
-```sh
-$ testground run composition -f _compositions/mycomposition.toml
+```commandline
+testground run composition -f _compositions/mycomposition.toml
 ```
 
 We will be updating this readme as we learn more about testground tools.
@@ -71,3 +65,8 @@ We will be updating this readme as we learn more about testground tools.
 
 Sometimes the daemon might hang, I find shutting it down and restarting Docker
 fixes it most of the time.
+
+Clean up docker cache by running:
+```commandline
+docker system prune
+```

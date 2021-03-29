@@ -1,0 +1,30 @@
+[metadata]
+  name = "high_network_density"
+
+[global]
+  plan = "discovery"
+  case = "gossip"
+  total_instances = 40
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.run.test_params]
+  regions = '["Global"]'
+  bootstrap = "20"
+  min_conns = "40"
+  max_conns = "60"
+
+[[groups]]
+  id = "bystanders"
+    [groups.instances]
+    count = 36
+
+[[groups]]
+  id = "providers"
+   [groups.instances]
+    count = 3
+
+[[groups]]
+  id = "clients"
+  [groups.instances]
+    count = 1
