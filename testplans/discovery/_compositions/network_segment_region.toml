@@ -16,7 +16,7 @@
     [groups.instances]
     count = 12
     [groups.run.test_params]
-    regions = ['Global']
+    regions = '["Global"]'
     min_latency = "500ms"
     max_latency = "1100ms"
 
@@ -25,7 +25,7 @@
     [groups.instances]
     count = 11
     [groups.run.test_params]
-    regions = ['Asia']
+    regions = '["Asia"]'
     max_latency = "900ms"
     min_latency = "1100ms"
 
@@ -34,7 +34,7 @@
     [groups.instances]
     count = 10
     [groups.run.test_params]
-    regions = ['Oceania']
+    regions = '["Oceania"]'
     max_latency = "700ms"
     min_latency = "900ms"
 
@@ -43,7 +43,7 @@
     [groups.instances]
     count = 9
     [groups.run.test_params]
-    regions = ['NorthAmerica']
+    regions = '["NorthAmerica"]'
     min_latency = "300ms"
     max_latency = "600ms"
 
@@ -52,7 +52,7 @@
     [groups.instances]
     count = 4
     [groups.run.test_params]
-    regions = ['Europe']
+    regions = '["Europe"]'
     min_latency = "30ms"
     max_latency = "50ms"
 
@@ -61,7 +61,7 @@
    [groups.instances]
     count = 3
   [groups.run.test_params]
-    regions = ['Europe']
+    regions = '["Europe"]'
     min_latency = "30ms"
     max_latency = "50ms"
 
@@ -70,6 +70,6 @@
   [groups.instances]
     count = 1
   [groups.run.test_params]
-    regions = ['Europe']
+    regions = '["Europe"]'
     min_latency = "30ms"
     max_latency = "50ms"
