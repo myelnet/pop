@@ -16,46 +16,46 @@
     [groups.instances]
     count = 12
     [groups.run.test_params]
-    regions = ['Global']
+    regions = '["Global"]'
 
 [[groups]]
   id = "bystanders_as"
     [groups.instances]
     count = 11
     [groups.run.test_params]
-    regions = ['Asia']
+    regions = '["Asia"]'
 
 [[groups]]
   id = "bystanders_oc"
     [groups.instances]
     count = 10
     [groups.run.test_params]
-    regions = ['Oceania']
+    regions = '["Oceania"]'
 
 [[groups]]
   id = "bystanders_us"
     [groups.instances]
     count = 9
     [groups.run.test_params]
-    regions = ['NorthAmerica']
+    regions = '["NorthAmerica"]'
 
 [[groups]]
   id = "bystanders_eur"
     [groups.instances]
     count = 4
     [groups.run.test_params]
-    regions = ['Europe']
+    regions = '["Europe"]'
 
 [[groups]]
   id = "providers"
    [groups.instances]
     count = 3
   [groups.run.test_params]
-    regions = ['Europe']
+    regions = '["Europe"]'
 
 [[groups]]
   id = "clients"
   [groups.instances]
     count = 1
   [groups.run.test_params]
-    regions = ['Europe']
+    regions = '["Europe"]'
