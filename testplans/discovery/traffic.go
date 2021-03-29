@@ -28,7 +28,7 @@ func shapeTraffic(ctx context.Context, runenv *runtime.RunEnv, netclient *networ
 
 	minbw := runenv.IntParam("min_bandwidth")
 	maxbw := runenv.IntParam("max_bandwidth")
-	bw := minbw + (rand.Int() * (maxbw - minbw))
+	bw := minbw + rand.Intn(maxbw-minbw)
 
 	config := &network.Config{
 		Network: "default",

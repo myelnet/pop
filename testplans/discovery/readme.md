@@ -44,12 +44,19 @@ large network.
 
 Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
 
-Typical time to first offer: mean ± standard deviations
+Typical time to first offer: mean ± standard deviations (24 samples)
 
 | Solution        | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
 | :--- | ---: | ---: | ---: | ---: |
 | `gossip`        |     `825` `±104`  |     `1337` `±1071` |    `2111` `±1376` |    `2081` `±1275` | 
 
+
+#### Interpretation
+
+As the size of the network grows, the client becomes less likely to be directly connected to ther provider
+of the content it's looking for. Dialing the provider incurs some overhead which can reduce
+the speed of query by 2-3X. As a result, the standard devation shows the very large difference between queries
+in which client and provider are directly connect vs when they're not.
 
 ### [High Content Replication](/testplans/discovery/_compositions/high_content_replication.toml)
 
@@ -60,30 +67,57 @@ network.
 
 Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
 
-Typical time to first offer: mean ± standard deviations
+Typical time to first offer: mean ± standard deviations (24 samples)
 
 | Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
 | :--- | ---: | ---: | ---: | ---: |
 | `gossip`         |       `697` `±25` |     	`720` `±40` |      `844` `±499` |      `776` `±101` | 
 
+#### Interpretation
 
-### [Low network density](/testplans/discovery/_compositions/low_network_density.toml)
-
-This composition evaluates the performance of the network in a low density topology. This means peers may be 
-limiting connections to a small amount of peers or not have had time to bootstrap and increasing the size of 
-the routing table.
-
-### [High network density](/testplans/discovery/_compositions/high_network_density.toml)
-
-This composition evaluates the performance of the network in a high density topology. This means users are running
-devices that have been online for a while and are able to maintain a very large number of connections.
+A higher content replication means a higher likelihood that the client is directly connected with a 
+provider hence a majority of queries are very quick to execute even with a high latency and jitter.
 
 ### [Network Segmentation By Region](/testplans/discovery/_compositions/network_segment_region.toml)
 
 This composition demonstrates the segmentation of the gossip network into different topics based on geographic
 regions. Messages are only published to a topic in which the subscribers have relatively similar latency.
 
+#### Results
+
+Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
+
+Typical time to first offer: mean ± standard deviations (24 samples)
+
+| Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
+| :--- | ---: | ---: | ---: | ---: |
+| `gossip`         |        `96` `±16` |       `132` `±129` |       `125` `±31` |      `240` `±252` | 
+
+#### Interpretation
+
+Since the message is only published to peers at the lowest latency in the network, propagation is extremely
+fast. Even if peers are likely to dial each other, when they are very close to each other this extra step
+doesn't impact the speed as significantly as with peers with higher latency.
+
 ### [Network Segmentation By Content](/testplans/discovery/_compositions/network_segment_content.toml)
 
 This composition demonstrates the segmentation of the gossip network by type of content. I.e. an application
-has created its own subnetwork in which clients can query the topic to find their content.
+has created its own subnetwork in which clients can query the topic to find their content. Currently the 
+discovery session can only publish to a region topic so we use region topics to test but we include peers with 
+different latency as opposed to the previous test.
+
+#### Results
+
+Ubuntu AMD Ryzen 9 3900XT 12-Core Processor - 64GiB DDR4
+
+Typical time to first offer: mean ± standard deviations (24 samples)
+
+| Solution         | 10 Instances (ms) | 20 Instances (ms) | 30 Instances (ms) | 40 Instances (ms) |
+| :--- | ---: | ---: | ---: | ---: |
+| `gossip`         |       `707` `±29` |       `713` `±36` |     `1076` `±881` |    `1552` `±1206` | 
+
+#### Interpretation
+
+Segmenting the network into non-geographic topics does not seem to improve performance at this scale.
+This is because peers with different latencies can subscribe to the same topic thus it does not guarrantee
+peers will be nearby.
