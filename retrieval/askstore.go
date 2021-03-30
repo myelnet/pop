@@ -3,7 +3,7 @@ package retrieval
 import (
 	"sync"
 
-	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/ipfs/go-cid"
 	"github.com/myelnet/pop/retrieval/deal"
 )
 
@@ -11,11 +11,11 @@ import (
 // we don't currently need to persist this beyond node restart
 type AskStore struct {
 	lk   sync.RWMutex
-	asks map[peer.ID]deal.QueryResponse
+	asks map[cid.Cid]deal.QueryResponse
 }
 
-// SetAsk stores retrieval provider's ask
-func (s *AskStore) SetAsk(k peer.ID, ask deal.QueryResponse) error {
+// SetAsk stores retrieval provider's ask for a given content root
+func (s *AskStore) SetAsk(k cid.Cid, ask deal.QueryResponse) error {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -23,8 +23,8 @@ func (s *AskStore) SetAsk(k peer.ID, ask deal.QueryResponse) error {
 	return nil
 }
 
-// GetAsk returns the current retrieval ask, or nil if one does not exist.
-func (s *AskStore) GetAsk(k peer.ID) deal.QueryResponse {
+// GetAsk returns the current retrieval ask for a given content root, or nil if one does not exist.
+func (s *AskStore) GetAsk(k cid.Cid) deal.QueryResponse {
 	s.lk.RLock()
 	defer s.lk.RUnlock()
 

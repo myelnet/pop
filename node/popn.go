@@ -179,7 +179,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	nd.ps, err = pubsub.NewGossipSub(ctx, nd.host)
+	tracer := pop.NewGossipTracer()
+	nd.ps, err = pubsub.NewGossipSub(ctx, nd.host, pubsub.WithEventTracer(tracer))
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{opts.FilToken},
 		},
-		Regions: regions,
+		GossipTracer: tracer,
+		Regions:      regions,
 	}
 
 	nd.exch, err = pop.NewExchange(ctx, settings)

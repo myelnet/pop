@@ -110,7 +110,7 @@ type providerValidationEnvironment struct {
 
 // CheckDealParams verifies the given deal params are acceptable
 func (pve *providerValidationEnvironment) CheckDealParams(ds deal.ProviderState) error {
-	ask := pve.p.GetAsk(ds.Receiver)
+	ask := pve.p.GetAsk(ds.PayloadCID)
 	if ds.PricePerByte.LessThan(ask.MinPricePerByte) {
 		return errors.New("price per byte too low")
 	}
