@@ -4,7 +4,7 @@
 [global]
   plan = "discovery"
   case = "gossip"
-  total_instances = 12
+  total_instances = 40
   builder = "docker:go"
   runner = "local:docker"
 
@@ -16,7 +16,7 @@
 [[groups]]
   id = "bystanders"
     [groups.instances]
-    count = 10
+    count = 38
 
 [[groups]]
   id = "providers"

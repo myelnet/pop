@@ -4,17 +4,18 @@
 [global]
   plan = "discovery"
   case = "gossip"
-  total_instances = 50
+  total_instances = 40
   builder = "docker:go"
   runner = "local:docker"
 
 [global.run.test_params]
   bootstrap = "10"
+  providers = "3"
 
 [[groups]]
   id = "bystanders_glob"
     [groups.instances]
-    count = 12
+    count = 4
     [groups.run.test_params]
     regions = '["Global"]'
     min_latency = "500ms"
@@ -23,7 +24,7 @@
 [[groups]]
   id = "bystanders_as"
     [groups.instances]
-    count = 11
+    count = 9
     [groups.run.test_params]
     regions = '["Asia"]'
     max_latency = "900ms"
