@@ -264,7 +264,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		if msg.ReceivedFrom == e.h.ID() {
 			continue
 		}
-		m := new(deal.GossipQuery)
+		m := new(deal.Query)
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
@@ -304,7 +304,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 			}
 			// We need to remember the offer we made so we can validate against it once
 			// clients start the retrieval
-			e.retrieval.Provider().SetAsk(msg.ReceivedFrom, answer)
+			e.retrieval.Provider().SetAsk(m.PayloadCID, answer)
 		}
 	}
 }

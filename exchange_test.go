@@ -244,19 +244,21 @@ func TestExchangeDirect(t *testing.T) {
 			for i := 0; i < 11; i++ {
 				n := testutil.NewTestNode(mn, t)
 				n.SetupGraphSync(ctx)
-				ps, err := pubsub.NewGossipSub(ctx, n.Host)
+				tracer := NewGossipTracer()
+				ps, err := pubsub.NewGossipSub(ctx, n.Host, pubsub.WithEventTracer(tracer))
 				require.NoError(t, err)
 
 				settings := Settings{
-					Datastore:  n.Ds,
-					Blockstore: n.Bs,
-					MultiStore: n.Ms,
-					Host:       n.Host,
-					PubSub:     ps,
-					GraphSync:  n.Gs,
-					RepoPath:   n.DTTmpDir,
-					Keystore:   keystore.NewMemKeystore(),
-					Regions:    []supply.Region{supply.Regions["Global"]},
+					Datastore:    n.Ds,
+					Blockstore:   n.Bs,
+					MultiStore:   n.Ms,
+					Host:         n.Host,
+					PubSub:       ps,
+					GraphSync:    n.Gs,
+					RepoPath:     n.DTTmpDir,
+					GossipTracer: tracer,
+					Keystore:     keystore.NewMemKeystore(),
+					Regions:      []supply.Region{supply.Regions["Global"]},
 				}
 
 				exch, err := NewExchange(bgCtx, settings)

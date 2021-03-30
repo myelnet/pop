@@ -232,7 +232,7 @@ func TestRetrieval(t *testing.T) {
 				ask.MinPricePerByte = big.Add(pricePerByte, abi.NewTokenAmount(int64(20)))
 			}
 			// We need to set the ask first
-			r2.Provider().SetAsk(n1.Host.ID(), ask)
+			r2.Provider().SetAsk(rootCid, ask)
 
 			// We offset it a bit since it's usually higher with ipld encoding
 			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+200)))
