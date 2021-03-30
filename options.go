@@ -46,6 +46,7 @@ type Settings struct {
 	RepoPath            string
 	FilecoinRPCEndpoint string
 	FilecoinRPCHeader   http.Header
+	GossipTracer        *GossipTracer
 	// Probably temporary as we want Regions to be more dynamic eventually
 	Regions []supply.Region
 }

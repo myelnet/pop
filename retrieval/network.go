@@ -46,6 +46,10 @@ type QueryStream interface {
 type OfferReceiver interface {
 	// Receive queues up an offer
 	Receive(peer.ID, deal.QueryResponse)
+	// IsRecipient checks if we are actually the peer expecting this offer
+	IsRecipient(string) bool
+	// Recipient returns the peer we think this message should be forwarded to
+	Recipient(string) (peer.ID, error)
 }
 
 // QueryNetwork is the API for creating query and deal streams and
@@ -223,6 +227,7 @@ func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
 }
 
 func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
+	r := impl.receiver
 	qs := &queryStream{
 		p:        s.Conn().RemotePeer(),
 		rw:       s,
@@ -232,11 +237,30 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 
 	response, err := qs.ReadQueryResponse()
 	if err != nil {
-		fmt.Printf("failed to read query response %s\n", err)
+		fmt.Println("failed to read query response", err)
 		return
 	}
 
-	impl.receiver.Receive(qs.OtherPeer(), response)
+	// The receiver should know if we issued the query if it's not the case
+	// it means we must forward it to whichever peer sent us the query
+	if !r.IsRecipient(response.Message) {
+		to, err := r.Recipient(response.Message)
+		if err != nil {
+			fmt.Println("failed to find message recipient", err)
+			return
+		}
+		nqs, err := impl.NewQueryStream(to)
+		if err != nil {
+			fmt.Println("failed to open query stream with new recipient", err)
+			return
+		}
+		if err := nqs.WriteQueryResponse(response); err != nil {
+			fmt.Println("failed to write forwarded response", err)
+			return
+		}
+		return
+	}
+	r.Receive(qs.OtherPeer(), response)
 }
 
 // ID returns the host peer ID

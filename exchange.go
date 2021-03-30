@@ -16,9 +16,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/filecoin"
-	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
@@ -61,7 +61,7 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	ex.net = retrieval.NewQueryNetwork(ex.h)
 	// We must start the offer queue now otherwise there is a race condition when trying to set it
 	// at the moment we're querying for offers
-	ex.ofq = NewOfferQueue(ctx)
+	ex.ofq = NewOfferQueue(ctx, set.GossipTracer)
 	ex.net.Start(ex.ofq)
 	// Retrieval data transfer setup
 	ex.dataTransfer, err = NewDataTransfer(ctx, ex.h, set.GraphSync, set.Datastore, "retrieval", set.RepoPath)
@@ -124,6 +124,7 @@ type OfferQueue struct {
 	results chan JobResult
 	jobs    chan Job
 	peek    chan chan deal.Offer
+	gt      *GossipTracer
 }
 
 // JobResult tells us if our job was started successfully
@@ -138,12 +139,13 @@ type JobResult struct {
 type Job func(context.Context, deal.Offer) (deal.ID, error)
 
 // NewOfferQueue starts a worker to process received offers and run jobs on queued up offers
-func NewOfferQueue(ctx context.Context) *OfferQueue {
+func NewOfferQueue(ctx context.Context, gt *GossipTracer) *OfferQueue {
 	oq := &OfferQueue{
 		offers:  make(chan deal.Offer),
 		results: make(chan JobResult),
 		peek:    make(chan chan deal.Offer),
 		jobs:    make(chan Job, 8),
+		gt:      gt,
 	}
 	go oq.processOffers(ctx)
 	return oq
@@ -160,6 +162,16 @@ func (oq *OfferQueue) Receive(p peer.ID, res deal.QueryResponse) {
 		PeerID:   p,
 		Response: res,
 	}
+}
+
+// IsRecipient checks if our peer is the recipient of the offer
+func (oq *OfferQueue) IsRecipient(mid string) bool {
+	return oq.gt.Published(mid)
+}
+
+// Recipient returns the recipient of an offer
+func (oq *OfferQueue) Recipient(mid string) (peer.ID, error) {
+	return oq.gt.Sender(mid)
 }
 
 // Peek returns the first item in the queue or an error if no item is loaded yet
@@ -272,15 +284,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it
 		if err == nil && stats.Size > 0 {
-			// Only parse the addr info if we're gonna reply
-			pi, err := utils.AddrBytesToAddrInfo(m.Publisher)
-			if err != nil {
-				fmt.Println("invalid p2p addr", err)
-				continue
-			}
-			e.net.AddAddrs(pi.ID, pi.Addrs)
-
-			qs, err := e.net.NewQueryStream(pi.ID)
+			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
 			if err != nil {
 				fmt.Println("error", err)
 				continue
@@ -292,6 +296,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 				MinPricePerByte:            r.PPB, // TODO: dynamic pricing
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+				Message:                    pubsub.DefaultMsgIdFn(msg.Message),
 			}
 			if err := qs.WriteQueryResponse(answer); err != nil {
 				fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
@@ -299,7 +304,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 			}
 			// We need to remember the offer we made so we can validate against it once
 			// clients start the retrieval
-			e.retrieval.Provider().SetAsk(pi.ID, answer)
+			e.retrieval.Provider().SetAsk(msg.ReceivedFrom, answer)
 		}
 	}
 }
@@ -391,4 +396,42 @@ func (e *Exchange) StoragePeerInfo(ctx context.Context, addr address.Address) (*
 // IsFilecoinOnline tells us if we are connected to the Filecoin RPC api
 func (e *Exchange) IsFilecoinOnline() bool {
 	return e.fAPI != nil
+}
+
+// GossipTracer tracks messages we've seen so we can relay responses back to the publisher
+type GossipTracer struct {
+	published map[string]bool
+	senders   map[string]peer.ID
+}
+
+func NewGossipTracer() *GossipTracer {
+	return &GossipTracer{
+		published: make(map[string]bool),
+		senders:   make(map[string]peer.ID),
+	}
+}
+
+// Trace gets triggered for every internal gossip sub operation
+func (gt *GossipTracer) Trace(evt *pb.TraceEvent) {
+	if evt.PublishMessage != nil {
+		gt.published[string(evt.PublishMessage.MessageID)] = true
+	}
+	if evt.DeliverMessage != nil {
+		msg := evt.DeliverMessage
+		gt.senders[string(msg.MessageID)] = peer.ID(msg.ReceivedFrom)
+	}
+}
+
+// Published checks if we were the publisher of a message
+func (gt *GossipTracer) Published(mid string) bool {
+	return gt.published[mid]
+}
+
+// Sender returns the peer who sent us a message
+func (gt *GossipTracer) Sender(mid string) (peer.ID, error) {
+	p, ok := gt.senders[mid]
+	if !ok {
+		return "", errors.New("no sender found")
+	}
+	return p, nil
 }
