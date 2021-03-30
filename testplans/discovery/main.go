@@ -229,7 +229,8 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		return pop.Settings{}, err
 	}
 
-	ps, err := pubsub.NewGossipSub(ctx, h)
+	tracer := pop.NewGossipTracer()
+	ps, err := pubsub.NewGossipSub(ctx, h, pubsub.WithEventTracer(tracer))
 	if err != nil {
 		return pop.Settings{}, err
 	}
@@ -241,15 +242,16 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 	)
 
 	return pop.Settings{
-		Datastore:  ds,
-		Blockstore: bs,
-		MultiStore: ms,
-		Host:       h,
-		PubSub:     ps,
-		GraphSync:  gs,
-		RepoPath:   rpath,
-		Keystore:   ks,
-		Regions:    []supply.Region{supply.Regions["Global"]},
+		Datastore:    ds,
+		Blockstore:   bs,
+		MultiStore:   ms,
+		Host:         h,
+		PubSub:       ps,
+		GraphSync:    gs,
+		RepoPath:     rpath,
+		Keystore:     ks,
+		GossipTracer: tracer,
+		Regions:      []supply.Region{supply.Regions["Global"]},
 	}, nil
 
 }

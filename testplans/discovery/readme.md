@@ -35,6 +35,10 @@ We assume peers will have different network conditions and randomly generate par
 
 ## Gossip
 
+In these experiments we compare 2 different implementations, one (address broadcast) in which the publisher 
+network address is sent along in the message and the recipient streams the response back directly and the other 
+(recursive forwarding) in which each peer in the gossip transmission chain forwards back to the previous sender.
+
 ### [Low Content Replication](/testplans/discovery/_compositions/low_content_replication.toml)
 
 This composition evaluates the performance of the network with low to no content replication over a
@@ -48,7 +52,8 @@ Typical time to first offer: mean ± standard deviations (24 samples)
 
 | Solution        | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
 | :--- | ---: | ---: | ---: | ---: |
-| `gossip`        |     `825` `±104`  |     `1337` `±1071` |    `2111` `±1376` |    `2081` `±1275` | 
+| `gossip - AB`   |     `825` `±104`  |     `1337` `±1071` |    `2111` `±1376` |    `2081` `±1275` | 
+| `gossip - RF`   |    `1014` `±344`  |     `1187` `±447`  |    `1186` `±442`  |    `1445` `±457`  |
 
 
 #### Interpretation
@@ -56,7 +61,9 @@ Typical time to first offer: mean ± standard deviations (24 samples)
 As the size of the network grows, the client becomes less likely to be directly connected to ther provider
 of the content it's looking for. Dialing the provider incurs some overhead which can reduce
 the speed of query by 2-3X. As a result, the standard devation shows the very large difference between queries
-in which client and provider are directly connect vs when they're not.
+in which client and provider are directly connected vs when they're not.
+When forwarding back to the previous sender we reuse existing connections so the speed depends on the number of
+hops between peers and makes the speed more consistant.
 
 ### [High Content Replication](/testplans/discovery/_compositions/high_content_replication.toml)
 
@@ -71,12 +78,14 @@ Typical time to first offer: mean ± standard deviations (24 samples)
 
 | Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
 | :--- | ---: | ---: | ---: | ---: |
-| `gossip`         |       `697` `±25` |     	`720` `±40` |      `844` `±499` |      `776` `±101` | 
+| `gossip - AB`    |       `697` `±25` |     	`720` `±40` |      `844` `±499` |      `776` `±101` | 
+| `gossip - RF`    |       `686` `±24` | 	`714` `±25` |      `817` `±234` |      `906` `±333` | 
 
 #### Interpretation
 
 A higher content replication means a higher likelihood that the client is directly connected with a 
 provider hence a majority of queries are very quick to execute even with a high latency and jitter.
+Using recursive forwarding yields very similar speed.
 
 ### [Network Segmentation By Region](/testplans/discovery/_compositions/network_segment_region.toml)
 
@@ -91,13 +100,15 @@ Typical time to first offer: mean ± standard deviations (24 samples)
 
 | Solution         | 10 Instances (ms) | 20 Instances (ms)  | 30 Instances (ms) | 40 Instances (ms) |
 | :--- | ---: | ---: | ---: | ---: |
-| `gossip`         |        `96` `±16` |       `132` `±129` |       `125` `±31` |      `240` `±252` | 
+| `gossip - AB`    |        `96` `±16` |       `132` `±129` |       `125` `±31` |      `240` `±252` | 
+| `gossip - RF`    | 	   `148` `±87` |       `143` `±51`  |       `136` `±50` |      `168` `±78`  |
 
 #### Interpretation
 
 Since the message is only published to peers at the lowest latency in the network, propagation is extremely
 fast. Even if peers are likely to dial each other, when they are very close to each other this extra step
 doesn't impact the speed as significantly as with peers with higher latency.
+RF looks very similar in speed though significantly more consistant across samples.
 
 ### [Network Segmentation By Content](/testplans/discovery/_compositions/network_segment_content.toml)
 
@@ -114,10 +125,13 @@ Typical time to first offer: mean ± standard deviations (24 samples)
 
 | Solution         | 10 Instances (ms) | 20 Instances (ms) | 30 Instances (ms) | 40 Instances (ms) |
 | :--- | ---: | ---: | ---: | ---: |
-| `gossip`         |       `707` `±29` |       `713` `±36` |     `1076` `±881` |    `1552` `±1206` | 
+| `gossip - AB`    |       `707` `±29` |      `713` `±36`  |     `1076` `±881` |    `1552` `±1206` | 
+| `gossip - RF`    |       `708` `±28` |      `752` `±146` |      `863` `±267` |     `846` `±258`  |
 
 #### Interpretation
 
 Segmenting the network into non-geographic topics does not seem to improve performance at this scale.
 This is because peers with different latencies can subscribe to the same topic thus it does not guarrantee
 peers will be nearby.
+RF appears to offer better performance in these conditions, might be because smaller amount of subscribers
+means less hops though it is very likely peers won't be directly connected.

@@ -11,6 +11,7 @@
 [global.run.test_params]
   regions = '["Global"]'
   bootstrap = "10"
+  providers = "8"
 
 [[groups]]
   id = "bystanders"
