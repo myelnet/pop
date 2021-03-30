@@ -38,14 +38,6 @@ type Query struct {
 	QueryParams
 }
 
-// GossipQuery is a query to any provider which may be relayed by other peers
-// hence it needs to provide information about the publisher
-type GossipQuery struct {
-	PayloadCID cid.Cid
-	Publisher  []byte // p2p address bytes
-	QueryParams
-}
-
 // QueryResponseStatus indicates whether a queried piece is available
 type QueryResponseStatus uint64
 

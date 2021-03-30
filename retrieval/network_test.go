@@ -14,7 +14,9 @@ import (
 )
 
 type receiver struct {
-	offers chan deal.Offer
+	offers      chan deal.Offer
+	isRecipient bool
+	recipient   peer.ID
 }
 
 // Receive sends a new offer to the queue
@@ -23,6 +25,14 @@ func (r receiver) Receive(p peer.ID, res deal.QueryResponse) {
 		PeerID:   p,
 		Response: res,
 	}
+}
+
+func (r receiver) Recipient(id string) (peer.ID, error) {
+	return r.recipient, nil
+}
+
+func (r receiver) IsRecipient(id string) bool {
+	return r.isRecipient
 }
 
 func TestNetwork(t *testing.T) {
@@ -34,7 +44,7 @@ func TestNetwork(t *testing.T) {
 
 	cnode := testutil.NewTestNode(mn, t)
 	cnet := NewQueryNetwork(cnode.Host)
-	r := receiver{make(chan deal.Offer)}
+	r := receiver{make(chan deal.Offer), true, ""}
 	cnet.Start(r)
 
 	pnodes := make(map[peer.ID]*testutil.TestNode)
@@ -82,6 +92,76 @@ func TestNetwork(t *testing.T) {
 			require.NoError(t, ctx.Err())
 		}
 	}
+}
+
+func TestNetworkForwarding(t *testing.T) {
+	bgCtx := context.Background()
+	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+	defer cancel()
+
+	mn := mocknet.New(bgCtx)
+
+	cnode := testutil.NewTestNode(mn, t)
+	cnet := NewQueryNetwork(cnode.Host)
+	r := receiver{make(chan deal.Offer), true, ""}
+	cnet.Start(r)
+
+	var pnodes []*testutil.TestNode
+	var pnets []*Libp2pQueryNetwork
+
+	for i := 0; i < 11; i++ {
+		pnode := testutil.NewTestNode(mn, t)
+		pnet := NewQueryNetwork(pnode.Host)
+		// Each node is forwwarding to next one
+		pp := cnet.ID()
+		if i > 0 {
+			pp = pnets[i-1].ID()
+		}
+		pnet.Start(&receiver{make(chan deal.Offer), false, pp})
+		pnodes = append(pnodes, pnode)
+		pnets = append(pnets, pnet)
+	}
+
+	require.NoError(t, mn.LinkAll())
+
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Simulating a bunch of nodes sending responses at the same time
+	for i, net := range pnets {
+		net := net
+		pp := cnet.ID()
+		if i > 0 {
+			pp = pnets[i-1].ID()
+		}
+		go func(p peer.ID) {
+			stream, err := net.NewQueryStream(p)
+			require.NoError(t, err)
+			defer stream.Close()
+
+			addr, _ := address.NewIDAddress(uint64(10))
+
+			answer := deal.QueryResponse{
+				Status:                     deal.QueryResponseAvailable,
+				Size:                       1600,
+				PaymentAddress:             addr,
+				MinPricePerByte:            deal.DefaultPricePerByte,
+				MaxPaymentInterval:         deal.DefaultPaymentInterval,
+				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+			}
+			err = stream.WriteQueryResponse(answer)
+			require.NoError(t, err)
+		}(pp)
+	}
+
+	for i := 0; i < 11; i++ {
+		select {
+		case of := <-r.offers:
+			require.Equal(t, of.Response.Size, uint64(1600))
+		case <-ctx.Done():
+			require.NoError(t, ctx.Err())
+		}
+	}
+
 }
 
 /****

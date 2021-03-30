@@ -40,7 +40,7 @@ func TestOfferQueue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	q := NewOfferQueue(ctx)
+	q := NewOfferQueue(ctx, NewGossipTracer())
 
 	for i := 0; i < 11; i++ {
 		i := i
@@ -82,9 +82,9 @@ func Markov(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*test
 	time.Sleep(time.Second)
 }
 
+func noop(*testutil.TestNode) {}
+
 func TestGossipQuery(t *testing.T) {
-	noop := func(tn *testutil.TestNode) {}
-	// For some reason the other testnet doesn't behave so well with complex topologies
 	withSwarmT := func(tn *testutil.TestNode) {
 		netw := swarmt.GenSwarm(t, context.Background())
 		h := bhost.NewBlankHost(netw)
@@ -94,6 +94,7 @@ func TestGossipQuery(t *testing.T) {
 		name     string
 		topology Topology
 		peers    int
+		files    int
 		netOpts  func(*testutil.TestNode)
 	}{
 		{
@@ -101,25 +102,28 @@ func TestGossipQuery(t *testing.T) {
 			topology: All,
 			peers:    11,
 			netOpts:  noop,
+			files:    1,
 		},
 		{
 			name:     "One to one",
 			topology: OneToOne,
 			peers:    2,
 			netOpts:  withSwarmT,
+			files:    1,
 		},
 		{
 			name:     "Markov",
 			topology: Markov,
 			peers:    6,
 			netOpts:  withSwarmT,
+			files:    3,
 		},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			bgCtx := context.Background()
 
-			ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Second)
 			defer cancel()
 
 			mn := mocknet.New(bgCtx)
@@ -130,27 +134,33 @@ func TestGossipQuery(t *testing.T) {
 			providers := make(map[peer.ID]*Exchange)
 			var pnodes []*testutil.TestNode
 
-			// This just creates the file without adding it
-			fname := cnode.CreateRandomFile(t, 256000)
+			fnames := make([]string, testCase.files)
+			for i := range fnames {
+				// This just creates the file without adding it
+				fnames[i] = cnode.CreateRandomFile(t, 256000)
+			}
+			roots := make([]cid.Cid, testCase.files)
 
 			var rootCid cid.Cid
 
 			for i := 0; i < testCase.peers; i++ {
 				n := testutil.NewTestNode(mn, t, testCase.netOpts)
 				n.SetupGraphSync(ctx)
-				ps, err := pubsub.NewGossipSub(ctx, n.Host)
+				tracer := NewGossipTracer()
+				ps, err := pubsub.NewGossipSub(ctx, n.Host, pubsub.WithEventTracer(tracer))
 				require.NoError(t, err)
 
 				settings := Settings{
-					Datastore:  n.Ds,
-					Blockstore: n.Bs,
-					MultiStore: n.Ms,
-					Host:       n.Host,
-					PubSub:     ps,
-					GraphSync:  n.Gs,
-					RepoPath:   n.DTTmpDir,
-					Keystore:   keystore.NewMemKeystore(),
-					Regions:    []supply.Region{supply.Regions["Global"]},
+					Datastore:    n.Ds,
+					Blockstore:   n.Bs,
+					MultiStore:   n.Ms,
+					Host:         n.Host,
+					PubSub:       ps,
+					GraphSync:    n.Gs,
+					RepoPath:     n.DTTmpDir,
+					Keystore:     keystore.NewMemKeystore(),
+					GossipTracer: tracer,
+					Regions:      []supply.Region{supply.Regions["Global"]},
 				}
 
 				exch, err := NewExchange(bgCtx, settings)
@@ -162,48 +172,56 @@ func TestGossipQuery(t *testing.T) {
 				} else {
 					providers[n.Host.ID()] = exch
 					pnodes = append(pnodes, n)
-					link, storeID, _ := n.LoadFileToNewStore(ctx, t, fname)
-					rootCid = link.(cidlink.Link).Cid
-					require.NoError(t, exch.Supply().Register(rootCid, storeID))
+
+					for i, name := range fnames {
+						link, storeID, _ := n.LoadFileToNewStore(ctx, t, name)
+						rootCid = link.(cidlink.Link).Cid
+						require.NoError(t, exch.Supply().Register(rootCid, storeID))
+						roots[i] = rootCid
+					}
 				}
 			}
 
 			testCase.topology(t, mn, cnode, pnodes)
 
-			// Now we fetch it again from our providers
-			session, err := client.NewSession(ctx, rootCid)
-			require.NoError(t, err)
-			defer session.Close()
-
-			err = session.QueryGossip(ctx)
-			require.NoError(t, err)
-
-			// execute a job for each offer
-			for i := 0; i < testCase.peers-1; i++ {
-				offer, err := session.OfferQueue().Peek(ctx)
+			for _, root := range roots {
+				// Now we fetch it again from our providers
+				session, err := client.NewSession(ctx, root)
 				require.NoError(t, err)
-				require.Equal(t, offer.Response.Size, uint64(268009))
 
-				session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
-					return deal.ID(i), nil
-				})
-				select {
-				case r := <-session.offers.results:
-					require.Equal(t, r.DealID, deal.ID(i))
-					// first offer in the queue should be different now that we launched a job on it
-					if i < testCase.peers-2 {
-						noffer, err := session.OfferQueue().Peek(ctx)
-						// if it's the last item the queue should be empty
-						require.NoError(t, err)
-						require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+				err = session.QueryGossip(ctx)
+				require.NoError(t, err)
+
+				// execute a job for each offer
+				for i := 0; i < testCase.peers-1; i++ {
+					offer, err := session.OfferQueue().Peek(ctx)
+					require.NoError(t, err)
+					require.Equal(t, offer.Response.Size, uint64(268009))
+
+					session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
+						return deal.ID(i), nil
+					})
+					select {
+					case r := <-session.offers.results:
+						require.Equal(t, r.DealID, deal.ID(i))
+						// first offer in the queue should be different now that we launched a job on it
+						if i < testCase.peers-2 {
+							_, err := session.OfferQueue().Peek(ctx)
+							// if it's the last item the queue should be empty
+							require.NoError(t, err)
+							// require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+						}
+
+					case <-ctx.Done():
+						require.NoError(t, ctx.Err())
 					}
-
-				case <-ctx.Done():
-					require.NoError(t, ctx.Err())
 				}
+				session.Close()
 			}
+
 		})
 	}
+
 }
 
 func TestExchangeDirect(t *testing.T) {
@@ -226,19 +244,21 @@ func TestExchangeDirect(t *testing.T) {
 			for i := 0; i < 11; i++ {
 				n := testutil.NewTestNode(mn, t)
 				n.SetupGraphSync(ctx)
-				ps, err := pubsub.NewGossipSub(ctx, n.Host)
+				tracer := NewGossipTracer()
+				ps, err := pubsub.NewGossipSub(ctx, n.Host, pubsub.WithEventTracer(tracer))
 				require.NoError(t, err)
 
 				settings := Settings{
-					Datastore:  n.Ds,
-					Blockstore: n.Bs,
-					MultiStore: n.Ms,
-					Host:       n.Host,
-					PubSub:     ps,
-					GraphSync:  n.Gs,
-					RepoPath:   n.DTTmpDir,
-					Keystore:   keystore.NewMemKeystore(),
-					Regions:    []supply.Region{supply.Regions["Global"]},
+					Datastore:    n.Ds,
+					Blockstore:   n.Bs,
+					MultiStore:   n.Ms,
+					Host:         n.Host,
+					PubSub:       ps,
+					GraphSync:    n.Gs,
+					RepoPath:     n.DTTmpDir,
+					GossipTracer: tracer,
+					Keystore:     keystore.NewMemKeystore(),
+					Regions:      []supply.Region{supply.Regions["Global"]},
 				}
 
 				exch, err := NewExchange(bgCtx, settings)

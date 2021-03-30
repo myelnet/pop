@@ -86,13 +86,13 @@ type Provider struct {
 	storeIDGetter    StoreIDGetter
 }
 
-// GetAsk returns the current deal parameters this provider accepts for a given peer
-func (p *Provider) GetAsk(k peer.ID) deal.QueryResponse {
+// GetAsk returns the current deal parameters this provider accepts for a given content ID
+func (p *Provider) GetAsk(k cid.Cid) deal.QueryResponse {
 	return p.askStore.GetAsk(k)
 }
 
 // SetAsk sets the deal parameters this provider accepts
-func (p *Provider) SetAsk(k peer.ID, ask deal.QueryResponse) {
+func (p *Provider) SetAsk(k cid.Cid, ask deal.QueryResponse) {
 	err := p.askStore.SetAsk(k, ask)
 
 	if err != nil {
@@ -152,7 +152,7 @@ func New(
 		dataTransfer: dt,
 		pay:          pay,
 		askStore: &AskStore{
-			asks: make(map[peer.ID]deal.QueryResponse),
+			asks: make(map[cid.Cid]deal.QueryResponse),
 		},
 		storeIDGetter: sg,
 	}
