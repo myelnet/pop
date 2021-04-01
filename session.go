@@ -51,8 +51,8 @@ type Session struct {
 }
 
 // QueryMiner asks a storage miner for retrieval conditions
-func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) error {
-	stream, err := s.net.NewQueryStream(pid)
+func (s *Session) QueryMiner(ctx context.Context, p peer.AddrInfo) error {
+	stream, err := s.net.NewQueryStream(p.ID)
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (s *Session) QueryMiner(ctx context.Context, pid peer.ID) error {
 	if err != nil {
 		return err
 	}
-	s.offers.Receive(pid, res)
+	s.offers.Receive(p, res)
 	return nil
 }
 
@@ -103,6 +103,8 @@ func (s *Session) QueryGossip(ctx context.Context) error {
 func (s *Session) StartTransfer(ctx context.Context) error {
 	// Queue the job to handle once we get an offer
 	job := func(ctx context.Context, of deal.Offer) (deal.ID, error) {
+		// Make sure our provider is in our peerstore
+		s.net.AddAddrs(of.Provider.ID, of.Provider.Addrs)
 		params, err := deal.NewParams(
 			of.Response.MinPricePerByte,
 			of.Response.MaxPaymentInterval,
@@ -120,7 +122,7 @@ func (s *Session) StartTransfer(ctx context.Context) error {
 			s.root,
 			params,
 			of.Response.PieceRetrievalPrice(),
-			of.PeerID,
+			of.Provider.ID,
 			s.clientAddr,
 			of.Response.PaymentAddress,
 			&s.storeID,

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
@@ -14,6 +15,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/deal"
 )
 
@@ -45,7 +47,7 @@ type QueryStream interface {
 // both query and deal streams
 type OfferReceiver interface {
 	// Receive queues up an offer
-	Receive(peer.ID, deal.QueryResponse)
+	Receive(peer.AddrInfo, deal.QueryResponse)
 	// IsRecipient checks if we are actually the peer expecting this offer
 	IsRecipient(string) bool
 	// Recipient returns the peer we think this message should be forwarded to
@@ -64,6 +66,9 @@ type QueryNetwork interface {
 
 	// ID returns the peer id of the host for this network
 	ID() peer.ID
+
+	// Addrs returns the host addresses
+	Addrs() ([]ma.Multiaddr, error)
 
 	// AddAddrs adds the given multi-addrs to the peerstore for the passed peer ID
 	AddAddrs(peer.ID, []ma.Multiaddr)
@@ -238,10 +243,18 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 		return
 	}
 
+	// Get the index where to split
+	msg := response.Message
+	is, err := strconv.ParseInt(msg[:2], 10, 64)
+	if err != nil {
+		fmt.Println("failed to parse index", err)
+		return
+	}
+	msgID := msg[2 : is+2]
 	// The receiver should know if we issued the query if it's not the case
 	// it means we must forward it to whichever peer sent us the query
-	if !r.IsRecipient(response.Message) {
-		to, err := r.Recipient(response.Message)
+	if !r.IsRecipient(msgID) {
+		to, err := r.Recipient(msgID)
 		if err != nil {
 			fmt.Println("failed to find message recipient", err)
 			return
@@ -257,7 +270,12 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 		}
 		return
 	}
-	r.Receive(qs.OtherPeer(), response)
+	rec, err := utils.AddrBytesToAddrInfo([]byte(msg[is+2:]))
+	if err != nil {
+		fmt.Println("failed to parse addr bytes", err)
+		return
+	}
+	r.Receive(*rec, response)
 }
 
 // ID returns the host peer ID
@@ -268,6 +286,11 @@ func (impl *Libp2pQueryNetwork) ID() peer.ID {
 // AddAddrs adds a new peer into the host peerstore
 func (impl *Libp2pQueryNetwork) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
 	impl.host.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
+}
+
+// Addrs returns the host's p2p addresses
+func (impl *Libp2pQueryNetwork) Addrs() ([]ma.Multiaddr, error) {
+	return peer.AddrInfoToP2pAddrs(host.InfoFromHost(impl.host))
 }
 
 // Receiver returns the interface between the network and the exchange

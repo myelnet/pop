@@ -45,7 +45,7 @@ func TestOfferQueue(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		i := i
 		go func() {
-			q.Receive(peer.ID(fmt.Sprintf("%d", i)), deal.QueryResponse{})
+			q.Receive(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{})
 		}()
 	}
 
@@ -61,21 +61,24 @@ func TestOfferQueue(t *testing.T) {
 	}
 }
 
-type Topology func(*testing.T, mocknet.Mocknet, *testutil.TestNode, []*testutil.TestNode)
+type Topology func(*testing.T, mocknet.Mocknet, []*testutil.TestNode, []*testutil.TestNode)
 
-func All(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*testutil.TestNode) {
+func All(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*testutil.TestNode) {
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
 }
 
-func OneToOne(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*testutil.TestNode) {
-	require.NoError(t, testutil.Connect(rn, prs[0]))
+func OneToOne(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*testutil.TestNode) {
+	require.NoError(t, testutil.Connect(rn[0], prs[0]))
 	time.Sleep(time.Second)
 }
 
-func Markov(t *testing.T, mn mocknet.Mocknet, rn *testutil.TestNode, prs []*testutil.TestNode) {
-	prevPeer := rn
-	for _, tn := range prs {
+func Markov(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*testutil.TestNode) {
+	prevPeer := rn[0]
+	var peers []*testutil.TestNode
+	peers = append(peers, rn[1:]...)
+	peers = append(peers, prs...)
+	for _, tn := range peers {
 		require.NoError(t, testutil.Connect(prevPeer, tn))
 		prevPeer = tn
 	}
@@ -94,6 +97,7 @@ func TestGossipQuery(t *testing.T) {
 		name     string
 		topology Topology
 		peers    int
+		clients  int
 		files    int
 		netOpts  func(*testutil.TestNode)
 	}{
@@ -101,13 +105,24 @@ func TestGossipQuery(t *testing.T) {
 			name:     "Connect all",
 			topology: All,
 			peers:    11,
+			clients:  1,
 			netOpts:  noop,
 			files:    1,
 		},
 		{
+			name:     "Connect all with 2 clients",
+			topology: All,
+			peers:    11,
+			clients:  2,
+			netOpts:  noop,
+			files:    1,
+		},
+
+		{
 			name:     "One to one",
 			topology: OneToOne,
 			peers:    2,
+			clients:  1,
 			netOpts:  withSwarmT,
 			files:    1,
 		},
@@ -115,6 +130,7 @@ func TestGossipQuery(t *testing.T) {
 			name:     "Markov",
 			topology: Markov,
 			peers:    6,
+			clients:  1,
 			netOpts:  withSwarmT,
 			files:    3,
 		},
@@ -128,8 +144,8 @@ func TestGossipQuery(t *testing.T) {
 
 			mn := mocknet.New(bgCtx)
 
-			var client *Exchange
-			var cnode *testutil.TestNode
+			clients := make(map[peer.ID]*Exchange)
+			var cnodes []*testutil.TestNode
 
 			providers := make(map[peer.ID]*Exchange)
 			var pnodes []*testutil.TestNode
@@ -137,7 +153,7 @@ func TestGossipQuery(t *testing.T) {
 			fnames := make([]string, testCase.files)
 			for i := range fnames {
 				// This just creates the file without adding it
-				fnames[i] = cnode.CreateRandomFile(t, 256000)
+				fnames[i] = (&testutil.TestNode{}).CreateRandomFile(t, 256000)
 			}
 			roots := make([]cid.Cid, testCase.files)
 
@@ -166,9 +182,9 @@ func TestGossipQuery(t *testing.T) {
 				exch, err := NewExchange(bgCtx, settings)
 				require.NoError(t, err)
 
-				if i == 0 {
-					client = exch
-					cnode = n
+				if i < testCase.clients {
+					clients[n.Host.ID()] = exch
+					cnodes = append(cnodes, n)
 				} else {
 					providers[n.Host.ID()] = exch
 					pnodes = append(pnodes, n)
@@ -182,41 +198,43 @@ func TestGossipQuery(t *testing.T) {
 				}
 			}
 
-			testCase.topology(t, mn, cnode, pnodes)
+			testCase.topology(t, mn, cnodes, pnodes)
 
-			for _, root := range roots {
-				// Now we fetch it again from our providers
-				session, err := client.NewSession(ctx, root)
-				require.NoError(t, err)
-
-				err = session.QueryGossip(ctx)
-				require.NoError(t, err)
-
-				// execute a job for each offer
-				for i := 0; i < testCase.peers-1; i++ {
-					offer, err := session.OfferQueue().Peek(ctx)
+			for _, client := range clients {
+				for _, root := range roots {
+					// Now we fetch it again from our providers
+					session, err := client.NewSession(ctx, root)
 					require.NoError(t, err)
-					require.Equal(t, offer.Response.Size, uint64(268009))
 
-					session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
-						return deal.ID(i), nil
-					})
-					select {
-					case r := <-session.offers.results:
-						require.Equal(t, r.DealID, deal.ID(i))
-						// first offer in the queue should be different now that we launched a job on it
-						if i < testCase.peers-2 {
-							_, err := session.OfferQueue().Peek(ctx)
-							// if it's the last item the queue should be empty
-							require.NoError(t, err)
-							// require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+					err = session.QueryGossip(ctx)
+					require.NoError(t, err)
+
+					// execute a job for each offer
+					for i := 0; i < testCase.peers-testCase.clients; i++ {
+						offer, err := session.OfferQueue().Peek(ctx)
+						require.NoError(t, err)
+						require.Equal(t, offer.Response.Size, uint64(268009))
+
+						session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
+							return deal.ID(i), nil
+						})
+						select {
+						case r := <-session.offers.results:
+							require.Equal(t, r.DealID, deal.ID(i))
+							// first offer in the queue should be different now that we launched a job on it
+							if i < testCase.peers-testCase.clients-1 {
+								_, err := session.OfferQueue().Peek(ctx)
+								// if it's the last item the queue should be empty
+								require.NoError(t, err)
+								// require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
+							}
+
+						case <-ctx.Done():
+							require.NoError(t, ctx.Err())
 						}
-
-					case <-ctx.Done():
-						require.NoError(t, ctx.Err())
 					}
+					session.Close()
 				}
-				session.Close()
 			}
 
 		})

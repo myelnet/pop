@@ -157,9 +157,9 @@ func (oq *OfferQueue) HandleNext(fn Job) {
 }
 
 // Receive sends a new offer to the queue
-func (oq *OfferQueue) Receive(p peer.ID, res deal.QueryResponse) {
+func (oq *OfferQueue) Receive(p peer.AddrInfo, res deal.QueryResponse) {
 	oq.offers <- deal.Offer{
-		PeerID:   p,
+		Provider: p,
 		Response: res,
 	}
 }
@@ -289,6 +289,14 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 				fmt.Println("error", err)
 				continue
 			}
+			addrs, err := e.net.Addrs()
+			if err != nil {
+				continue
+			}
+			mid := pubsub.DefaultMsgIdFn(msg.Message)
+			// Our message payload includes the message ID and the recipient peer address
+			// The index indicates where to slice the string to extract both values
+			p := fmt.Sprintf("%d%s%s", len(mid), mid, string(addrs[0].Bytes()))
 			answer := deal.QueryResponse{
 				Status:                     deal.QueryResponseAvailable,
 				Size:                       uint64(stats.Size),
@@ -296,11 +304,11 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 				MinPricePerByte:            r.PPB, // TODO: dynamic pricing
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
-				Message:                    pubsub.DefaultMsgIdFn(msg.Message),
+				Message:                    p,
 			}
 			if err := qs.WriteQueryResponse(answer); err != nil {
 				fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
-				return
+				continue
 			}
 			// We need to remember the offer we made so we can validate against it once
 			// clients start the retrieval

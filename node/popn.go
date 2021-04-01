@@ -704,7 +704,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			return err
 		}
 
-		err = session.QueryMiner(ctx, info.ID)
+		err = session.QueryMiner(ctx, info)
 		if err != nil {
 			return err
 		}
