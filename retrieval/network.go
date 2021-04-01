@@ -2,12 +2,16 @@ package retrieval
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"time"
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
+	"github.com/ipfs/go-cid"
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/mux"
@@ -17,6 +21,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/deal"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 // We stay compatible with lotus nodes so we can retrieve from lotus providers too
@@ -230,21 +235,18 @@ func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
 
 func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 	r := impl.receiver
-	qs := &queryStream{
-		p:        s.Conn().RemotePeer(),
-		rw:       s,
-		buffered: bufio.NewReaderSize(s, 16),
-	}
-	defer qs.Close()
+	buffered := bufio.NewReaderSize(s, 16)
 
-	response, err := qs.ReadQueryResponse()
+	var buf bytes.Buffer
+	msg, err := PeekResponseMsg(buffered, &buf)
 	if err != nil {
-		fmt.Println("failed to read query response", err)
+		fmt.Println("failed to peek message", err)
 		return
 	}
-
+	if len(msg) == 0 {
+		return
+	}
 	// Get the index where to split
-	msg := response.Message
 	is, err := strconv.ParseInt(msg[:2], 10, 64)
 	if err != nil {
 		fmt.Println("failed to parse index", err)
@@ -259,14 +261,13 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 			fmt.Println("failed to find message recipient", err)
 			return
 		}
-		nqs, err := impl.NewQueryStream(to)
+		w, err := impl.openStream(context.Background(), to, impl.supportedProtocols)
 		if err != nil {
-			fmt.Println("failed to open query stream with new recipient", err)
+			fmt.Println("failed to open stream", err)
 			return
 		}
-		if err := nqs.WriteQueryResponse(response); err != nil {
-			fmt.Println("failed to write forwarded response", err)
-			return
+		if _, err := io.Copy(w, &buf); err != nil {
+			fmt.Println("failed to forward buffer", err)
 		}
 		return
 	}
@@ -275,7 +276,14 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 		fmt.Println("failed to parse addr bytes", err)
 		return
 	}
-	r.Receive(*rec, response)
+
+	var resp deal.QueryResponse
+	if err := resp.UnmarshalCBOR(&buf); err != nil && !errors.Is(err, io.EOF) {
+		fmt.Println("failed to read query response", err)
+		return
+	}
+
+	r.Receive(*rec, resp)
 }
 
 // ID returns the host peer ID
@@ -296,4 +304,34 @@ func (impl *Libp2pQueryNetwork) Addrs() ([]ma.Multiaddr, error) {
 // Receiver returns the interface between the network and the exchange
 func (impl *Libp2pQueryNetwork) Receiver() OfferReceiver {
 	return impl.receiver
+}
+
+// PeekResponseMsg decodes the Message field only and returns the value while copying the bytes in a buffer
+func PeekResponseMsg(r io.Reader, buf *bytes.Buffer) (string, error) {
+	tr := io.TeeReader(r, buf)
+	br := cbg.GetPeeker(tr)
+	scratch := make([]byte, 8)
+	_, n, err := cbg.CborReadHeaderBuf(br, scratch)
+	if err != nil {
+		return "", err
+	}
+	var name string
+	for i := uint64(0); i < n; i++ {
+		{
+			sval, err := cbg.ReadStringBuf(br, scratch)
+			if err != nil {
+				return "", err
+			}
+			name = string(sval)
+		}
+		if name == "Message" {
+			sval, err := cbg.ReadStringBuf(br, scratch)
+			if err != nil {
+				return "", err
+			}
+			return string(sval), nil
+		}
+		cbg.ScanForLinks(br, func(cid.Cid) {})
+	}
+	return "", errors.New("no Message field")
 }
