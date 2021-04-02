@@ -2,11 +2,12 @@ package retrieval
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
@@ -20,9 +21,9 @@ type receiver struct {
 }
 
 // Receive sends a new offer to the queue
-func (r receiver) Receive(p peer.ID, res deal.QueryResponse) {
+func (r receiver) Receive(p peer.AddrInfo, res deal.QueryResponse) {
 	r.offers <- deal.Offer{
-		PeerID:   p,
+		Provider: p,
 		Response: res,
 	}
 }
@@ -70,6 +71,7 @@ func TestNetwork(t *testing.T) {
 			defer stream.Close()
 
 			addr, _ := address.NewIDAddress(uint64(10))
+			addrs, _ := net.Addrs()
 
 			answer := deal.QueryResponse{
 				Status:                     deal.QueryResponseAvailable,
@@ -78,6 +80,7 @@ func TestNetwork(t *testing.T) {
 				MinPricePerByte:            deal.DefaultPricePerByte,
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+				Message:                    "02Qm" + string(addrs[0].Bytes()),
 			}
 			err = stream.WriteQueryResponse(answer)
 			require.NoError(t, err)
@@ -139,6 +142,7 @@ func TestNetworkForwarding(t *testing.T) {
 			defer stream.Close()
 
 			addr, _ := address.NewIDAddress(uint64(10))
+			addrs, _ := net.Addrs()
 
 			answer := deal.QueryResponse{
 				Status:                     deal.QueryResponseAvailable,
@@ -147,6 +151,7 @@ func TestNetworkForwarding(t *testing.T) {
 				MinPricePerByte:            deal.DefaultPricePerByte,
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+				Message:                    "02Qm" + string(addrs[0].Bytes()),
 			}
 			err = stream.WriteQueryResponse(answer)
 			require.NoError(t, err)
@@ -162,6 +167,81 @@ func TestNetworkForwarding(t *testing.T) {
 		}
 	}
 
+}
+
+func BenchmarkNetworkForwarding(b *testing.B) {
+	bgCtx := context.Background()
+	ctx, cancel := context.WithCancel(bgCtx)
+	defer cancel()
+
+	mn := mocknet.New(bgCtx)
+
+	cnode := testutil.NewTestNode(mn, b)
+	cnet := NewQueryNetwork(cnode.Host)
+	r := receiver{make(chan deal.Offer), true, ""}
+	cnet.Start(r)
+
+	var pnodes []*testutil.TestNode
+	var pnets []*Libp2pQueryNetwork
+
+	for i := 0; i < 1+b.N; i++ {
+		pnode := testutil.NewTestNode(mn, b)
+		pnet := NewQueryNetwork(pnode.Host)
+		// Each node is forwwarding to next one
+		pp := cnet.ID()
+		if i > 0 {
+			pp = pnets[i-1].ID()
+		}
+		pnet.Start(&receiver{make(chan deal.Offer), false, pp})
+		pnodes = append(pnodes, pnode)
+		pnets = append(pnets, pnet)
+	}
+
+	require.NoError(b, mn.LinkAll())
+
+	require.NoError(b, mn.ConnectAllButSelf())
+
+	runtime.GC()
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	// Simulating a bunch of nodes sending responses at the same time
+	for i, net := range pnets {
+		net := net
+		pp := cnet.ID()
+		if i > 0 {
+			pp = pnets[i-1].ID()
+		}
+		go func(p peer.ID) {
+			stream, err := net.NewQueryStream(p)
+			require.NoError(b, err)
+			defer stream.Close()
+
+			addr, _ := address.NewIDAddress(uint64(10))
+			addrs, _ := net.Addrs()
+
+			answer := deal.QueryResponse{
+				Status:                     deal.QueryResponseAvailable,
+				Size:                       1600,
+				PaymentAddress:             addr,
+				MinPricePerByte:            deal.DefaultPricePerByte,
+				MaxPaymentInterval:         deal.DefaultPaymentInterval,
+				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+				Message:                    "02Qm" + string(addrs[0].Bytes()),
+			}
+			err = stream.WriteQueryResponse(answer)
+			require.NoError(b, err)
+		}(pp)
+	}
+
+	for i := 0; i < 1+b.N; i++ {
+		select {
+		case of := <-r.offers:
+			require.Equal(b, of.Response.Size, uint64(1600))
+		case <-ctx.Done():
+			require.NoError(b, ctx.Err())
+		}
+	}
 }
 
 /****
