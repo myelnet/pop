@@ -236,9 +236,10 @@ func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
 func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 	r := impl.receiver
 	buffered := bufio.NewReaderSize(s, 16)
+	defer s.Close()
 
-	var buf bytes.Buffer
-	msg, err := PeekResponseMsg(buffered, &buf)
+	buf := new(bytes.Buffer)
+	msg, err := PeekResponseMsg(buffered, buf)
 	if err != nil {
 		fmt.Println("failed to peek message", err)
 		return
@@ -266,7 +267,7 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 			fmt.Println("failed to open stream", err)
 			return
 		}
-		if _, err := io.Copy(w, &buf); err != nil {
+		if _, err := io.Copy(w, buf); err != nil {
 			fmt.Println("failed to forward buffer", err)
 		}
 		return
@@ -278,7 +279,7 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 	}
 
 	var resp deal.QueryResponse
-	if err := resp.UnmarshalCBOR(&buf); err != nil && !errors.Is(err, io.EOF) {
+	if err := resp.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
 		fmt.Println("failed to read query response", err)
 		return
 	}
@@ -316,6 +317,7 @@ func PeekResponseMsg(r io.Reader, buf *bytes.Buffer) (string, error) {
 		return "", err
 	}
 	var name string
+	var msg string
 	for i := uint64(0); i < n; i++ {
 		{
 			sval, err := cbg.ReadStringBuf(br, scratch)
@@ -329,9 +331,10 @@ func PeekResponseMsg(r io.Reader, buf *bytes.Buffer) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			return string(sval), nil
+			msg = string(sval)
+		} else {
+			cbg.ScanForLinks(br, func(cid.Cid) {})
 		}
-		cbg.ScanForLinks(br, func(cid.Cid) {})
 	}
-	return "", errors.New("no Message field")
+	return msg, nil
 }
