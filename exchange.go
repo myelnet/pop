@@ -75,6 +75,10 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 	paym := payments.New(ctx, ex.fAPI, ex.wallet, set.Datastore, cborblocks)
 	// create the supply manager to handle optimisations of the block supply
 	ex.supply = supply.New(ex.h, ex.dataTransfer, set.Datastore, ex.multiStore, set.Regions)
+	err = ex.supply.Start(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Create our retrieval manager
 	ex.retrieval, err = retrieval.New(
 		ctx,

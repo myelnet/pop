@@ -25,6 +25,7 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/libp2p/go-eventbus"
 	bhost "github.com/libp2p/go-libp2p-blankhost"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -290,10 +291,21 @@ func TestExchangeDirect(t *testing.T) {
 					pnodes[n.Host.ID()] = n
 				}
 			}
+			sub, err := client.h.EventBus().Subscribe(new(supply.PeerRegionEvt), eventbus.BufSize(16))
+			require.NoError(t, err)
 
 			require.NoError(t, mn.LinkAll())
 
 			require.NoError(t, mn.ConnectAllButSelf())
+
+			// Wait for all peers to be received in the peer manager
+			for i := 0; i < 11; i++ {
+				select {
+				case <-sub.Out():
+				case <-ctx.Done():
+					t.Fatal("all peers didn't get in the peermgr")
+				}
+			}
 
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
@@ -302,19 +314,16 @@ func TestExchangeDirect(t *testing.T) {
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			res, err := client.Supply().Dispatch(supply.Request{
+			res := client.Supply().Dispatch(supply.Request{
 				PayloadCID: rootCid,
 				Size:       uint64(len(origBytes)),
-			})
-			require.NoError(t, err)
+			}, supply.DefaultDispatchOptions)
 
 			var records []supply.PRecord
-			for len(records) < res.Count {
-				rec, err := res.Next(ctx)
-				require.NoError(t, err)
+			for rec := range res {
 				records = append(records, rec)
 			}
-			res.Close()
+			require.Equal(t, len(records), 7)
 
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {

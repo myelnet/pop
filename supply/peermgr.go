@@ -87,10 +87,10 @@ func (pm *PeerMgr) Receive(p peer.ID, h Hey) {
 			// These peers should be trimmed last when the number of connections overflows
 			pm.h.ConnManager().TagPeer(p, reg.Name, 10)
 			pm.mu.Lock()
-			defer pm.mu.Unlock()
 			pm.peers[p] = Peer{
 				Regions: h.Regions,
 			}
+			pm.mu.Unlock()
 		}
 	}
 }
