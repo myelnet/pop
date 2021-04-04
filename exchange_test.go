@@ -101,14 +101,14 @@ func TestGossipQuery(t *testing.T) {
 		files    int
 		netOpts  func(*testutil.TestNode)
 	}{
-		// {
-		// 	name:     "Connect all",
-		// 	topology: All,
-		// 	peers:    11,
-		// 	clients:  1,
-		// 	netOpts:  noop,
-		// 	files:    1,
-		// },
+		{
+			name:     "Connect all",
+			topology: All,
+			peers:    11,
+			clients:  1,
+			netOpts:  noop,
+			files:    1,
+		},
 		{
 			name:     "Connect all with 2 clients",
 			topology: All,
