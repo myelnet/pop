@@ -19,8 +19,8 @@ import (
 // HeyProtocol identifies the supply greeter protocol
 const HeyProtocol = "/myel/pop/hey/1.0"
 
-// Receiver is the interface the HeyService expects to receive the hey messages
-type Receiver interface {
+// HeyReceiver is the interface the HeyService expects to receive the hey messages
+type HeyReceiver interface {
 	Receive(peer.ID, Hey)
 }
 
@@ -31,21 +31,26 @@ type HeyGetter interface {
 
 // LatencyRecorder is an interface to record RTT latency measured during the hey operation
 type LatencyRecorder interface {
-	RecordLatency(peer.ID, time.Duration)
+	RecordLatency(peer.ID, time.Duration) error
+}
+
+// PeerManager all the methods to maintain an optimal list of peers
+type PeerManager interface {
+	HeyReceiver
+	HeyGetter
+	LatencyRecorder
 }
 
 // HeyService greets new peers upon connecting to learn more about their region
 // and their supply.
 type HeyService struct {
 	h  host.Host
-	r  Receiver
-	g  HeyGetter
-	lr LatencyRecorder
+	pm PeerManager
 }
 
 // NewHeyService creates new instance of the HeyService
-func NewHeyService(h host.Host, r Receiver, g HeyGetter) *HeyService {
-	return &HeyService{h, r, g, h.Peerstore()}
+func NewHeyService(h host.Host, pm PeerManager) *HeyService {
+	return &HeyService{h, pm}
 }
 
 // Hey is the greeting message which takes in network info
@@ -85,7 +90,7 @@ func (hs *HeyService) HandleStream(s network.Stream) {
 		fmt.Println("failed to read CBOR Hey msg", err)
 		return
 	}
-	hs.r.Receive(s.Conn().RemotePeer(), hmsg)
+	hs.pm.Receive(s.Conn().RemotePeer(), hmsg)
 	// We send back the seed to measure roundrip time
 	go func() {
 		defer s.Close()
@@ -101,7 +106,7 @@ func (hs *HeyService) SendHey(ctx context.Context, pid peer.ID) error {
 		return err
 	}
 
-	hmsg := hs.g.GetHey()
+	hmsg := hs.pm.GetHey()
 
 	start := time.Now()
 	if err := cborutil.WriteCborRPC(s, &hmsg); err != nil {
@@ -118,7 +123,7 @@ func (hs *HeyService) SendHey(ctx context.Context, pid peer.ID) error {
 		}
 		now := time.Now()
 		lat := now.Sub(start)
-		hs.lr.RecordLatency(pid, lat)
+		hs.pm.RecordLatency(pid, lat)
 	}()
 	return nil
 }

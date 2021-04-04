@@ -7,6 +7,7 @@ import (
 	"time"
 
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/libp2p/go-eventbus"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
@@ -43,6 +44,9 @@ func TestMultiRequestStreams(t *testing.T) {
 
 			hn := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, regions)
 			hn.Register(rootCid, storeID)
+			sub, err := hn.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
+			require.NoError(t, err)
+			require.NoError(t, hn.Start(ctx))
 
 			var testData []*testutil.TestNode
 			receivers := make(map[peer.ID]*Supply)
@@ -56,29 +60,33 @@ func TestMultiRequestStreams(t *testing.T) {
 				})
 
 				hn1 := New(tnode.Host, tnode.Dt, tnode.Ds, tnode.Ms, regions)
+				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
 				testData = append(testData, tnode)
 			}
 
-			err := mn.LinkAll()
+			err = mn.LinkAll()
 			require.NoError(t, err)
 
 			err = mn.ConnectAllButSelf()
 			require.NoError(t, err)
 
-			// This delay is required to let the host register all the peers and protocols
-			time.Sleep(10 * time.Millisecond)
+			// Wait for all peers to be received in the peer manager
+			for i := 0; i < 7; i++ {
+				select {
+				case <-sub.Out():
+				case <-ctx.Done():
+					t.Fatal("all peers didn't get in the peermgr")
+				}
+			}
 
-			res, err := hn.Dispatch(Request{rootCid, uint64(len(origBytes))})
-			defer res.Close()
-			require.NoError(t, err)
+			res := hn.Dispatch(Request{rootCid, uint64(len(origBytes))}, DefaultDispatchOptions)
 
 			var recs []PRecord
-			for len(recs) < res.Count {
-				rec, err := res.Next(ctx)
-				require.NoError(t, err)
+			for rec := range res {
 				recs = append(recs, rec)
 			}
+			require.Equal(t, len(recs), 7)
 
 		})
 	}
@@ -108,10 +116,16 @@ func TestSendRequestNoPeers(t *testing.T) {
 
 	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, regions)
 	supply.Register(rootCid, storeID)
+	require.NoError(t, supply.Start(bgCtx))
 
-	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
-	defer res.Close()
-	require.EqualError(t, err, ErrNoPeers.Error())
+	options := DispatchOptions{
+		BackoffMin:     10 * time.Millisecond,
+		BackoffAttemps: 4,
+		RF:             5,
+	}
+	res := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, options)
+	for range res {
+	}
 }
 
 // The role of this test is to make sure we never dispatch content to unwanted regions
@@ -141,6 +155,9 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	}
 
 	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, asia)
+	sub, err := n1.Host.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
+	require.NoError(t, err)
+	require.NoError(t, supply.Start(ctx))
 
 	asiaNodes := make(map[peer.ID]*testutil.TestNode)
 	asiaSupplies := make(map[peer.ID]*Supply)
@@ -155,6 +172,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 
 		// Create a supply for each node
 		s := New(n.Host, n.Dt, n.Ds, n.Ms, asia)
+		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
 		asiaSupplies[n.Host.ID()] = s
@@ -177,12 +195,13 @@ func TestSendRequestDiffRegions(t *testing.T) {
 
 		// Create a supply for each node
 		s := New(n.Host, n.Dt, n.Ds, n.Ms, africa)
+		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
 		africaSupplies = append(africaSupplies, s)
 	}
 
-	err := mn.LinkAll()
+	err = mn.LinkAll()
 	require.NoError(t, err)
 
 	err = mn.ConnectAllButSelf()
@@ -190,14 +209,24 @@ func TestSendRequestDiffRegions(t *testing.T) {
 
 	require.NoError(t, supply.Register(rootCid, storeID))
 
-	res, err := supply.Dispatch(Request{rootCid, uint64(len(origBytes))})
-	defer res.Close()
-	require.NoError(t, err)
+	// Wait for all peers to be received in the peer manager
+	for i := 0; i < 5; i++ {
+		select {
+		case <-sub.Out():
+		case <-ctx.Done():
+			t.Fatal("all peers didn't get in the peermgr")
+		}
+	}
+	// get 5 requests and give up after 4 attemps
+	options := DispatchOptions{
+		BackoffMin:     50 * time.Millisecond,
+		BackoffAttemps: 4,
+		RF:             7,
+	}
+	res := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, options)
 
 	var recipients []PRecord
-	for len(recipients) < res.Count {
-		rec, err := res.Next(ctx)
-		require.NoError(t, err)
+	for rec := range res {
 		recipients = append(recipients, rec)
 	}
 	for _, p := range recipients {
@@ -206,4 +235,5 @@ func TestSendRequestDiffRegions(t *testing.T) {
 
 		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 	}
+	require.Equal(t, 5, len(recipients))
 }

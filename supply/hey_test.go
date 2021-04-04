@@ -11,28 +11,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type receiver struct {
+type pmanager struct {
 	heys chan Hey
-}
-
-func (r *receiver) Receive(p peer.ID, msg Hey) {
-	r.heys <- msg
-}
-
-type getter struct {
-	hey Hey
-}
-
-func (g *getter) GetHey() Hey {
-	return g.hey
-}
-
-type lrecorder struct {
+	hey  Hey
 	lats chan time.Duration
 }
 
-func (lr *lrecorder) RecordLatency(p peer.ID, l time.Duration) {
-	lr.lats <- l
+func (pm *pmanager) Receive(p peer.ID, msg Hey) {
+	pm.heys <- msg
+}
+
+func (pm *pmanager) GetHey() Hey {
+	return pm.hey
+}
+
+func (pm *pmanager) RecordLatency(p peer.ID, l time.Duration) error {
+	pm.lats <- l
+	return nil
 }
 
 func TestHey(t *testing.T) {
@@ -49,7 +44,7 @@ func TestHey(t *testing.T) {
 	hey1 := Hey{
 		Regions: []RegionCode{GlobalRegion},
 	}
-	h1 := &HeyService{n1.Host, &receiver{h1ch}, &getter{hey1}, &lrecorder{l1ch}}
+	h1 := &HeyService{n1.Host, &pmanager{h1ch, hey1, l1ch}}
 	require.NoError(t, h1.Run(ctx))
 
 	h2ch := make(chan Hey, 1)
@@ -57,7 +52,7 @@ func TestHey(t *testing.T) {
 	hey2 := Hey{
 		Regions: []RegionCode{GlobalRegion, EuropeRegion},
 	}
-	h2 := &HeyService{n2.Host, &receiver{h2ch}, &getter{hey2}, &lrecorder{l2ch}}
+	h2 := &HeyService{n2.Host, &pmanager{h2ch, hey2, l2ch}}
 	require.NoError(t, h2.Run(ctx))
 
 	mn.SetLinkDefaults(mocknet.LinkOptions{Latency: lat})
