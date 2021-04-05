@@ -73,6 +73,7 @@ type TestNode struct {
 	Dt              datatransfer.Manager
 	Ms              *multistore.MultiStore
 	Counter         *storedcounter.StoredCounter
+	OrigBytes       []byte
 }
 
 func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *TestNode {
@@ -180,6 +181,7 @@ func (tn *TestNode) CreateRandomFile(t testing.TB, size int) string {
 	_, err = file.Write(data)
 	require.NoError(t, err)
 
+	tn.OrigBytes = data
 	return file.Name()
 }
 

@@ -101,14 +101,14 @@ func TestGossipQuery(t *testing.T) {
 		files    int
 		netOpts  func(*testutil.TestNode)
 	}{
-		// {
-		// 	name:     "Connect all",
-		// 	topology: All,
-		// 	peers:    11,
-		// 	clients:  1,
-		// 	netOpts:  noop,
-		// 	files:    1,
-		// },
+		{
+			name:     "Connect all",
+			topology: All,
+			peers:    11,
+			clients:  1,
+			netOpts:  noop,
+			files:    1,
+		},
 		{
 			name:     "Connect all with 2 clients",
 			topology: All,
@@ -242,7 +242,7 @@ func TestGossipQuery(t *testing.T) {
 
 }
 
-func TestExchangeDirect(t *testing.T) {
+func TestExchangeE2E(t *testing.T) {
 	// Iterating a ton helps weed out false positives
 	for i := 0; i < 1; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
@@ -255,7 +255,6 @@ func TestExchangeDirect(t *testing.T) {
 
 			var client *Exchange
 			var cnode *testutil.TestNode
-
 			providers := make(map[peer.ID]*Exchange)
 			pnodes := make(map[peer.ID]*testutil.TestNode)
 
@@ -290,11 +289,11 @@ func TestExchangeDirect(t *testing.T) {
 					pnodes[n.Host.ID()] = n
 				}
 			}
-
 			require.NoError(t, mn.LinkAll())
 
 			require.NoError(t, mn.ConnectAllButSelf())
 
+			// The peer manager has time to fill up while we load this file
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
@@ -302,19 +301,16 @@ func TestExchangeDirect(t *testing.T) {
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			res, err := client.Supply().Dispatch(supply.Request{
+			res := client.Supply().Dispatch(supply.Request{
 				PayloadCID: rootCid,
 				Size:       uint64(len(origBytes)),
-			})
-			require.NoError(t, err)
+			}, supply.DefaultDispatchOptions)
 
 			var records []supply.PRecord
-			for len(records) < res.Count {
-				rec, err := res.Next(ctx)
-				require.NoError(t, err)
+			for rec := range res {
 				records = append(records, rec)
 			}
-			res.Close()
+			require.Equal(t, 7, len(records))
 
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
@@ -323,7 +319,7 @@ func TestExchangeDirect(t *testing.T) {
 				pnodes[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 			}
 
-			err = client.Supply().RemoveContent(rootCid)
+			err := client.Supply().RemoveContent(rootCid)
 			require.NoError(t, err)
 
 			// Sanity check to make sure our client does not have a copy of our blocks
