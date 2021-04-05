@@ -25,7 +25,6 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/libp2p/go-eventbus"
 	bhost "github.com/libp2p/go-libp2p-blankhost"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -243,7 +242,7 @@ func TestGossipQuery(t *testing.T) {
 
 }
 
-func TestExchangeDirect(t *testing.T) {
+func TestExchangeE2E(t *testing.T) {
 	// Iterating a ton helps weed out false positives
 	for i := 0; i < 1; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
@@ -256,7 +255,6 @@ func TestExchangeDirect(t *testing.T) {
 
 			var client *Exchange
 			var cnode *testutil.TestNode
-
 			providers := make(map[peer.ID]*Exchange)
 			pnodes := make(map[peer.ID]*testutil.TestNode)
 
@@ -291,22 +289,11 @@ func TestExchangeDirect(t *testing.T) {
 					pnodes[n.Host.ID()] = n
 				}
 			}
-			sub, err := client.h.EventBus().Subscribe(new(supply.PeerRegionEvt), eventbus.BufSize(16))
-			require.NoError(t, err)
-
 			require.NoError(t, mn.LinkAll())
 
 			require.NoError(t, mn.ConnectAllButSelf())
 
-			// Wait for all peers to be received in the peer manager
-			for i := 0; i < 11; i++ {
-				select {
-				case <-sub.Out():
-				case <-ctx.Done():
-					t.Fatal("all peers didn't get in the peermgr")
-				}
-			}
-
+			// The peer manager has time to fill up while we load this file
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
@@ -323,7 +310,7 @@ func TestExchangeDirect(t *testing.T) {
 			for rec := range res {
 				records = append(records, rec)
 			}
-			require.Equal(t, len(records), 7)
+			require.Equal(t, 7, len(records))
 
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
@@ -332,7 +319,7 @@ func TestExchangeDirect(t *testing.T) {
 				pnodes[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 			}
 
-			err = client.Supply().RemoveContent(rootCid)
+			err := client.Supply().RemoveContent(rootCid)
 			require.NoError(t, err)
 
 			// Sanity check to make sure our client does not have a copy of our blocks

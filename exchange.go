@@ -276,14 +276,14 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		store, err := e.supply.GetStore(m.PayloadCID)
 		if err != nil {
 			// TODO: we need to log when we couldn't find some content so we can try looking for it
-			fmt.Printf("no store found for %s \n", m.PayloadCID)
+			fmt.Println("no store found for", m.PayloadCID)
 			continue
 		}
 		// DAGStat is both a way of checking if we have the blocks and returning its size
 		// TODO: support selector in Query
 		stats, err := DAGStat(ctx, store.Bstore, m.PayloadCID, AllSelector())
 		if err != nil {
-			fmt.Printf("failed to get content stat: %s\n", err)
+			fmt.Println("failed to get content stat", err, e.h.ID())
 		}
 		// We don't have the block we don't even reply to avoid taking bandwidth
 		// On the client side we assume no response means they don't have it

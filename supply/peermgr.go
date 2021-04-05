@@ -98,8 +98,10 @@ func (pm *PeerMgr) Receive(p peer.ID, h Hey) {
 // GetHey formats a new Hey message
 func (pm *PeerMgr) GetHey() Hey {
 	regions := make([]RegionCode, len(pm.regions))
+	i := 0
 	for k := range pm.regions {
-		regions = append(regions, k)
+		regions[i] = k
+		i++
 	}
 	return Hey{
 		Regions: regions,

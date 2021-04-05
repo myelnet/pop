@@ -48,7 +48,7 @@ func TestMultiRequestStreams(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, hn.Start(ctx))
 
-			var testData []*testutil.TestNode
+			tnds := make(map[peer.ID]*testutil.TestNode)
 			receivers := make(map[peer.ID]*Supply)
 
 			for i := 0; i < 7; i++ {
@@ -62,7 +62,7 @@ func TestMultiRequestStreams(t *testing.T) {
 				hn1 := New(tnode.Host, tnode.Dt, tnode.Ds, tnode.Ms, regions)
 				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
-				testData = append(testData, tnode)
+				tnds[tnode.Host.ID()] = tnode
 			}
 
 			err = mn.LinkAll()
@@ -87,6 +87,12 @@ func TestMultiRequestStreams(t *testing.T) {
 				recs = append(recs, rec)
 			}
 			require.Equal(t, len(recs), 7)
+
+			for _, r := range recs {
+				store, err := receivers[r.Provider].GetStore(rootCid)
+				require.NoError(t, err)
+				tnds[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
+			}
 
 		})
 	}
@@ -219,7 +225,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	}
 	// get 5 requests and give up after 4 attemps
 	options := DispatchOptions{
-		BackoffMin:     50 * time.Millisecond,
+		BackoffMin:     100 * time.Millisecond,
 		BackoffAttemps: 4,
 		RF:             7,
 	}

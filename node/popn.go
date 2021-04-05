@@ -594,19 +594,11 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		res, err := nd.exch.Supply().Dispatch(supply.Request{
+		res := nd.exch.Supply().Dispatch(supply.Request{
 			PayloadCID: com.PayloadCID,
 			Size:       uint64(com.PayloadSize),
-		})
-		defer res.Close()
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		for {
-			// Right now we only wait for 1 peer to receive the content but we could wait for
-			// more peers, the question is when to stop as we don't know exactly how many will retrieve
-			rec, err := res.Next(ctx)
+		}, supply.DefaultDispatchOptions)
+		for rec := range res {
 			nd.send(Notify{
 				PushResult: &PushResult{
 					Caches: []string{
