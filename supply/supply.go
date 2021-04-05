@@ -253,8 +253,6 @@ func New(
 	store := &Store{namespace.Wrap(ds, datastore.NewKey("/supply"))}
 	pmgr := NewPeerMgr(h, regions)
 	hs := NewHeyService(h, pmgr)
-	v := NewValidator()
-
 	s := &Supply{
 		h:          h,
 		dt:         dt,
@@ -264,15 +262,16 @@ func New(
 		net:        NewNetwork(h, regions),
 		store:      store,
 		regions:    regions,
-		validation: v,
+		validation: NewValidator(),
 	}
-	s.dt.RegisterVoucherType(&Request{}, v)
-	s.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(s))
-	s.net.SetDelegate(&handler{ms, dt, v, store})
 
 	for _, option := range options {
 		option(s)
 	}
+
+	s.dt.RegisterVoucherType(&Request{}, s.validation)
+	s.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(s))
+	s.net.SetDelegate(&handler{ms, dt, s.validation, store})
 
 	// TODO: clean this up
 	dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
