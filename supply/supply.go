@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
@@ -18,6 +19,7 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
+	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/mux"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -58,31 +60,6 @@ func (Request) Type() datatransfer.TypeIdentifier {
 type PRecord struct {
 	Provider   peer.ID
 	PayloadCID cid.Cid
-}
-
-// Response is an async collection of confirmations from data transfers to cache providers
-// it also provides the number of peers we messaged
-type Response struct {
-	recordChan chan PRecord
-	unsub      datatransfer.Unsubscribe
-
-	Count int
-}
-
-// Next returns the next record from a new cache
-func (r *Response) Next(ctx context.Context) (PRecord, error) {
-	select {
-	case r := <-r.recordChan:
-		return r, nil
-	case <-ctx.Done():
-		return PRecord{}, ctx.Err()
-	}
-}
-
-// Close stops listening for cache confirmations
-func (r *Response) Close() {
-	r.unsub()
-	close(r.recordChan)
 }
 
 // Network handles all the different messaging protocols
@@ -171,9 +148,15 @@ func (s *requestStream) OtherPeer() peer.ID {
 	return s.p
 }
 
+// RequestValidator is implemented to check whether a provider should accept new content or not
+type RequestValidator interface {
+	ValidateRequest(Request) error
+}
+
 type handler struct {
 	ms *multistore.MultiStore
 	dt datatransfer.Manager
+	rv RequestValidator
 	s  *Store
 }
 
@@ -196,6 +179,11 @@ func (h *handler) HandleRequest(stream RequestStreamer) {
 	// TODO: run custom logic to validate the presence of a storage deal for this block
 	// we may need to request deal info in the message
 	// + check if we have room to store it
+	err = h.rv.ValidateRequest(req)
+	if err != nil {
+		fmt.Println("refusing dispatch request", err)
+		return
+	}
 
 	// Create a new store to receive our new blocks
 	// It will be automatically picked up in the TransportConfigurer
@@ -213,6 +201,32 @@ func (h *handler) HandleRequest(stream RequestStreamer) {
 	}
 }
 
+// Validator is all the methods to implement for validating Supply operations
+type Validator interface {
+	RequestValidator
+	ValidatePush(
+		peer.ID,
+		datatransfer.Voucher,
+		cid.Cid,
+		ipld.Node) (datatransfer.VoucherResult, error)
+	ValidatePull(
+		peer.ID,
+		datatransfer.Voucher,
+		cid.Cid,
+		ipld.Node) (datatransfer.VoucherResult, error)
+	Authorize(cid.Cid, peer.ID)
+}
+
+// WithValidator sets a custom validator for supply requests
+func WithValidator(v Validator) Option {
+	return func(s *Supply) {
+		s.validation = v
+	}
+}
+
+// Option sets some optional values for supply configuration
+type Option func(*Supply)
+
 // Supply keeps track of the content we store and provide on the network
 // its role is to always seek and supply new and more efficient content to store
 type Supply struct {
@@ -221,7 +235,9 @@ type Supply struct {
 	ms         *multistore.MultiStore
 	net        *Network
 	store      *Store
-	validation *Validator
+	validation Validator
+	hs         *HeyService
+	pm         *PeerMgr
 	regions    []Region
 }
 
@@ -232,23 +248,30 @@ func New(
 	ds datastore.Batching,
 	ms *multistore.MultiStore,
 	regions []Region,
+	options ...Option,
 ) *Supply {
 	store := &Store{namespace.Wrap(ds, datastore.NewKey("/supply"))}
-	v := &Validator{
-		auth: make(map[cid.Cid]*peer.Set),
-	}
+	pmgr := NewPeerMgr(h, regions)
+	hs := NewHeyService(h, pmgr)
 	s := &Supply{
 		h:          h,
 		dt:         dt,
 		ms:         ms,
+		pm:         pmgr,
+		hs:         hs,
 		net:        NewNetwork(h, regions),
 		store:      store,
 		regions:    regions,
-		validation: v,
+		validation: NewValidator(),
 	}
-	s.dt.RegisterVoucherType(&Request{}, v)
+
+	for _, option := range options {
+		option(s)
+	}
+
+	s.dt.RegisterVoucherType(&Request{}, s.validation)
 	s.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(s))
-	s.net.SetDelegate(&handler{ms, dt, store})
+	s.net.SetDelegate(&handler{ms, dt, s.validation, store})
 
 	// TODO: clean this up
 	dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
@@ -260,6 +283,11 @@ func New(
 	return s
 }
 
+// Start all the supply background tasks
+func (s *Supply) Start(ctx context.Context) error {
+	return s.hs.Run(ctx)
+}
+
 // Register a new content record in our supply
 func (s *Supply) Register(key cid.Cid, sid multistore.StoreID) error {
 	// Store a record of the content in our supply
@@ -268,14 +296,27 @@ func (s *Supply) Register(key cid.Cid, sid multistore.StoreID) error {
 	}})
 }
 
-// Dispatch requests to the network until we have propagated the content to enough peers
-func (s *Supply) Dispatch(r Request) (*Response, error) {
-	res := &Response{
-		recordChan: make(chan PRecord),
-	}
+// DispatchOptions exposes parameters to affect the duration of a Dispatch operation
+type DispatchOptions struct {
+	BackoffMin     time.Duration
+	BackoffAttemps int
+	RF             int
+}
 
+// DefaultDispatchOptions provides useful defaults
+// We can change these if the content requires a long transfer time
+var DefaultDispatchOptions = DispatchOptions{
+	BackoffMin:     2 * time.Second,
+	BackoffAttemps: 4,
+	RF:             7,
+}
+
+// Dispatch requests to the network until we have propagated the content to enough peers
+func (s *Supply) Dispatch(r Request, opt DispatchOptions) chan PRecord {
+	resChan := make(chan PRecord, opt.RF)
+	out := make(chan PRecord, opt.RF)
 	// listen for datatransfer events to identify the peers who pulled the content
-	res.unsub = s.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+	unsub := s.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
 		if chState.Status() == datatransfer.Completed {
 			root := chState.BaseCID()
 			if root != r.PayloadCID {
@@ -283,59 +324,67 @@ func (s *Supply) Dispatch(r Request) (*Response, error) {
 			}
 			// The recipient is the provider who received our content
 			rec := chState.Recipient()
-			res.recordChan <- PRecord{
+			resChan <- PRecord{
 				Provider:   rec,
 				PayloadCID: root,
 			}
 		}
 	})
-
-	// Select the providers we want to send to
-	providers, err := s.selectProviders()
-	if err != nil {
-		return res, err
-	}
-	// Authorize the transfer
-	for _, p := range providers {
-		s.validation.Authorize(r.PayloadCID, p)
-	}
-	res.Count = len(providers)
-	s.sendAllRequests(r, providers)
-	return res, nil
-}
-
-func (s *Supply) selectProviders() ([]peer.ID, error) {
-	var peers []peer.ID
-	// Get the current connected peers
-	for _, pconn := range s.h.Network().Conns() {
-		pid := pconn.RemotePeer()
-		// Make sure we don't add ourselves
-		if pid != s.h.ID() {
-			// Make sure our peer supports the retrieval dispatch protocol
-			var protos []string
-			for _, p := range protoRegions(RequestProtocol, s.regions) {
-				protos = append(protos, string(p))
-			}
-			supported, err := s.h.Peerstore().SupportsProtocols(
-				pid,
-				protos...,
-			)
-			if err != nil || len(supported) == 0 {
-				continue
-			}
-			peers = append(peers, pid)
+	go func() {
+		defer func() {
+			unsub()
+			close(out)
+		}()
+		// The peers we already sent requests to
+		rcv := make(map[peer.ID]bool)
+		// Set the parameters for backing off after each try
+		b := backoff.Backoff{
+			Min: opt.BackoffMin,
+			Max: 60 * time.Minute,
+			// Factor: 2 (default)
 		}
-	}
+		// The number of confirmations we received so far
+		n := 0
 
-	if len(peers) == 0 {
-		return nil, ErrNoPeers
-	}
-	// If we have less peers we adjust accordingly
-	if len(peers) > MaxReceiverCount {
-		peers = peers[:MaxReceiverCount]
-	}
+	requests:
+		for {
+			// Give up after 6 attemps. Maybe should make this customizable for servers that can afford it
+			if int(b.Attempt()) > opt.BackoffAttemps {
+				return
+			}
+			// Select the providers we want to send to minus those we already confirmed
+			// received the requests
+			providers := s.pm.Peers(opt.RF-n, s.regions, rcv)
 
-	return peers, nil
+			// Authorize the transfer
+			for _, p := range providers {
+				s.validation.Authorize(r.PayloadCID, p)
+				rcv[p] = true
+			}
+			if len(providers) > 0 {
+				// sendAllRequests
+				s.sendAllRequests(r, providers)
+			}
+
+			timer := time.NewTimer(b.Duration())
+			for {
+				select {
+				case <-timer.C:
+
+					continue requests
+				case r := <-resChan:
+					// forward the confirmations to the Response channel
+					out <- r
+					// increment our results count
+					n++
+					if n == opt.RF {
+						return
+					}
+				}
+			}
+		}
+	}()
+	return out
 }
 
 func (s *Supply) sendAllRequests(r Request, peers []peer.ID) {
@@ -450,16 +499,30 @@ func TransportConfigurer(s *Supply) datatransfer.TransportConfigurer {
 	}
 }
 
-// Validator implements the validation interface for the data transfer manager
+// BasicValidator implements the validation interface for the data transfer manager
 // We can authorize peers to retrieve content from us by adding them to the set
-type Validator struct {
+type BasicValidator struct {
 	mu   sync.Mutex
 	auth map[cid.Cid]*peer.Set
 }
 
+// NewValidator creates a default validator for our supply operations
+func NewValidator() *BasicValidator {
+	return &BasicValidator{
+		auth: make(map[cid.Cid]*peer.Set),
+	}
+}
+
+// ValidateRequest runs decision logic before accepting a Dispatch Request
+// it runs on the provider side
+func (v *BasicValidator) ValidateRequest(r Request) error {
+	return nil
+}
+
 // Authorize adds a peer to a set giving authorization to pull content without payment
 // We assume that this authorizes the peer to pull as many links from the root CID as they can
-func (v *Validator) Authorize(k cid.Cid, p peer.ID) {
+// It runs on the client side to authorize caches
+func (v *BasicValidator) Authorize(k cid.Cid, p peer.ID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if set, ok := v.auth[k]; ok {
@@ -472,7 +535,7 @@ func (v *Validator) Authorize(k cid.Cid, p peer.ID) {
 }
 
 // ValidatePush returns a stubbed result for a push validation
-func (v *Validator) ValidatePush(
+func (v *BasicValidator) ValidatePush(
 	sender peer.ID,
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,
@@ -481,7 +544,7 @@ func (v *Validator) ValidatePush(
 }
 
 // ValidatePull returns a stubbed result for a pull validation
-func (v *Validator) ValidatePull(
+func (v *BasicValidator) ValidatePull(
 	receiver peer.ID,
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,

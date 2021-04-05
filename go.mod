@@ -45,6 +45,7 @@ require (
 	github.com/ipld/go-ipld-prime v0.7.0
 	github.com/ipld/go-ipld-prime-proto v0.1.1
 	github.com/jpillora/backoff v1.0.0
+	github.com/libp2p/go-eventbus v0.2.1
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-blankhost v0.2.0
 	github.com/libp2p/go-libp2p-connmgr v0.2.4
