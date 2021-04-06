@@ -13,6 +13,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-multistore"
+	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -678,13 +679,23 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
 
+	var strategy pop.SelectionStrategy
+	switch args.Strategy {
+	case "SelectFirst":
+		strategy = pop.SelectFirst
+	case "SelectCheapest":
+		strategy = pop.SelectCheapest(5, 4*time.Second)
+	case "SelectFirstLowerThan":
+		strategy = pop.SelectFirstLowerThan(abi.NewTokenAmount(5))
+	default:
+		return errors.New("unknown strategy")
+	}
+
+	var err error
 	start := time.Now()
 
-	session, err := nd.exch.NewSession(ctx, c)
-	if err != nil {
-		return err
-	}
-	var discDuration time.Duration
+	session := nd.exch.NewSession(ctx, c, strategy)
+
 	if args.Miner != "" {
 		miner, err := address.NewFromString(args.Miner)
 		if err != nil {
@@ -697,45 +708,45 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		}
 
 		err = session.QueryMiner(ctx, *info)
-		if err != nil {
-			return err
-		}
-		now := time.Now()
-		discDuration = now.Sub(start)
 	}
 	if args.Miner == "" {
 		// Gossip discovery shouldn't last more than 5 seconds
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		err = session.QueryGossip(ctx)
-		if err != nil {
-			return err
-		}
-		now := time.Now()
-		discDuration = now.Sub(start)
 	}
-
-	offer, err := session.OfferQueue().Peek(ctx)
 	if err != nil {
 		return err
 	}
 
-	if err := session.StartTransfer(ctx); err != nil {
-		return err
-	}
-
-	did, err := session.DealID()
+	// Checkout waits until we select the first offer it does not mean the first
+	// offer that we receive depending on the strategy used
+	selection, err := session.Checkout()
 	if err != nil {
 		return err
+	}
+	now := time.Now()
+	discDuration := now.Sub(start)
+	resp := selection.Offer.Response
+
+	// TODO: accept all by default but we should be able to pass flag to provide
+	// confirmation before retrieving
+	selection.Incline()
+
+	var ref pop.DealRef
+	select {
+	case ref = <-session.Ongoing():
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	nd.send(Notify{
 		GetResult: &GetResult{
-			DealID:       did.String(),
-			TotalPrice:   filecoin.FIL(offer.Response.PieceRetrievalPrice()).Short(),
-			PricePerByte: filecoin.FIL(offer.Response.MinPricePerByte).Short(),
-			UnsealPrice:  filecoin.FIL(offer.Response.UnsealPrice).Short(),
-			PieceSize:    filecoin.SizeStr(filecoin.NewInt(offer.Response.Size)),
+			DealID:       ref.ID.String(),
+			TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
+			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
+			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
+			PieceSize:    filecoin.SizeStr(filecoin.NewInt(resp.Size)),
 		},
 	})
 

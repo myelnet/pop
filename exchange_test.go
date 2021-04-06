@@ -3,6 +3,7 @@ package pop
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -36,29 +38,173 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOfferQueue(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+type testExecutor struct {
+	done chan deal.Offer
+	conf chan deal.Offer
+	err  chan error
+}
 
-	q := NewOfferQueue(ctx, NewGossipTracer())
+func (te testExecutor) SetError(err error) {
+	te.err <- err
+}
 
-	for i := 0; i < 11; i++ {
-		i := i
-		go func() {
-			q.Receive(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{})
-		}()
+func (te testExecutor) Execute(o deal.Offer) error {
+	err := <-te.err
+	if err != nil {
+		return err
 	}
+	te.done <- o
+	return nil
+}
 
-	for i := 0; i < 11; i++ {
-		q.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
-			return deal.ID(0), nil
+func (te testExecutor) Confirm(o deal.Offer) bool {
+	select {
+	case te.conf <- o:
+	default:
+	}
+	return true
+}
+
+func TestSelectionStrategies(t *testing.T) {
+
+	testCases := []struct {
+		name     string
+		strategy SelectionStrategy
+		offers   int
+		failures int
+	}{
+		{
+			name:     "SelectFirst",
+			strategy: SelectFirst,
+			offers:   11,
+			failures: 0,
+		},
+		{
+			name:     "SelectFirst failing",
+			strategy: SelectFirst,
+			offers:   11,
+			failures: 3,
+		},
+		{
+			name:     "SelectCheapest count threshold",
+			strategy: SelectCheapest(5, 5*time.Second),
+			offers:   11,
+			failures: 0,
+		},
+		{
+			name:     "SelectCheapest count threshold failing",
+			strategy: SelectCheapest(5, 5*time.Second),
+			offers:   11,
+			failures: 2,
+		},
+		{
+			name:     "SelectCheapest time threshold",
+			strategy: SelectCheapest(20, 1*time.Second),
+			offers:   11,
+			failures: 0,
+		},
+		{
+			name:     "SelectCheapest time threshold failing",
+			strategy: SelectCheapest(20, 1*time.Second),
+			offers:   11,
+			failures: 4,
+		},
+		{
+			name:     "SelectFirstLowerThan",
+			strategy: SelectFirstLowerThan(abi.NewTokenAmount(5)),
+			offers:   11,
+			failures: 0,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			exec := testExecutor{
+				done: make(chan deal.Offer, 1),
+				err:  make(chan error, 1),
+			}
+			wq := testCase.strategy(exec)
+
+			for i := 0; i < testCase.offers; i++ {
+				i := i
+				go func() {
+					wq.Receive(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
+					})
+				}()
+			}
+
+			wq.Start()
+
+			for i := 0; i < testCase.failures; i++ {
+				exec.SetError(errors.New("failing"))
+			}
+			exec.SetError(nil)
+
+			select {
+			case <-exec.done:
+			case <-ctx.Done():
+				require.NoError(t, ctx.Err())
+			}
+
+			_ = wq.Close()
 		})
-		select {
-		case <-q.results:
-		case <-ctx.Done():
-			require.NoError(t, ctx.Err())
-		}
 	}
+}
+
+// Stress test strategies to make sure they scale well to handle hundreds of offers
+func BenchmarkStrategies(b *testing.B) {
+	testCases := []struct {
+		name     string
+		strategy SelectionStrategy
+	}{
+		{
+			name:     "Bench SelectFirst",
+			strategy: SelectFirst,
+		},
+		{
+			name:     "Bench SelectCheapest count threshold",
+			strategy: SelectCheapest(5, 5*time.Second),
+		},
+		{
+			name:     "Bench SelectCheapest time threshold",
+			strategy: SelectCheapest(20, 1*time.Second),
+		},
+		{
+			name:     "Bench SelectFirstLowerThan",
+			strategy: SelectFirstLowerThan(abi.NewTokenAmount(5)),
+		},
+	}
+	for _, testCase := range testCases {
+		b.Run(testCase.name, func(b *testing.B) {
+			b.ReportAllocs()
+			exec := testExecutor{
+				done: make(chan deal.Offer, 1),
+				err:  make(chan error, 1),
+			}
+			wq := testCase.strategy(exec)
+
+			for i := 0; i < 30+b.N; i++ {
+				i := i
+				go func() {
+					wq.Receive(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
+					})
+				}()
+			}
+
+			wq.Start()
+
+			exec.SetError(nil)
+
+			<-exec.done
+
+			_ = wq.Close()
+		})
+	}
+
 }
 
 type Topology func(*testing.T, mocknet.Mocknet, []*testutil.TestNode, []*testutil.TestNode)
@@ -203,35 +349,19 @@ func TestGossipQuery(t *testing.T) {
 			for _, client := range clients {
 				for _, root := range roots {
 					// Now we fetch it again from our providers
-					session, err := client.NewSession(ctx, root)
-					require.NoError(t, err)
+					session := client.NewSession(ctx, root, SelectFirst)
 
-					err = session.QueryGossip(ctx)
+					err := session.QueryGossip(ctx)
 					require.NoError(t, err)
 
 					// execute a job for each offer
 					for i := 0; i < testCase.peers-testCase.clients; i++ {
-						offer, err := session.OfferQueue().Peek(ctx)
+						selected, err := session.Checkout()
 						require.NoError(t, err)
-						require.Equal(t, offer.Response.Size, uint64(268009))
+						require.Equal(t, selected.Offer.Response.Size, uint64(268009))
 
-						session.offers.HandleNext(func(ctx context.Context, o deal.Offer) (deal.ID, error) {
-							return deal.ID(i), nil
-						})
-						select {
-						case r := <-session.offers.results:
-							require.Equal(t, r.DealID, deal.ID(i))
-							// first offer in the queue should be different now that we launched a job on it
-							if i < testCase.peers-testCase.clients-1 {
-								_, err := session.OfferQueue().Peek(ctx)
-								// if it's the last item the queue should be empty
-								require.NoError(t, err)
-								// require.NotEqual(t, r.Offer.PeerID, noffer.PeerID)
-							}
-
-						case <-ctx.Done():
-							require.NoError(t, ctx.Err())
-						}
+						// Deny the offer so we don't trigger a retrieval
+						selected.Decline()
 					}
 					session.Close()
 				}
@@ -244,7 +374,7 @@ func TestGossipQuery(t *testing.T) {
 
 func TestExchangeE2E(t *testing.T) {
 	// Iterating a ton helps weed out false positives
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 11; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
 			bgCtx := context.Background()
 
@@ -312,6 +442,9 @@ func TestExchangeE2E(t *testing.T) {
 			}
 			require.Equal(t, 7, len(records))
 
+			// Must had a delay here because go-data-transfer is racy af
+			time.Sleep(time.Second)
+
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
 				store, err := providers[r.Provider].Supply().GetStore(rootCid)
@@ -327,18 +460,20 @@ func TestExchangeE2E(t *testing.T) {
 			require.Error(t, err)
 
 			// Now we fetch it again from our providers
-			session, err := client.NewSession(ctx, rootCid)
-			require.NoError(t, err)
+			session := client.NewSession(ctx, rootCid, SelectFirst)
 			defer session.Close()
 
 			err = session.QueryGossip(ctx)
 			require.NoError(t, err)
 
-			require.NoError(t, session.StartTransfer(ctx))
-
-			d, err := session.DealID()
+			selected, err := session.Checkout()
 			require.NoError(t, err)
-			require.Equal(t, d, deal.ID(0))
+
+			selected.Incline()
+
+			ref := <-session.Ongoing()
+			require.NoError(t, err)
+			require.Equal(t, ref.ID, deal.ID(0))
 
 			select {
 			case err := <-session.Done():

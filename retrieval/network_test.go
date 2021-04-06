@@ -15,9 +15,7 @@ import (
 )
 
 type receiver struct {
-	offers      chan deal.Offer
-	isRecipient bool
-	recipient   peer.ID
+	offers chan deal.Offer
 }
 
 // Receive sends a new offer to the queue
@@ -28,12 +26,17 @@ func (r receiver) Receive(p peer.AddrInfo, res deal.QueryResponse) {
 	}
 }
 
-func (r receiver) Recipient(id string) (peer.ID, error) {
-	return r.recipient, nil
+type mtracker struct {
+	isRecipient bool
+	recipient   peer.ID
 }
 
-func (r receiver) IsRecipient(id string) bool {
-	return r.isRecipient
+func (mt mtracker) Sender(id string) (peer.ID, error) {
+	return mt.recipient, nil
+}
+
+func (mt mtracker) Published(id string) bool {
+	return mt.isRecipient
 }
 
 func TestNetwork(t *testing.T) {
@@ -44,16 +47,16 @@ func TestNetwork(t *testing.T) {
 	mn := mocknet.New(bgCtx)
 
 	cnode := testutil.NewTestNode(mn, t)
-	cnet := NewQueryNetwork(cnode.Host)
-	r := receiver{make(chan deal.Offer), true, ""}
-	cnet.Start(r)
+	cnet := NewQueryNetwork(cnode.Host, NetMetadata(mtracker{true, ""}))
+	r := receiver{make(chan deal.Offer)}
+	cnet.SetReceiver(r)
 
 	pnodes := make(map[peer.ID]*testutil.TestNode)
 	pnets := make(map[peer.ID]*Libp2pQueryNetwork)
 
 	for i := 0; i < 11; i++ {
 		pnode := testutil.NewTestNode(mn, t)
-		pnet := NewQueryNetwork(pnode.Host)
+		pnet := NewQueryNetwork(pnode.Host, NetMetadata(mtracker{false, ""}))
 		pnodes[pnode.Host.ID()] = pnode
 		pnets[pnode.Host.ID()] = pnet
 	}
@@ -105,22 +108,22 @@ func TestNetworkForwarding(t *testing.T) {
 	mn := mocknet.New(bgCtx)
 
 	cnode := testutil.NewTestNode(mn, t)
-	cnet := NewQueryNetwork(cnode.Host)
-	r := receiver{make(chan deal.Offer), true, ""}
-	cnet.Start(r)
+	cnet := NewQueryNetwork(cnode.Host, NetMetadata(mtracker{true, ""}))
+	r := receiver{make(chan deal.Offer)}
+	cnet.SetReceiver(r)
 
 	var pnodes []*testutil.TestNode
 	var pnets []*Libp2pQueryNetwork
 
 	for i := 0; i < 11; i++ {
 		pnode := testutil.NewTestNode(mn, t)
-		pnet := NewQueryNetwork(pnode.Host)
 		// Each node is forwwarding to next one
 		pp := cnet.ID()
 		if i > 0 {
 			pp = pnets[i-1].ID()
 		}
-		pnet.Start(&receiver{make(chan deal.Offer), false, pp})
+		pnet := NewQueryNetwork(pnode.Host, NetMetadata(mtracker{false, pp}))
+		pnet.SetReceiver(&receiver{make(chan deal.Offer)})
 		pnodes = append(pnodes, pnode)
 		pnets = append(pnets, pnet)
 	}
@@ -177,22 +180,22 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 	mn := mocknet.New(bgCtx)
 
 	cnode := testutil.NewTestNode(mn, b)
-	cnet := NewQueryNetwork(cnode.Host)
-	r := receiver{make(chan deal.Offer), true, ""}
-	cnet.Start(r)
+	cnet := NewQueryNetwork(cnode.Host, NetMetadata(mtracker{true, ""}))
+	r := receiver{make(chan deal.Offer)}
+	cnet.SetReceiver(r)
 
 	var pnodes []*testutil.TestNode
 	var pnets []*Libp2pQueryNetwork
 
 	for i := 0; i < 1+b.N; i++ {
 		pnode := testutil.NewTestNode(mn, b)
-		pnet := NewQueryNetwork(pnode.Host)
 		// Each node is forwwarding to next one
 		pp := cnet.ID()
 		if i > 0 {
 			pp = pnets[i-1].ID()
 		}
-		pnet.Start(&receiver{make(chan deal.Offer), false, pp})
+		pnet := NewQueryNetwork(pnode.Host, NetMetadata(mtracker{false, pp}))
+		pnet.SetReceiver(&receiver{make(chan deal.Offer)})
 		pnodes = append(pnodes, pnode)
 		pnets = append(pnets, pnet)
 	}
