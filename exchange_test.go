@@ -149,11 +149,62 @@ func TestSelectionStrategies(t *testing.T) {
 				require.NoError(t, ctx.Err())
 			}
 
-			res := wq.Close()
-			// We should have some non deterministic spare offers.
-			require.Greater(t, len(res), 0)
+			_ = wq.Close()
 		})
 	}
+}
+
+// Stress test strategies to make sure they scale well to handle hundreds of offers
+func BenchmarkStrategies(b *testing.B) {
+	testCases := []struct {
+		name     string
+		strategy SelectionStrategy
+	}{
+		{
+			name:     "Bench SelectFirst",
+			strategy: SelectFirst,
+		},
+		{
+			name:     "Bench SelectCheapest count threshold",
+			strategy: SelectCheapest(5, 5*time.Second),
+		},
+		{
+			name:     "Bench SelectCheapest time threshold",
+			strategy: SelectCheapest(20, 1*time.Second),
+		},
+		{
+			name:     "Bench SelectFirstLowerThan",
+			strategy: SelectFirstLowerThan(abi.NewTokenAmount(5)),
+		},
+	}
+	for _, testCase := range testCases {
+		b.Run(testCase.name, func(b *testing.B) {
+			b.ReportAllocs()
+			exec := testExecutor{
+				done: make(chan deal.Offer, 1),
+				err:  make(chan error, 1),
+			}
+			wq := testCase.strategy(exec)
+
+			for i := 0; i < 30+b.N; i++ {
+				i := i
+				go func() {
+					wq.Receive(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
+					})
+				}()
+			}
+
+			wq.Start()
+
+			exec.SetError(nil)
+
+			<-exec.done
+
+			_ = wq.Close()
+		})
+	}
+
 }
 
 type Topology func(*testing.T, mocknet.Mocknet, []*testutil.TestNode, []*testutil.TestNode)
@@ -323,7 +374,7 @@ func TestGossipQuery(t *testing.T) {
 
 func TestExchangeE2E(t *testing.T) {
 	// Iterating a ton helps weed out false positives
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 11; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
 			bgCtx := context.Background()
 
