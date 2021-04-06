@@ -88,6 +88,7 @@ func TestMultiRequestStreams(t *testing.T) {
 			}
 			require.Equal(t, len(recs), 7)
 
+			time.Sleep(time.Second)
 			for _, r := range recs {
 				store, err := receivers[r.Provider].GetStore(rootCid)
 				require.NoError(t, err)

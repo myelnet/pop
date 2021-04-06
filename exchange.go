@@ -58,11 +58,7 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 		}
 	}
 	// Setup the messaging protocol for communicating retrieval deals
-	ex.net = retrieval.NewQueryNetwork(ex.h)
-	// We must start the offer queue now otherwise there is a race condition when trying to set it
-	// at the moment we're querying for offers
-	ex.ofq = NewOfferQueue(ctx, set.GossipTracer)
-	ex.net.Start(ex.ofq)
+	ex.net = retrieval.NewQueryNetwork(ex.h, retrieval.NetMetadata(set.GossipTracer))
 	// Retrieval data transfer setup
 	ex.dataTransfer, err = NewDataTransfer(ctx, ex.h, set.GraphSync, set.Datastore, "retrieval", set.RepoPath)
 	if err != nil {
@@ -109,127 +105,10 @@ type Exchange struct {
 	supply    *supply.Supply
 	wallet    wallet.Driver
 	fAPI      filecoin.API
-	ofq       *OfferQueue
 
 	mu           sync.Mutex
 	regionSubs   map[string]*pubsub.Subscription
 	regionTopics map[string]*pubsub.Topic
-}
-
-// ErrQueueEmpty is returned when peeking if the queue is empty
-var ErrQueueEmpty = errors.New("queue is empty")
-
-// OfferQueue receives query responses from the network and queues them up in a buffer
-// the goal is to fallback on other offers if a transfer goes wrong which means being able
-// to seemlessly continue the transfer with another peer
-// Eventually we will want to function with multiple providers at once
-type OfferQueue struct {
-	offers  chan deal.Offer
-	results chan JobResult
-	jobs    chan Job
-	peek    chan chan deal.Offer
-	gt      *GossipTracer
-}
-
-// JobResult tells us if our job was started successfully
-// and the offer it's running on
-type JobResult struct {
-	DealID deal.ID
-	Offer  deal.Offer
-	Err    error
-}
-
-// Job is a retrieval operation to be performed on an offer
-type Job func(context.Context, deal.Offer) (deal.ID, error)
-
-// NewOfferQueue starts a worker to process received offers and run jobs on queued up offers
-func NewOfferQueue(ctx context.Context, gt *GossipTracer) *OfferQueue {
-	oq := &OfferQueue{
-		offers:  make(chan deal.Offer),
-		results: make(chan JobResult),
-		peek:    make(chan chan deal.Offer),
-		jobs:    make(chan Job, 8),
-		gt:      gt,
-	}
-	go oq.processOffers(ctx)
-	return oq
-}
-
-// HandleNext adds a job in the queue to run on the next available offer
-func (oq *OfferQueue) HandleNext(fn Job) {
-	oq.jobs <- fn
-}
-
-// Receive sends a new offer to the queue
-func (oq *OfferQueue) Receive(p peer.AddrInfo, res deal.QueryResponse) {
-	oq.offers <- deal.Offer{
-		Provider: p,
-		Response: res,
-	}
-}
-
-// IsRecipient checks if our peer is the recipient of the offer
-func (oq *OfferQueue) IsRecipient(mid string) bool {
-	return oq.gt.Published(mid)
-}
-
-// Recipient returns the recipient of an offer
-func (oq *OfferQueue) Recipient(mid string) (peer.ID, error) {
-	return oq.gt.Sender(mid)
-}
-
-// Peek returns the first item in the queue or an error if no item is loaded yet
-func (oq *OfferQueue) Peek(ctx context.Context) (deal.Offer, error) {
-	result := make(chan deal.Offer)
-	oq.peek <- result
-
-	select {
-	case r := <-result:
-		return r, nil
-	case <-ctx.Done():
-		return deal.Offer{}, ctx.Err()
-	}
-}
-
-// processOffers  is a worker that receives jobs to handle queued up offers
-// TODO: we need to make sure we are matching the job with the right offer
-func (oq *OfferQueue) processOffers(ctx context.Context) {
-	// This is our offer queue
-	maxQSize := 17
-	var q []deal.Offer
-	for {
-		var first deal.Offer
-		// if there are no offers the jobs channel should be
-		// nil so wait for the next offer to execute it
-		var jobs chan Job
-		var peek chan chan deal.Offer
-		if len(q) > 0 {
-			first = q[0]
-			jobs = oq.jobs
-			peek = oq.peek
-		}
-		select {
-		// If we have a job and a queued up offer we run the job on the first offer
-		case j := <-jobs:
-			did, err := j(ctx, first)
-			oq.results <- JobResult{did, first, err}
-
-			// remove the offer from the queue
-			q = q[1:]
-			// If we receive a new offer we append it to the queue
-		case of := <-oq.offers:
-			// If we already have too many offers we drop them
-			if len(q) < maxQSize {
-				q = append(q, of)
-			}
-		// if we get a peek request we send our first item to it
-		case req := <-peek:
-			req <- first
-		case <-ctx.Done():
-			// exit when the context is done
-			return
-		}
-	}
 }
 
 // joinRegions allows a provider to handle request in specific CDN regions
@@ -290,7 +169,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		if err == nil && stats.Size > 0 {
 			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
 			if err != nil {
-				fmt.Println("error", err)
+				fmt.Println("failed to create response query stream", err)
 				continue
 			}
 			addrs, err := e.net.Addrs()
@@ -322,9 +201,13 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 }
 
 // NewSession returns a new retrieval session
-func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, error) {
+func (e *Exchange) NewSession(ctx context.Context, root cid.Cid, strategy SelectionStrategy) *Session {
+	// This cancel allows us to shutdown the retrieval process with the session if needed
+	ctx, cancel := context.WithCancel(ctx)
 	// Track when the session is completed
 	done := make(chan error)
+	// Track any issues with the transfer
+	err := make(chan deal.Status)
 	// Subscribe to client events to send to the channel
 	cl := e.retrieval.Client()
 	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
@@ -333,23 +216,30 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 			done <- nil
 			return
 		case deal.StatusCancelled, deal.StatusErrored:
-			done <- fmt.Errorf("retrieval: %v, %v", deal.Statuses[state.Status], state.Message)
+			err <- state.Status
 			return
 		}
 	})
 	session := &Session{
+		ctx:          ctx,
+		cancelCtx:    cancel,
 		regionTopics: e.regionTopics,
 		net:          e.net,
 		root:         root,
 		retriever:    cl,
 		clientAddr:   e.wallet.DefaultAddress(),
 		done:         done,
+		err:          err,
+		ongoing:      make(chan DealRef),
+		selecting:    make(chan DealSelection),
 		unsub:        unsubscribe,
-		offers:       e.ofq,
 		// We create a fresh new store for this session
 		storeID: e.multiStore.Next(),
 	}
-	return session, nil
+	session.worker = strategy(session)
+	session.worker.Start()
+	session.net.SetReceiver(session.worker)
+	return session
 }
 
 // Wallet returns the wallet instance funding the exchange
