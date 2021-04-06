@@ -17,6 +17,7 @@ var getArgs struct {
 	timeout  int
 	verbose  bool
 	miner    string
+	strategy string
 }
 
 var getCmd = &ffcli.Command{
@@ -38,6 +39,7 @@ data to disk. Adding a miner flag will fallback to miner if content is not avail
 		fs.IntVar(&getArgs.timeout, "timeout", 60, "timeout before the request should be cancelled by the node (in minutes)")
 		fs.BoolVar(&getArgs.verbose, "verbose", false, "print the state transitions")
 		fs.StringVar(&getArgs.miner, "miner", "", "ask storage miner and use as fallback if network does not have the content")
+		fs.StringVar(&getArgs.strategy, "strategy", "SelectFirst", "strategy for selecting offers from providers")
 		return fs
 	})(),
 }
@@ -55,12 +57,13 @@ func runGet(ctx context.Context, args []string) error {
 	go receive(ctx, cc, c)
 
 	cc.Get(&node.GetArgs{
-		Cid:     args[0],
-		Timeout: getArgs.timeout,
-		Sel:     getArgs.selector,
-		Out:     getArgs.output,
-		Verbose: getArgs.verbose,
-		Miner:   getArgs.miner,
+		Cid:      args[0],
+		Timeout:  getArgs.timeout,
+		Sel:      getArgs.selector,
+		Out:      getArgs.output,
+		Verbose:  getArgs.verbose,
+		Miner:    getArgs.miner,
+		Strategy: getArgs.strategy,
 	})
 
 	for {
