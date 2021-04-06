@@ -58,11 +58,7 @@ func NewExchange(ctx context.Context, set Settings) (*Exchange, error) {
 		}
 	}
 	// Setup the messaging protocol for communicating retrieval deals
-	ex.net = retrieval.NewQueryNetwork(ex.h)
-	// We must start the offer queue now otherwise there is a race condition when trying to set it
-	// at the moment we're querying for offers
-	ex.ofq = NewOfferQueue(ctx, set.GossipTracer)
-	ex.net.Start(ex.ofq)
+	ex.net = retrieval.NewQueryNetwork(ex.h, retrieval.NetMetadata(set.GossipTracer))
 	// Retrieval data transfer setup
 	ex.dataTransfer, err = NewDataTransfer(ctx, ex.h, set.GraphSync, set.Datastore, "retrieval", set.RepoPath)
 	if err != nil {
@@ -109,7 +105,6 @@ type Exchange struct {
 	supply    *supply.Supply
 	wallet    wallet.Driver
 	fAPI      filecoin.API
-	ofq       *OfferQueue
 
 	mu           sync.Mutex
 	regionSubs   map[string]*pubsub.Subscription
@@ -151,7 +146,7 @@ func NewOfferQueue(ctx context.Context, gt *GossipTracer) *OfferQueue {
 		jobs:    make(chan Job, 8),
 		gt:      gt,
 	}
-	go oq.processOffers(ctx)
+	// go oq.processOffers(ctx)
 	return oq
 }
 
@@ -162,6 +157,7 @@ func (oq *OfferQueue) HandleNext(fn Job) {
 
 // Receive sends a new offer to the queue
 func (oq *OfferQueue) Receive(p peer.AddrInfo, res deal.QueryResponse) {
+	// This never blocks as our queue is always receiving and decides when to drop offers
 	oq.offers <- deal.Offer{
 		Provider: p,
 		Response: res,
@@ -290,7 +286,7 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 		if err == nil && stats.Size > 0 {
 			qs, err := e.net.NewQueryStream(msg.ReceivedFrom)
 			if err != nil {
-				fmt.Println("error", err)
+				fmt.Println("failed to create response query stream", err)
 				continue
 			}
 			addrs, err := e.net.Addrs()
@@ -322,9 +318,13 @@ func (e *Exchange) requestLoop(ctx context.Context, sub *pubsub.Subscription, r 
 }
 
 // NewSession returns a new retrieval session
-func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, error) {
+func (e *Exchange) NewSession(ctx context.Context, root cid.Cid, strategy SelectionStrategy) *Session {
+	// This cancel allows us to shutdown the retrieval process with the session if needed
+	ctx, cancel := context.WithCancel(ctx)
 	// Track when the session is completed
 	done := make(chan error)
+	// Track any issues with the transfer
+	err := make(chan deal.Status)
 	// Subscribe to client events to send to the channel
 	cl := e.retrieval.Client()
 	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
@@ -333,23 +333,30 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid) (*Session, erro
 			done <- nil
 			return
 		case deal.StatusCancelled, deal.StatusErrored:
-			done <- fmt.Errorf("retrieval: %v, %v", deal.Statuses[state.Status], state.Message)
+			err <- state.Status
 			return
 		}
 	})
 	session := &Session{
+		ctx:          ctx,
+		cancelCtx:    cancel,
 		regionTopics: e.regionTopics,
 		net:          e.net,
 		root:         root,
 		retriever:    cl,
 		clientAddr:   e.wallet.DefaultAddress(),
 		done:         done,
+		err:          err,
+		ongoing:      make(chan DealRef),
+		selecting:    make(chan DealSelection),
 		unsub:        unsubscribe,
-		offers:       e.ofq,
 		// We create a fresh new store for this session
 		storeID: e.multiStore.Next(),
 	}
-	return session, nil
+	session.worker = strategy(session)
+	session.worker.Start()
+	session.net.SetReceiver(session.worker)
+	return session
 }
 
 // Wallet returns the wallet instance funding the exchange

@@ -53,10 +53,15 @@ type QueryStream interface {
 type OfferReceiver interface {
 	// Receive queues up an offer
 	Receive(peer.AddrInfo, deal.QueryResponse)
-	// IsRecipient checks if we are actually the peer expecting this offer
-	IsRecipient(string) bool
-	// Recipient returns the peer we think this message should be forwarded to
-	Recipient(string) (peer.ID, error)
+}
+
+// MessageTracker returns metadata about messages so we know if they're destined to this host
+// or should be forwarded
+type MessageTracker interface {
+	// Published checks if we are actually the peer expecting this offer
+	Published(string) bool
+	// Sender returns the peer we think this message should be forwarded to
+	Sender(string) (peer.ID, error)
 }
 
 // QueryNetwork is the API for creating query and deal streams and
@@ -64,10 +69,6 @@ type OfferReceiver interface {
 type QueryNetwork interface {
 	//  NewQueryStream creates a new RetrievalQueryStream implementer using the provided peer.ID
 	NewQueryStream(peer.ID) (QueryStream, error)
-
-	// StopHandlingRequests unsets the RetrievalReceiver and would perform any other necessary
-	// shutdown logic.
-	StopHandlingRequests() error
 
 	// ID returns the peer id of the host for this network
 	ID() peer.ID
@@ -81,8 +82,11 @@ type QueryNetwork interface {
 	// Receiver returns the channel
 	Receiver() OfferReceiver
 
-	// Start receiving offers
-	Start(OfferReceiver)
+	// SetReceiver sets a new receiver to sent messages for this peer to
+	SetReceiver(OfferReceiver)
+
+	// ClearReceiver
+	ClearReceiver()
 }
 
 type queryStream struct {
@@ -151,6 +155,13 @@ func SupportedProtocols(supportedProtocols []protocol.ID) Option {
 	}
 }
 
+// NetMetadata exposes accessor to access network metadata and make broker decisions
+func NetMetadata(mt MessageTracker) Option {
+	return func(impl *Libp2pQueryNetwork) {
+		impl.meta = mt
+	}
+}
+
 // NewQueryNetwork constructs a new instance of the QueryNetwork from a
 // libp2p host
 func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
@@ -168,6 +179,10 @@ func NewQueryNetwork(h host.Host, options ...Option) *Libp2pQueryNetwork {
 		option(impl)
 	}
 
+	for _, proto := range impl.supportedProtocols {
+		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
+	}
+
 	return impl
 }
 
@@ -181,13 +196,7 @@ type Libp2pQueryNetwork struct {
 	maxAttemptDuration    time.Duration
 	supportedProtocols    []protocol.ID
 	receiver              OfferReceiver
-}
-
-func (impl *Libp2pQueryNetwork) Start(r OfferReceiver) {
-	impl.receiver = r
-	for _, proto := range impl.supportedProtocols {
-		impl.host.SetStreamHandler(proto, impl.handleNewQueryStream)
-	}
+	meta                  MessageTracker
 }
 
 // NewQueryStream creates a new QueryStream using the provided peer.ID
@@ -213,7 +222,7 @@ func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, prot
 		if err == nil {
 			return s, err
 		}
-		fmt.Printf("trying again %v\n", err)
+		fmt.Println("trying again", err)
 
 		nAttempts := b.Attempt()
 		if nAttempts == impl.maxStreamOpenAttempts {
@@ -224,17 +233,7 @@ func (impl *Libp2pQueryNetwork) openStream(ctx context.Context, id peer.ID, prot
 	}
 }
 
-// StopHandlingRequests unsets the RetrievalReceiver and would perform any other necessary
-// shutdown logic.
-func (impl *Libp2pQueryNetwork) StopHandlingRequests() error {
-	for _, proto := range impl.supportedProtocols {
-		impl.host.RemoveStreamHandler(proto)
-	}
-	return nil
-}
-
 func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
-	r := impl.receiver
 	buffered := bufio.NewReaderSize(s, 16)
 	defer s.Close()
 
@@ -256,8 +255,8 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 	msgID := msg[2 : is+2]
 	// The receiver should know if we issued the query if it's not the case
 	// it means we must forward it to whichever peer sent us the query
-	if !r.IsRecipient(msgID) {
-		to, err := r.Recipient(msgID)
+	if !impl.meta.Published(msgID) {
+		to, err := impl.meta.Sender(msgID)
 		if err != nil {
 			fmt.Println("failed to find message recipient", err)
 			return
@@ -272,6 +271,11 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 		}
 		return
 	}
+	// Stop if we don't have a receiver set
+	if impl.receiver == nil {
+		return
+	}
+
 	rec, err := utils.AddrBytesToAddrInfo([]byte(msg[is+2:]))
 	if err != nil {
 		fmt.Println("failed to parse addr bytes", err)
@@ -284,7 +288,7 @@ func (impl *Libp2pQueryNetwork) handleNewQueryStream(s network.Stream) {
 		return
 	}
 
-	r.Receive(*rec, resp)
+	impl.receiver.Receive(*rec, resp)
 }
 
 // ID returns the host peer ID
@@ -305,6 +309,16 @@ func (impl *Libp2pQueryNetwork) Addrs() ([]ma.Multiaddr, error) {
 // Receiver returns the interface between the network and the exchange
 func (impl *Libp2pQueryNetwork) Receiver() OfferReceiver {
 	return impl.receiver
+}
+
+// SetReceiver assigns a given receiver interface to receive messages
+func (impl *Libp2pQueryNetwork) SetReceiver(r OfferReceiver) {
+	impl.receiver = r
+}
+
+// ClearReceiver clears the receiver preventing from receiving any messages
+func (impl *Libp2pQueryNetwork) ClearReceiver() {
+	impl.receiver = nil
 }
 
 // PeekResponseMsg decodes the Message field only and returns the value while copying the bytes in a buffer
