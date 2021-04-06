@@ -442,6 +442,9 @@ func TestExchangeE2E(t *testing.T) {
 			}
 			require.Equal(t, 7, len(records))
 
+			// Must had a delay here because go-data-transfer is racy af
+			time.Sleep(time.Second)
+
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
 				store, err := providers[r.Provider].Supply().GetStore(rootCid)
