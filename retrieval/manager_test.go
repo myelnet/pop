@@ -242,7 +242,7 @@ func TestRetrieval(t *testing.T) {
 
 			did, err := r1.Client().Retrieve(ctx, rootCid, params, expectedTotal, n2.Host.ID(), clientAddr, providerAddr, &clientStoreID)
 			require.NoError(t, err)
-			require.Equal(t, did, deal.ID(0))
+			require.NotEqual(t, did, deal.ID(0))
 
 			select {
 			case <-ctx.Done():
