@@ -10,7 +10,6 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-statemachine/fsm"
-	"github.com/filecoin-project/go-storedcounter"
 	"github.com/hannahhoward/go-pubsub"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -60,7 +59,7 @@ type Client struct {
 	dataTransfer  datatransfer.Manager
 	stateMachines fsm.Group
 	subscribers   *pubsub.PubSub
-	counter       *storedcounter.StoredCounter
+	counter       *counter
 	pay           payments.Manager
 }
 
@@ -124,13 +123,12 @@ func New(
 	sg StoreIDGetter,
 	self peer.ID,
 ) (Manager, error) {
-	sc := storedcounter.New(ds, datastore.NewKey("/retrieval/deal-id"))
 	var err error
 	// Client setup
 	c := &Client{
 		multiStore:   ms,
 		subscribers:  pubsub.New(client.Dispatcher),
-		counter:      sc,
+		counter:      newCounter(),
 		dataTransfer: dt,
 		pay:          pay,
 	}
@@ -219,14 +217,11 @@ func (c *Client) Retrieve(
 	providerAddr address.Address,
 	storeID *multistore.StoreID,
 ) (deal.ID, error) {
-	next, err := c.counter.Next()
-	if err != nil {
-		return 0, err
-	}
+	next := c.counter.next()
 
 	// make sure the store is loadable
 	if storeID != nil {
-		_, err = c.multiStore.Get(*storeID)
+		_, err := c.multiStore.Get(*storeID)
 		if err != nil {
 			return 0, err
 		}
@@ -253,7 +248,7 @@ func (c *Client) Retrieve(
 	}
 
 	// start the deal processing
-	err = c.stateMachines.Begin(dealState.ID, &dealState)
+	err := c.stateMachines.Begin(dealState.ID, &dealState)
 	if err != nil {
 		return 0, err
 	}

@@ -18,7 +18,6 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-storedcounter"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -59,21 +58,19 @@ func (ft FakeDTType) Type() datatransfer.TypeIdentifier {
 }
 
 type TestNode struct {
-	Ds              datastore.Batching
-	Bs              blockstore.Blockstore
-	DAG             ipldformat.DAGService
-	Host            host.Host
-	Loader          ipld.Loader
-	Storer          ipld.Storer
-	Gs              graphsync.GraphExchange
-	DTNet           dtnet.DataTransferNetwork
-	DTStore         datastore.Batching
-	DTTmpDir        string
-	DTStoredCounter *storedcounter.StoredCounter
-	Dt              datatransfer.Manager
-	Ms              *multistore.MultiStore
-	Counter         *storedcounter.StoredCounter
-	OrigBytes       []byte
+	Ds        datastore.Batching
+	Bs        blockstore.Blockstore
+	DAG       ipldformat.DAGService
+	Host      host.Host
+	Loader    ipld.Loader
+	Storer    ipld.Storer
+	Gs        graphsync.GraphExchange
+	DTNet     dtnet.DataTransferNetwork
+	DTStore   datastore.Batching
+	DTTmpDir  string
+	Dt        datatransfer.Manager
+	Ms        *multistore.MultiStore
+	OrigBytes []byte
 }
 
 func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *TestNode {
@@ -120,8 +117,6 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 
 	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
 	require.NoError(t, err)
-
-	testNode.Counter = storedcounter.New(testNode.Ds, datastore.NewKey("nextID"))
 
 	testNode.DAG = merkledag.NewDAGService(blockservice.New(testNode.Bs, offline.Exchange(testNode.Bs)))
 

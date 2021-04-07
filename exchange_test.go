@@ -473,7 +473,7 @@ func TestExchangeE2E(t *testing.T) {
 
 			ref := <-session.Ongoing()
 			require.NoError(t, err)
-			require.Equal(t, ref.ID, deal.ID(0))
+			require.NotEqual(t, ref.ID, deal.ID(0))
 
 			select {
 			case err := <-session.Done():
