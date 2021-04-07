@@ -14,7 +14,6 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-storedcounter"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -63,12 +62,8 @@ func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchang
 	dtNet := dtnet.NewFromLibp2pHost(h)
 	// Setup graphsync transport
 	tp := gstransport.NewTransport(h.ID(), gs)
-	// Make a special key for stored counter
-	key := datastore.NewKey(dsprefix + "-counter")
-	// persist ids for new transfers
-	storedCounter := storedcounter.New(ds, key)
 	// Build the manager
-	dt, err := dtfimpl.NewDataTransfer(dtDs, cidDir, dtNet, tp, storedCounter)
+	dt, err := dtfimpl.NewDataTransfer(dtDs, cidDir, dtNet, tp)
 	if err != nil {
 		return nil, err
 	}

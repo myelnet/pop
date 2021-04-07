@@ -148,12 +148,11 @@ func (tn *TestNode) SetupGraphSync(ctx context.Context) {
 
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t testing.TB) {
 	var err error
-	tn.DTStoredCounter = storedcounter.New(tn.Ds, datastore.NewKey("nextDTID"))
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
 	tn.DTStore = namespace.Wrap(tn.Ds, datastore.NewKey("DataTransfer"))
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
 	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs)
-	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTTmpDir, tn.DTNet, dtTransport, tn.DTStoredCounter)
+	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTTmpDir, tn.DTNet, dtTransport)
 	require.NoError(t, err)
 
 	ready := make(chan error, 1)
