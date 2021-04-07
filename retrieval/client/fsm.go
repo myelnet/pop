@@ -291,13 +291,16 @@ var FSMEvents = fsm.Events{
 			state.FundsSpent = big.Add(state.FundsSpent, state.PaymentRequested)
 
 			paymentForUnsealing := big.Min(state.PaymentRequested, big.Sub(state.UnsealPrice, state.UnsealFundsPaid))
-
-			bytesPaidFor := big.Div(big.Sub(state.PaymentRequested, paymentForUnsealing), state.PricePerByte).Uint64()
-			if bytesPaidFor >= state.CurrentInterval {
-				state.CurrentInterval += state.Proposal.PaymentIntervalIncrease
-			}
-			state.BytesPaidFor += bytesPaidFor
 			state.UnsealFundsPaid = big.Add(state.UnsealFundsPaid, paymentForUnsealing)
+
+			// If the price per bytes is zero, we ONLY need to account for the Unsealing payments here.
+			if !state.PricePerByte.IsZero() {
+				bytesPaidFor := big.Div(big.Sub(state.PaymentRequested, paymentForUnsealing), state.PricePerByte).Uint64()
+				if bytesPaidFor >= state.CurrentInterval {
+					state.CurrentInterval += state.Proposal.PaymentIntervalIncrease
+				}
+				state.BytesPaidFor += bytesPaidFor
+			}
 			state.PaymentRequested = abi.NewTokenAmount(0)
 			return nil
 		}),
