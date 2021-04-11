@@ -6,12 +6,14 @@ import (
 	"fmt"
 
 	"github.com/filecoin-project/go-address"
+	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
@@ -50,7 +52,10 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err != nil {
 		return nil, err
 	}
-	metads := &MetadataStore{namespace.Wrap(ds, datastore.NewKey("/metadata")), opts.MultiStore}
+	metads := &MetadataStore{
+		ds: namespace.Wrap(ds, datastore.NewKey("/metadata")),
+		ms: opts.MultiStore,
+	}
 	// register a pubsub topic for each region
 	exch := &Exchange{
 		h:    h,
@@ -199,6 +204,60 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid, strategy Select
 // Wallet returns the wallet API
 func (e *Exchange) Wallet() wallet.Driver {
 	return e.w
+}
+
+// Registrar returns the metadata store API
+func (e *Exchange) Registrar() *MetadataStore {
+	return e.meta
+}
+
+// DataTransfer returns the data transfer manager instance for this exchange
+func (e *Exchange) DataTransfer() datatransfer.Manager {
+	return e.opts.DataTransfer
+}
+
+// FilecoinAPI returns the FilecoinAPI instance for this exchange
+// may be nil so check with IsFilecoinOnline first
+func (e *Exchange) FilecoinAPI() filecoin.API {
+	return e.opts.FilecoinAPI
+}
+
+// IsFilecoinOnline returns whether we are connected to a Filecoin blockchain gateway
+func (e *Exchange) IsFilecoinOnline() bool {
+	return e.opts.FilecoinAPI != nil
+}
+
+// Retrieval exposes the retrieval manager module
+func (e *Exchange) Retrieval() retrieval.Manager {
+	return e.rtv
+}
+
+// ListMiners returns a list of miners based on the regions this exchange is part of
+// We keep a context as this could also query a remote service or API
+func (e *Exchange) ListMiners(ctx context.Context) ([]address.Address, error) {
+	var strList []string
+	for _, r := range e.opts.Regions {
+		// Global region is already a list of miners in all regions
+		if r.Name == "Global" {
+			strList = r.StorageMiners
+			break
+		}
+		strList = append(strList, r.StorageMiners...)
+	}
+	var addrList []address.Address
+	for _, s := range strList {
+		addr, err := address.NewFromString(s)
+		if err != nil {
+			return addrList, err
+		}
+		addrList = append(addrList, addr)
+	}
+	return addrList, nil
+}
+
+// GetStoreID exposes a method to get the store ID used by a given CID
+func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
+	return e.meta.GetStoreID(id)
 }
 
 // Get sends a Get request and executes the receive offers
