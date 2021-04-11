@@ -24,6 +24,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
 )
@@ -115,6 +117,33 @@ func (s *Storage) Start(ctx context.Context) error {
 		return err
 	}
 	return s.client.Start(ctx)
+}
+
+// PeerInfo resolves a Filecoin address to find the peer info and add to our address book
+func (s *Storage) PeerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
+	miner, err := s.fAPI.StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	multiaddrs := make([]ma.Multiaddr, 0, len(miner.Multiaddrs))
+	for _, a := range miner.Multiaddrs {
+		maddr, err := ma.NewMultiaddrBytes(a)
+		if err != nil {
+			return nil, err
+		}
+		multiaddrs = append(multiaddrs, maddr)
+	}
+	if miner.PeerId == nil {
+		return nil, fmt.Errorf("no peer id available")
+	}
+	if len(miner.Multiaddrs) == 0 {
+		return nil, fmt.Errorf("no peer address available")
+	}
+	pi := peer.AddrInfo{
+		ID:    *miner.PeerId,
+		Addrs: multiaddrs,
+	}
+	return &pi, nil
 }
 
 // Miner encapsulates some information about a storage miner

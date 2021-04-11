@@ -25,7 +25,7 @@ func TestSecpSignature(t *testing.T) {
 	ctx := context.Background()
 	ks := keystore.NewMemKeystore()
 
-	w := NewIPFS(ks, nil)
+	w := NewFromKeystore(ks, nil)
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestDefaultAddress(t *testing.T) {
 	ctx := context.Background()
 	ks := keystore.NewMemKeystore()
 
-	w := NewIPFS(ks, nil)
+	w := NewFromKeystore(ks, nil)
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestImportKey(t *testing.T) {
 	ctx := context.Background()
 	ks := keystore.NewMemKeystore()
 
-	w := NewIPFS(ks, nil)
+	w := NewFromKeystore(ks, nil)
 
 	h := "7b2254797065223a22626c73222c22507269766174654b6579223a226a6b55704e6a53493749664a4632434f6f505169344f79477a475241532b766b616c314e5a616f7a3853633d227d"
 	decoded, _ := hex.DecodeString(h)
@@ -182,7 +182,7 @@ func TestTransfer(t *testing.T) {
 	defer api.Close()
 	ks := keystore.NewMemKeystore()
 
-	w := NewIPFS(ks, api)
+	w := NewFromKeystore(ks, api)
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	if err != nil {

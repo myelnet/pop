@@ -1,4 +1,4 @@
-package pop
+package exchange
 
 import (
 	"bytes"
@@ -12,9 +12,6 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	cid "github.com/ipfs/go-cid"
 	iprime "github.com/ipld/go-ipld-prime"
-	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/ipld/go-ipld-prime/traversal/selector"
-	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/pop/retrieval"
@@ -28,9 +25,9 @@ type Session struct {
 	// storeID is the unique store used to load the content retrieved during this session
 	storeID multistore.StoreID
 	// regionTopics are all the region gossip subscriptions this session can query to find the content
-	regionTopics map[string]*pubsub.Topic
+	regionTopics []*pubsub.Topic
 	// net is the network procotol used by providers to send their offers
-	net retrieval.QueryNetwork
+	net *Messaging
 	// retriever manages the state of the transfer once we have a good offer
 	retriever *retrieval.Client
 	// clientAddr is the address that will be used to make any payment for retrieving the content
@@ -99,7 +96,7 @@ func (s *Session) QueryMiner(ctx context.Context, p peer.AddrInfo) error {
 	if err != nil {
 		return err
 	}
-	s.worker.Receive(p, res)
+	s.worker.ReceiveOffer(p, res)
 	return nil
 }
 
@@ -116,9 +113,10 @@ func (s *Session) QueryGossip(ctx context.Context) error {
 		return err
 	}
 
+	bytes := buf.Bytes()
 	// publish to all regions this exchange joined
 	for _, topic := range s.regionTopics {
-		if err := topic.Publish(ctx, buf.Bytes()); err != nil {
+		if err := topic.Publish(ctx, bytes); err != nil {
 			return err
 		}
 	}
@@ -197,13 +195,6 @@ func (s *Session) Checkout() (DealSelection, error) {
 	}
 }
 
-// AllSelector to get all the nodes for now. TODO` support custom selectors
-func AllSelector() iprime.Node {
-	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
-	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
-		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
-}
-
 // Done returns a channel that receives any resulting error from the latest operation
 func (s *Session) Done() <-chan error {
 	return s.done
@@ -235,7 +226,7 @@ var ErrUserDeniedOffer = errors.New("user denied offer")
 
 // OfferWorker is a generic interface to manage the lifecycle of offers
 type OfferWorker interface {
-	retrieval.OfferReceiver
+	OfferReceiver
 	Start()
 	Close() []deal.Offer
 }
@@ -398,8 +389,8 @@ func (s sessionWorker) Close() []deal.Offer {
 	return <-resc
 }
 
-// Receive sends a new offer to the queue
-func (s sessionWorker) Receive(p peer.AddrInfo, res deal.QueryResponse) {
+// ReceiveOffer sends a new offer to the queue
+func (s sessionWorker) ReceiveOffer(p peer.AddrInfo, res deal.QueryResponse) {
 	// This never blocks as our queue is always receiving and decides when to drop offers
 	s.offersIn <- deal.Offer{
 		Provider: p,
