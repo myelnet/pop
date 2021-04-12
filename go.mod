@@ -66,6 +66,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/stretchr/testify v1.6.1
 	github.com/supranational/blst v0.3.2
+	github.com/tchardin/go-libp2p-blankhost v0.2.1-0.20210408134851-9396bc83e200 // indirect
 	github.com/urfave/cli/v2 v2.2.0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210219115102-f37d292932f2
 	github.com/xorcare/golden v0.6.1-0.20191112154924-b87f686d7542 // indirect

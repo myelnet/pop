@@ -19,10 +19,6 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	badgerds "github.com/ipfs/go-ds-badger"
-	"github.com/ipfs/go-graphsync"
-	gsimpl "github.com/ipfs/go-graphsync/impl"
-	gsnet "github.com/ipfs/go-graphsync/network"
-	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
@@ -36,17 +32,15 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	mh "github.com/multiformats/go-multihash"
-	"github.com/myelnet/pop"
+	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/filecoin/storage"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
-	"github.com/myelnet/pop/supply"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
 )
@@ -100,6 +94,7 @@ type RemoteStorer interface {
 	Start(context.Context) error
 	Store(context.Context, storage.Params) (*storage.Receipt, error)
 	GetMarketQuote(context.Context, storage.QuoteParams) (*storage.Quote, error)
+	PeerInfo(context.Context, address.Address) (*peer.AddrInfo, error)
 }
 
 type node struct {
@@ -108,9 +103,7 @@ type node struct {
 	bs   blockstore.Blockstore
 	ms   *multistore.MultiStore
 	dag  ipldformat.DAGService
-	gs   graphsync.GraphExchange
-	ps   *pubsub.PubSub
-	exch *pop.Exchange
+	exch *exchange.Exchange
 	rs   RemoteStorer
 
 	mu     sync.Mutex
@@ -147,7 +140,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	priv, err := utils.Libp2pKey(ks)
 	if err != nil {
 		return nil, err
@@ -180,40 +172,22 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	tracer := pop.NewGossipTracer()
-	nd.ps, err = pubsub.NewGossipSub(ctx, nd.host, pubsub.WithEventTracer(tracer))
-	if err != nil {
-		return nil, err
-	}
-
-	nd.gs = gsimpl.New(ctx,
-		gsnet.NewFromLibp2pHost(nd.host),
-		storeutil.LoaderForBlockstore(nd.bs),
-		storeutil.StorerForBlockstore(nd.bs),
-	)
-
 	// Convert region names to region structs
-	regions := supply.ParseRegions(opts.Regions)
+	regions := exchange.ParseRegions(opts.Regions)
 
-	settings := pop.Settings{
-		Datastore:  nd.ds,
-		Blockstore: nd.bs,
-		MultiStore: nd.ms,
-		Host:       nd.host,
-		PubSub:     nd.ps,
-		GraphSync:  nd.gs,
-		RepoPath:   opts.RepoPath,
-		// TODO: secure keystore
+	eopts := exchange.Options{
+		Blockstore:          nd.bs,
+		MultiStore:          nd.ms,
 		Keystore:            ks,
+		RepoPath:            opts.RepoPath,
 		FilecoinRPCEndpoint: opts.FilEndpoint,
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{opts.FilToken},
 		},
-		GossipTracer: tracer,
-		Regions:      regions,
+		Regions: regions,
 	}
 
-	nd.exch, err = pop.NewExchange(ctx, settings)
+	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +203,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		nd.exch.DataTransfer(),
 		nd.exch.Wallet(),
 		nd.exch.FilecoinAPI(),
-		nd.exch.Supply(),
+		nd.exch,
 	)
 	if err != nil {
 		return nil, err
@@ -286,7 +260,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 
 	addr, err := address.NewFromString(who)
 	if err == nil {
-		info, err := nd.exch.StoragePeerInfo(ctx, addr)
+		info, err := nd.rs.PeerInfo(ctx, addr)
 		if err != nil {
 			sendErr(err)
 			return
@@ -361,7 +335,7 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 	}
 	// We could get the size from the index entry but DAGStat gives more feedback into
 	// how the file actually got chunked
-	stats, err := pop.DAGStat(ctx, w.Store().Bstore, root, pop.AllSelector())
+	stats, err := exchange.DAGStat(ctx, w.Store().Bstore, root, exchange.AllSelector())
 	if err != nil {
 		log.Error().Err(err).Msg("record not found")
 	}
@@ -433,7 +407,7 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 		sendErr(err)
 		return
 	}
-	err = nd.exch.Supply().Register(ref.PayloadCID, ref.StoreID)
+	err = nd.exch.Registrar().Register(ref.PayloadCID, ref.StoreID)
 	if err != nil {
 		sendErr(err)
 		return
@@ -595,10 +569,10 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		res := nd.exch.Supply().Dispatch(supply.Request{
+		res := nd.exch.R().Dispatch(exchange.Request{
 			PayloadCID: com.PayloadCID,
 			Size:       uint64(com.PayloadSize),
-		}, supply.DefaultDispatchOptions)
+		}, exchange.DefaultDispatchOptions)
 		for rec := range res {
 			nd.send(Notify{
 				PushResult: &PushResult{
@@ -637,7 +611,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		return
 	}
 	// Check our supply if we may already have it
-	sID, err := nd.exch.Supply().GetStoreID(root)
+	sID, err := nd.exch.Registrar().GetStoreID(root)
 	if err == nil && args.Out != "" {
 		err := nd.export(ctx, root, segs[0], args.Out, sID)
 		if err != nil {
@@ -679,14 +653,14 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// TODO handle different predefined selectors
 
-	var strategy pop.SelectionStrategy
+	var strategy exchange.SelectionStrategy
 	switch args.Strategy {
 	case "SelectFirst":
-		strategy = pop.SelectFirst
+		strategy = exchange.SelectFirst
 	case "SelectCheapest":
-		strategy = pop.SelectCheapest(5, 4*time.Second)
+		strategy = exchange.SelectCheapest(5, 4*time.Second)
 	case "SelectFirstLowerThan":
-		strategy = pop.SelectFirstLowerThan(abi.NewTokenAmount(5))
+		strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(5))
 	default:
 		return errors.New("unknown strategy")
 	}
@@ -701,19 +675,19 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		if err != nil {
 			return err
 		}
-		info, err := nd.exch.StoragePeerInfo(ctx, miner)
+		info, err := nd.rs.PeerInfo(ctx, miner)
 		if err != nil {
 			// Maybe fall back to a discovery session?
 			return err
 		}
 
-		err = session.QueryMiner(ctx, *info)
+		err = session.QueryFrom(*info)
 	}
 	if args.Miner == "" {
 		// Gossip discovery shouldn't last more than 5 seconds
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		err = session.QueryGossip(ctx)
+		err = session.Query(ctx)
 	}
 	if err != nil {
 		return err
@@ -733,7 +707,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// confirmation before retrieving
 	selection.Incline()
 
-	var ref pop.DealRef
+	var ref exchange.DealRef
 	select {
 	case ref = <-session.Ongoing():
 	case <-ctx.Done():
@@ -764,7 +738,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			}
 		}
 		// Register new blocks in our supply by default
-		err = nd.exch.Supply().Register(c, session.StoreID())
+		err = nd.exch.Registrar().Register(c, session.StoreID())
 		if err != nil {
 			return err
 		}
