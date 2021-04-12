@@ -1,7 +1,6 @@
 package exchange
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/payments"
@@ -33,8 +33,8 @@ type Exchange struct {
 	w wallet.Driver
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
-	// Messaging service
-	mg *Messaging
+	// Discovery service
+	disco *GossipDisco
 	// Replication scheme
 	rpl *Replication
 	// Persist Metadata about content
@@ -48,23 +48,19 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err != nil {
 		return nil, err
 	}
-	tops, subs, err := opts.joinRegions()
-	if err != nil {
-		return nil, err
-	}
 	metads := &MetadataStore{
 		ds: namespace.Wrap(ds, datastore.NewKey("/metadata")),
 		ms: opts.MultiStore,
 	}
 	// register a pubsub topic for each region
 	exch := &Exchange{
-		h:    h,
-		ds:   ds,
-		opts: opts,
-		tops: tops,
-		meta: metads,
-		w:    wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
-		mg:   NewMessaging(h, NetMetadata(opts.GossipTracer)),
+		h:     h,
+		ds:    ds,
+		opts:  opts,
+		meta:  metads,
+		rpl:   NewReplication(h, metads, opts.DataTransfer, opts.Regions),
+		disco: NewGossipDisco(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
 	// Make a new default key to be sure we have an address where to receive our payments
 	if exch.w.DefaultAddress() == address.Undef {
@@ -73,7 +69,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 			return nil, err
 		}
 	}
-	exch.rpl = NewReplication(h, metads, opts.DataTransfer, exch.mg, opts.Regions)
 	exch.rtv, err = retrieval.New(
 		ctx,
 		opts.MultiStore,
@@ -89,74 +84,38 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err := exch.rpl.Start(ctx); err != nil {
 		return nil, err
 	}
-	for _, sub := range subs {
-		go exch.pump(ctx, sub)
+	if err := exch.disco.StartProviding(ctx, exch.handleQuery); err != nil {
+		return nil, err
 	}
 	return exch, nil
 }
 
-func (e *Exchange) pump(ctx context.Context, sub *pubsub.Subscription) {
-	r := RegionFromTopic(sub.Topic())
-	for {
-		msg, err := sub.Next(ctx)
-		if err != nil {
-			return
-		}
-		if msg.ReceivedFrom == e.h.ID() {
-			continue
-		}
-		m := new(deal.Query)
-		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
-			continue
-		}
-
-		store, err := e.meta.GetStore(m.PayloadCID)
-		if err != nil {
-			// TODO: we need to log when we couldn't find some content so we can try looking for it
-			fmt.Println("no store found for", m.PayloadCID)
-			continue
-		}
-		// DAGStat is both a way of checking if we have the blocks and returning its size
-		// TODO: support selector in Query
-		stats, err := DAGStat(ctx, store.Bstore, m.PayloadCID, AllSelector())
-		if err != nil {
-			fmt.Println("failed to get content stat", err, e.h.ID())
-		}
-		// We don't have the block we don't even reply to avoid taking bandwidth
-		// On the client side we assume no response means they don't have it
-		if err == nil && stats.Size > 0 {
-			qs, err := e.mg.NewQueryStream(msg.ReceivedFrom)
-			if err != nil {
-				fmt.Println("failed to create response query stream", err)
-				continue
-			}
-			addrs, err := e.mg.Addrs()
-			if err != nil {
-				continue
-			}
-			mid := pubsub.DefaultMsgIdFn(msg.Message)
-			// Our message payload includes the message ID and the recipient peer address
-			// The index indicates where to slice the string to extract both values
-			p := fmt.Sprintf("%d%s%s", len(mid), mid, string(addrs[0].Bytes()))
-			answer := deal.QueryResponse{
-				Status:                     deal.QueryResponseAvailable,
-				Size:                       uint64(stats.Size),
-				PaymentAddress:             e.w.DefaultAddress(),
-				MinPricePerByte:            r.PPB, // TODO: dynamic pricing
-				MaxPaymentInterval:         deal.DefaultPaymentInterval,
-				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
-				Message:                    p,
-			}
-			if err := qs.WriteQueryResponse(answer); err != nil {
-				fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
-				continue
-			}
-			// We need to remember the offer we made so we can validate against it once
-			// clients start the retrieval
-			e.rtv.Provider().SetAsk(m.PayloadCID, answer)
-		}
-
+func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
+	store, err := e.meta.GetStore(q.PayloadCID)
+	if err != nil {
+		// TODO: we need to log when we couldn't find some content so we can try looking for it
+		return deal.QueryResponse{}, fmt.Errorf("no store found for %s: %w", q.PayloadCID, err)
 	}
+	// DAGStat is both a way of checking if we have the blocks and returning its size
+	// TODO: support selector in Query
+	stats, err := DAGStat(ctx, store.Bstore, q.PayloadCID, AllSelector())
+	// We don't have the block we don't even reply to avoid taking bandwidth
+	// On the client side we assume no response means they don't have it
+	if err != nil || stats.Size == 0 {
+		return deal.QueryResponse{}, fmt.Errorf("%s failed to get content stat: %w", e.h.ID(), err)
+	}
+	resp := deal.QueryResponse{
+		Status:                     deal.QueryResponseAvailable,
+		Size:                       uint64(stats.Size),
+		PaymentAddress:             e.w.DefaultAddress(),
+		MinPricePerByte:            r.PPB, // TODO: dynamic pricing
+		MaxPaymentInterval:         deal.DefaultPaymentInterval,
+		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+	}
+	// We need to remember the offer we made so we can validate against it once
+	// clients start the retrieval
+	e.rtv.Provider().SetAsk(q.PayloadCID, resp)
+	return resp, nil
 }
 
 // NewSession returns a new retrieval session
@@ -180,24 +139,22 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid, strategy Select
 		}
 	})
 	session := &Session{
-		ctx:          ctx,
-		cancelCtx:    cancel,
-		regionTopics: e.tops,
-		net:          e.mg,
-		root:         root,
-		retriever:    cl,
-		clientAddr:   e.w.DefaultAddress(),
-		done:         done,
-		err:          err,
-		ongoing:      make(chan DealRef),
-		selecting:    make(chan DealSelection),
-		unsub:        unsubscribe,
+		ctx:        ctx,
+		cancelCtx:  cancel,
+		disco:      e.disco,
+		root:       root,
+		retriever:  cl,
+		clientAddr: e.w.DefaultAddress(),
+		done:       done,
+		err:        err,
+		ongoing:    make(chan DealRef),
+		selecting:  make(chan DealSelection),
+		unsub:      unsubscribe,
 		// We create a fresh new store for this session
 		storeID: e.opts.MultiStore.Next(),
 	}
 	session.worker = strategy(session)
 	session.worker.Start()
-	session.net.SetOfferReceiver(session.worker)
 	return session
 }
 
@@ -230,6 +187,11 @@ func (e *Exchange) IsFilecoinOnline() bool {
 // Retrieval exposes the retrieval manager module
 func (e *Exchange) Retrieval() retrieval.Manager {
 	return e.rtv
+}
+
+// R exposes replication scheme methods
+func (e *Exchange) R() *Replication {
+	return e.rpl
 }
 
 // ListMiners returns a list of miners based on the regions this exchange is part of

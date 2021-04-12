@@ -113,25 +113,6 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 	return opts, nil
 }
 
-// joinRegions registers topics and returns subscriptions for each of them
-func (opts Options) joinRegions() ([]*pubsub.Topic, []*pubsub.Subscription, error) {
-	tops := make([]*pubsub.Topic, len(opts.Regions))
-	subs := make([]*pubsub.Subscription, len(opts.Regions))
-	for i, r := range opts.Regions {
-		top, err := opts.PubSub.Join(fmt.Sprintf("%s1.0/%s", RequestTopic, r.Name))
-		if err != nil {
-			return nil, nil, err
-		}
-		tops[i] = top
-		sub, err := top.Subscribe()
-		if err != nil {
-			return nil, nil, err
-		}
-		subs[i] = sub
-	}
-	return tops, subs, nil
-}
-
 // NewDataTransfer packages together all the things needed for a new manager to work
 func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
 	cidDir, err := mkCidListDir(dir)

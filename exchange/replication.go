@@ -1,12 +1,13 @@
 package exchange
 
 import (
+	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
@@ -16,20 +17,67 @@ import (
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-eventbus"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/mux"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	pb "github.com/libp2p/go-libp2p-pubsub/pb"
+	"github.com/libp2p/go-libp2p-core/protocol"
 )
+
+// PopRequestProtocolID is the protocol for requesting caches to store new content
+const PopRequestProtocolID = protocol.ID("/myel/pop/request/1.0")
+
+// Request describes the content to pull
+type Request struct {
+	PayloadCID cid.Cid
+	Size       uint64
+}
+
+// Type defines AddRequest as a datatransfer voucher for pulling the data from the request
+func (Request) Type() datatransfer.TypeIdentifier {
+	return "DispatchRequestVoucher"
+}
+
+// RequestStream allows reading and writing CBOR encoded messages to a stream
+type RequestStream struct {
+	p   peer.ID
+	rw  mux.MuxedStream
+	buf *bufio.Reader
+}
+
+// ReadRequest reads and decodes a CBOR encoded Request message from a stream buffer
+func (rs *RequestStream) ReadRequest() (Request, error) {
+	var m Request
+	if err := m.UnmarshalCBOR(rs.buf); err != nil {
+		return Request{}, err
+	}
+	return m, nil
+}
+
+// WriteRequest encodes and writes a Request message to a stream
+func (rs *RequestStream) WriteRequest(m Request) error {
+	return cborutil.WriteCborRPC(rs.rw, &m)
+}
+
+// Close the stream
+func (rs *RequestStream) Close() error {
+	return rs.rw.Close()
+}
+
+// OtherPeer returns the peer ID of the peer at the other end of the stream
+func (rs *RequestStream) OtherPeer() peer.ID {
+	return rs.p
+}
 
 // Replication manages the network replication scheme, it keeps track of read and write requests
 // and decides whether to join a replication scheme or not
 type Replication struct {
-	h     host.Host
-	dt    datatransfer.Manager
-	pm    *PeerMgr
-	hs    *HeyService
-	store *MetadataStore
-	mg    *Messaging
-	rgs   []Region
+	h         host.Host
+	dt        datatransfer.Manager
+	pm        *PeerMgr
+	hs        *HeyService
+	store     *MetadataStore
+	rgs       []Region
+	reqProtos []protocol.ID
 
 	mu      sync.Mutex
 	schemes map[peer.ID]struct{}
@@ -39,21 +87,21 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, metads *MetadataStore, dt datatransfer.Manager, mg *Messaging, rgs []Region) *Replication {
+func NewReplication(h host.Host, metads *MetadataStore, dt datatransfer.Manager, rgs []Region) *Replication {
 	pm := NewPeerMgr(h, rgs)
 	hs := NewHeyService(h, pm)
 	r := &Replication{
-		h:       h,
-		pm:      pm,
-		hs:      hs,
-		dt:      dt,
-		mg:      mg,
-		rgs:     rgs,
-		schemes: make(map[peer.ID]struct{}),
-		pulls:   make(map[cid.Cid]*peer.Set),
-		store:   metads,
+		h:         h,
+		pm:        pm,
+		hs:        hs,
+		dt:        dt,
+		rgs:       rgs,
+		reqProtos: []protocol.ID{PopRequestProtocolID},
+		schemes:   make(map[peer.ID]struct{}),
+		pulls:     make(map[cid.Cid]*peer.Set),
+		store:     metads,
 	}
-	r.mg.SetRequestReceiver(r)
+	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
 	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.store))
 
@@ -91,6 +139,43 @@ func (r *Replication) Start(ctx context.Context) error {
 	return nil
 }
 
+// NewRequestStream opens a multi stream with the given peer and sets up the interface to write requests to it
+func (r *Replication) NewRequestStream(dest peer.ID) (*RequestStream, error) {
+	s, err := OpenStream(context.Background(), r.h, dest, r.reqProtos)
+	if err != nil {
+		return nil, err
+	}
+	buf := bufio.NewReaderSize(s, 16)
+	return &RequestStream{p: dest, rw: s, buf: buf}, nil
+}
+
+func (r *Replication) handleRequest(s network.Stream) {
+	p := s.Conn().RemotePeer()
+	buffered := bufio.NewReaderSize(s, 16)
+	rs := &RequestStream{p, s, buffered}
+	defer rs.Close()
+	req, err := rs.ReadRequest()
+	if err != nil {
+		return
+	}
+
+	// TODO: validate request
+	// Create a new store to receive our new blocks
+	// It will be automatically picked up in the TransportConfigurer
+	storeID := r.store.ms.Next()
+	err = r.store.PutRecord(req.PayloadCID, &ContentRecord{Labels: map[string]string{
+		KStoreID: fmt.Sprintf("%d", storeID),
+		KSize:    fmt.Sprintf("%d", req.Size),
+	}})
+	if err != nil {
+		return
+	}
+	_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
+	if err != nil {
+		return
+	}
+}
+
 // PRecord is a provider <> cid mapping for recording who is storing what content
 type PRecord struct {
 	Provider   peer.ID
@@ -112,8 +197,8 @@ var DefaultDispatchOptions = DispatchOptions{
 	RF:             7,
 }
 
-// DispatchRequest to the network until we have propagated the content to enough peers
-func (r *Replication) DispatchRequest(req Request, opt DispatchOptions) chan PRecord {
+// Dispatch to the network until we have propagated the content to enough peers
+func (r *Replication) Dispatch(req Request, opt DispatchOptions) chan PRecord {
 	resChan := make(chan PRecord, opt.RF)
 	out := make(chan PRecord, opt.RF)
 	// listen for datatransfer events to identify the peers who pulled the content
@@ -190,7 +275,7 @@ func (r *Replication) DispatchRequest(req Request, opt DispatchOptions) chan PRe
 
 func (r *Replication) sendAllRequests(req Request, peers []peer.ID) {
 	for _, p := range peers {
-		stream, err := r.mg.NewRequestStream(p)
+		stream, err := r.NewRequestStream(p)
 		if err != nil {
 			continue
 		}
@@ -207,26 +292,6 @@ func AllSelector() ipld.Node {
 	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
 	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
-}
-
-// ReceiveRequest handles a write request from a peer
-func (r *Replication) ReceiveRequest(p peer.ID, req Request) {
-	// TODO: validate request
-	// Create a new store to receive our new blocks
-	// It will be automatically picked up in the TransportConfigurer
-	storeID := r.store.ms.Next()
-	err := r.store.PutRecord(req.PayloadCID, &ContentRecord{Labels: map[string]string{
-		KStoreID: fmt.Sprintf("%d", storeID),
-		KSize:    fmt.Sprintf("%d", req.Size),
-	}})
-	if err != nil {
-		return
-	}
-	_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
-	if err != nil {
-		return
-	}
-
 }
 
 // JoinScheme adds a peer to our scheme set meaning we're in that peer's scheme
@@ -283,50 +348,6 @@ func (r *Replication) ValidatePull(
 		return nil, fmt.Errorf("not authorized")
 	}
 	return nil, nil
-}
-
-// R exposes replication scheme methods
-func (e *Exchange) R() *Replication {
-	return e.rpl
-}
-
-// GossipTracer tracks messages we've seen so we can relay responses back to the publisher
-type GossipTracer struct {
-	published map[string]bool
-	senders   map[string]peer.ID
-}
-
-// NewGossipTracer creates a new instance of GossipTracer
-func NewGossipTracer() *GossipTracer {
-	return &GossipTracer{
-		published: make(map[string]bool),
-		senders:   make(map[string]peer.ID),
-	}
-}
-
-// Trace gets triggered for every internal gossip sub operation
-func (gt *GossipTracer) Trace(evt *pb.TraceEvent) {
-	if evt.PublishMessage != nil {
-		gt.published[string(evt.PublishMessage.MessageID)] = true
-	}
-	if evt.DeliverMessage != nil {
-		msg := evt.DeliverMessage
-		gt.senders[string(msg.MessageID)] = peer.ID(msg.ReceivedFrom)
-	}
-}
-
-// Published checks if we were the publisher of a message
-func (gt *GossipTracer) Published(mid string) bool {
-	return gt.published[mid]
-}
-
-// Sender returns the peer who sent us a message
-func (gt *GossipTracer) Sender(mid string) (peer.ID, error) {
-	p, ok := gt.senders[mid]
-	if !ok {
-		return "", errors.New("no sender found")
-	}
-	return p, nil
 }
 
 // StoreConfigurableTransport defines the methods needed to

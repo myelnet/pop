@@ -183,8 +183,7 @@ func TestMultiRequestStreams(t *testing.T) {
 			}
 
 			mds := &MetadataStore{n1.Ds, n1.Ms}
-			mg := NewMessaging(n1.Host)
-			hn := NewReplication(n1.Host, mds, n1.Dt, mg, regions)
+			hn := NewReplication(n1.Host, mds, n1.Dt, regions)
 			mds.Register(rootCid, storeID)
 			sub, err := hn.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
 			require.NoError(t, err)
@@ -202,8 +201,7 @@ func TestMultiRequestStreams(t *testing.T) {
 				})
 
 				mds := &MetadataStore{tnode.Ds, tnode.Ms}
-				mg := NewMessaging(tnode.Host)
-				hn1 := NewReplication(tnode.Host, mds, tnode.Dt, mg, regions)
+				hn1 := NewReplication(tnode.Host, mds, tnode.Dt, regions)
 				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
 				tnds[tnode.Host.ID()] = tnode
@@ -224,7 +222,7 @@ func TestMultiRequestStreams(t *testing.T) {
 				}
 			}
 
-			res := hn.DispatchRequest(Request{rootCid, uint64(len(origBytes))}, DefaultDispatchOptions)
+			res := hn.Dispatch(Request{rootCid, uint64(len(origBytes))}, DefaultDispatchOptions)
 
 			var recs []PRecord
 			for rec := range res {
@@ -266,8 +264,7 @@ func TestSendRequestNoPeers(t *testing.T) {
 	}
 
 	mds := &MetadataStore{n1.Ds, n1.Ms}
-	mg := NewMessaging(n1.Host)
-	supply := NewReplication(n1.Host, mds, n1.Dt, mg, regions)
+	supply := NewReplication(n1.Host, mds, n1.Dt, regions)
 	mds.Register(rootCid, storeID)
 	require.NoError(t, supply.Start(bgCtx))
 
@@ -276,7 +273,7 @@ func TestSendRequestNoPeers(t *testing.T) {
 		BackoffAttemps: 4,
 		RF:             5,
 	}
-	res := supply.DispatchRequest(Request{rootCid, uint64(len(origBytes))}, options)
+	res := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, options)
 	for range res {
 	}
 }
@@ -308,8 +305,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	}
 
 	mds := &MetadataStore{n1.Ds, n1.Ms}
-	mg := NewMessaging(n1.Host)
-	supply := NewReplication(n1.Host, mds, n1.Dt, mg, asia)
+	supply := NewReplication(n1.Host, mds, n1.Dt, asia)
 	sub, err := n1.Host.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
@@ -327,8 +323,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 
 		// Create a supply for each node
 		mds := &MetadataStore{n.Ds, n.Ms}
-		mg := NewMessaging(n.Host)
-		s := NewReplication(n.Host, mds, n.Dt, mg, asia)
+		s := NewReplication(n.Host, mds, n.Dt, asia)
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -352,8 +347,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 
 		// Create a supply for each node
 		mds := &MetadataStore{n.Ds, n.Ms}
-		mg := NewMessaging(n.Host)
-		s := NewReplication(n.Host, mds, n.Dt, mg, africa)
+		s := NewReplication(n.Host, mds, n.Dt, africa)
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
@@ -382,7 +376,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		BackoffAttemps: 4,
 		RF:             7,
 	}
-	res := supply.DispatchRequest(Request{rootCid, uint64(len(origBytes))}, options)
+	res := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, options)
 
 	var recipients []PRecord
 	for rec := range res {

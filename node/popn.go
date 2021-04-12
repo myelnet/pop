@@ -569,7 +569,7 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 		defer cancel()
 
-		res := nd.exch.R().DispatchRequest(exchange.Request{
+		res := nd.exch.R().Dispatch(exchange.Request{
 			PayloadCID: com.PayloadCID,
 			Size:       uint64(com.PayloadSize),
 		}, exchange.DefaultDispatchOptions)
@@ -681,13 +681,13 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			return err
 		}
 
-		err = session.QueryMiner(ctx, *info)
+		err = session.QueryFrom(*info)
 	}
 	if args.Miner == "" {
 		// Gossip discovery shouldn't last more than 5 seconds
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		err = session.QueryGossip(ctx)
+		err = session.Query(ctx)
 	}
 	if err != nil {
 		return err

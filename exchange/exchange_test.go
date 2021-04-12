@@ -9,12 +9,9 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
-	cid "github.com/ipfs/go-cid"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	bhost "github.com/libp2p/go-libp2p-blankhost"
 	peer "github.com/libp2p/go-libp2p-core/peer"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
@@ -113,7 +110,7 @@ func TestSelectionStrategies(t *testing.T) {
 			for i := 0; i < testCase.offers; i++ {
 				i := i
 				go func() {
-					wq.ReceiveOffer(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+					wq.ReceiveResponse(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -172,7 +169,7 @@ func BenchmarkStrategies(b *testing.B) {
 			for i := 0; i < 30+b.N; i++ {
 				i := i
 				go func() {
-					wq.ReceiveOffer(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+					wq.ReceiveResponse(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -189,164 +186,6 @@ func BenchmarkStrategies(b *testing.B) {
 	}
 
 }
-
-type Topology func(*testing.T, mocknet.Mocknet, []*testutil.TestNode, []*testutil.TestNode)
-
-func All(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*testutil.TestNode) {
-	require.NoError(t, mn.LinkAll())
-	require.NoError(t, mn.ConnectAllButSelf())
-}
-
-func OneToOne(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*testutil.TestNode) {
-	require.NoError(t, testutil.Connect(rn[0], prs[0]))
-	time.Sleep(time.Second)
-}
-
-func Markov(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*testutil.TestNode) {
-	prevPeer := rn[0]
-	var peers []*testutil.TestNode
-	peers = append(peers, rn[1:]...)
-	peers = append(peers, prs...)
-	for _, tn := range peers {
-		require.NoError(t, testutil.Connect(prevPeer, tn))
-		prevPeer = tn
-	}
-	time.Sleep(time.Second)
-}
-
-func noop(*testutil.TestNode) {}
-
-func TestGossipQuery(t *testing.T) {
-	withSwarmT := func(tn *testutil.TestNode) {
-		netw := swarmt.GenSwarm(t, context.Background())
-		h := bhost.NewBlankHost(netw)
-		tn.Host = h
-	}
-	testCases := []struct {
-		name     string
-		topology Topology
-		peers    int
-		clients  int
-		files    int
-		netOpts  func(*testutil.TestNode)
-	}{
-		{
-			name:     "Connect all",
-			topology: All,
-			peers:    11,
-			clients:  1,
-			netOpts:  noop,
-			files:    1,
-		},
-		{
-			name:     "Connect all with 2 clients",
-			topology: All,
-			peers:    11,
-			clients:  2,
-			netOpts:  noop,
-			files:    1,
-		},
-
-		{
-			name:     "One to one",
-			topology: OneToOne,
-			peers:    2,
-			clients:  1,
-			netOpts:  withSwarmT,
-			files:    1,
-		},
-		{
-			name:     "Markov",
-			topology: Markov,
-			peers:    6,
-			clients:  1,
-			netOpts:  withSwarmT,
-			files:    3,
-		},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			bgCtx := context.Background()
-
-			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Second)
-			defer cancel()
-
-			mn := mocknet.New(bgCtx)
-
-			clients := make(map[peer.ID]*Exchange)
-			var cnodes []*testutil.TestNode
-
-			providers := make(map[peer.ID]*Exchange)
-			var pnodes []*testutil.TestNode
-
-			fnames := make([]string, testCase.files)
-			for i := range fnames {
-				// This just creates the file without adding it
-				fnames[i] = (&testutil.TestNode{}).CreateRandomFile(t, 256000)
-			}
-			roots := make([]cid.Cid, testCase.files)
-
-			var rootCid cid.Cid
-
-			for i := 0; i < testCase.peers; i++ {
-				n := testutil.NewTestNode(mn, t, testCase.netOpts)
-				opts := Options{
-					Blockstore: n.Bs,
-					MultiStore: n.Ms,
-					RepoPath:   n.DTTmpDir,
-					Keystore:   keystore.NewMemKeystore(),
-				}
-
-				exch, err := New(bgCtx, n.Host, n.Ds, opts)
-				require.NoError(t, err)
-
-				if i < testCase.clients {
-					clients[n.Host.ID()] = exch
-					cnodes = append(cnodes, n)
-				} else {
-					providers[n.Host.ID()] = exch
-					pnodes = append(pnodes, n)
-
-					for i, name := range fnames {
-						link, storeID, _ := n.LoadFileToNewStore(ctx, t, name)
-						rootCid = link.(cidlink.Link).Cid
-						require.NoError(t, exch.Put(ctx, rootCid, PutOptions{
-							StoreID: storeID,
-							Local:   true,
-						}))
-						roots[i] = rootCid
-					}
-				}
-			}
-
-			testCase.topology(t, mn, cnodes, pnodes)
-
-			for _, client := range clients {
-				for _, root := range roots {
-					// Now we fetch it again from our providers
-					session := client.NewSession(ctx, root, SelectFirst)
-
-					err := session.QueryGossip(ctx)
-					require.NoError(t, err)
-
-					// execute a job for each offer
-					for i := 0; i < testCase.peers-testCase.clients; i++ {
-						selected, err := session.Checkout()
-						require.NoError(t, err)
-						require.Equal(t, selected.Offer.Response.Size, uint64(268009))
-
-						// Deny the offer so we don't trigger a retrieval
-						selected.Decline()
-					}
-					session.Close()
-				}
-			}
-
-		})
-	}
-
-}
-
 func TestExchangeE2E(t *testing.T) {
 	// Iterating a ton helps weed out false positives
 	for i := 0; i < 1; i++ {
@@ -397,7 +236,7 @@ func TestExchangeE2E(t *testing.T) {
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			res := client.R().DispatchRequest(Request{
+			res := client.R().Dispatch(Request{
 				PayloadCID: rootCid,
 				Size:       uint64(len(origBytes)),
 			}, DefaultDispatchOptions)
@@ -429,7 +268,7 @@ func TestExchangeE2E(t *testing.T) {
 			session := client.NewSession(ctx, rootCid, SelectFirst)
 			defer session.Close()
 
-			err = session.QueryGossip(ctx)
+			err = session.Query(ctx)
 			require.NoError(t, err)
 
 			selected, err := session.Checkout()

@@ -1,7 +1,6 @@
 package exchange
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"sort"
@@ -13,7 +12,6 @@ import (
 	cid "github.com/ipfs/go-cid"
 	iprime "github.com/ipld/go-ipld-prime"
 	peer "github.com/libp2p/go-libp2p-core/peer"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/deal"
 )
@@ -24,10 +22,8 @@ type Session struct {
 	cancelCtx context.CancelFunc
 	// storeID is the unique store used to load the content retrieved during this session
 	storeID multistore.StoreID
-	// regionTopics are all the region gossip subscriptions this session can query to find the content
-	regionTopics []*pubsub.Topic
-	// net is the network procotol used by providers to send their offers
-	net *Messaging
+	// disco is the discovery mechanism for finding content offers
+	disco *GossipDisco
 	// retriever manages the state of the transfer once we have a good offer
 	retriever *retrieval.Client
 	// clientAddr is the address that will be used to make any payment for retrieving the content
@@ -76,58 +72,20 @@ func (ds DealSelection) Decline() {
 	ds.confirm <- false
 }
 
-// QueryMiner asks a storage miner for retrieval conditions
-func (s *Session) QueryMiner(ctx context.Context, p peer.AddrInfo) error {
-	stream, err := s.net.NewQueryStream(p.ID)
-	if err != nil {
-		return err
-	}
-	defer stream.Close()
-
-	err = stream.WriteQuery(deal.Query{
-		PayloadCID:  s.root,
-		QueryParams: deal.QueryParams{},
-	})
-	if err != nil {
-		return err
-	}
-
-	res, err := stream.ReadQueryResponse()
-	if err != nil {
-		return err
-	}
-	s.worker.ReceiveOffer(p, res)
-	return nil
+// Query the discovery service for offers
+func (s *Session) Query(ctx context.Context) error {
+	return s.disco.Query(ctx, s.root, s.worker.ReceiveResponse)
 }
 
-// QueryGossip asks the gossip network of providers if anyone can provide the blocks we're looking for
-// it blocks execution until our conditions are satisfied
-func (s *Session) QueryGossip(ctx context.Context) error {
-	m := deal.Query{
-		PayloadCID:  s.root,
-		QueryParams: deal.QueryParams{},
-	}
-
-	buf := new(bytes.Buffer)
-	if err := m.MarshalCBOR(buf); err != nil {
-		return err
-	}
-
-	bytes := buf.Bytes()
-	// publish to all regions this exchange joined
-	for _, topic := range s.regionTopics {
-		if err := topic.Publish(ctx, bytes); err != nil {
-			return err
-		}
-	}
-
-	return nil
+// QueryFrom allows querying directly from a given peer
+func (s *Session) QueryFrom(info peer.AddrInfo) error {
+	return s.disco.QueryPeer(info, s.root, s.worker.ReceiveResponse)
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
 func (s *Session) Execute(of deal.Offer) error {
 	// Make sure our provider is in our peerstore
-	s.net.AddAddrs(of.Provider.ID, of.Provider.Addrs)
+	s.disco.AddAddrs(of.Provider.ID, of.Provider.Addrs)
 	params, err := deal.NewParams(
 		of.Response.MinPricePerByte,
 		of.Response.MaxPaymentInterval,
@@ -226,8 +184,8 @@ var ErrUserDeniedOffer = errors.New("user denied offer")
 
 // OfferWorker is a generic interface to manage the lifecycle of offers
 type OfferWorker interface {
-	OfferReceiver
 	Start()
+	ReceiveResponse(peer.AddrInfo, deal.QueryResponse)
 	Close() []deal.Offer
 }
 
@@ -389,8 +347,8 @@ func (s sessionWorker) Close() []deal.Offer {
 	return <-resc
 }
 
-// ReceiveOffer sends a new offer to the queue
-func (s sessionWorker) ReceiveOffer(p peer.AddrInfo, res deal.QueryResponse) {
+// ReceiveResponse sends a new offer to the queue
+func (s sessionWorker) ReceiveResponse(p peer.AddrInfo, res deal.QueryResponse) {
 	// This never blocks as our queue is always receiving and decides when to drop offers
 	s.offersIn <- deal.Offer{
 		Provider: p,

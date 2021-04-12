@@ -121,7 +121,7 @@ type scaffold struct {
 func setup(t *testing.T) *scaffold {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	w := wallet.NewIPFS(keystore.NewMemKeystore(), nil)
+	w := wallet.NewFromKeystore(keystore.NewMemKeystore(), nil)
 
 	walletAddr, err := w.NewKey(context.Background(), wallet.KTSecp256k1)
 	if err != nil {

@@ -13,9 +13,6 @@ import (
 
 	"github.com/filecoin-project/go-multistore"
 	badgerds "github.com/ipfs/go-ds-badger"
-	gsimpl "github.com/ipfs/go-graphsync/impl"
-	gsnet "github.com/ipfs/go-graphsync/network"
-	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/libp2p/go-libp2p"
@@ -23,11 +20,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
-	"github.com/myelnet/pop"
+	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/internal/utils"
-	"github.com/myelnet/pop/supply"
 )
 
 // pop provider is a lightweight daemon only focused on serving content for retrievals
@@ -131,29 +126,13 @@ func run() error {
 		return err
 	}
 
-	ps, err := pubsub.NewGossipSub(ctx, host)
-	if err != nil {
-		return err
-	}
-
-	gs := gsimpl.New(ctx,
-		gsnet.NewFromLibp2pHost(host),
-		storeutil.LoaderForBlockstore(bs),
-		storeutil.StorerForBlockstore(bs),
-	)
-
 	// Convert region names to region structs
-	regions := supply.ParseRegions(args.regions)
+	regions := exchange.ParseRegions(args.regions)
 
-	settings := pop.Settings{
-		Datastore:  ds,
-		Blockstore: bs,
-		MultiStore: ms,
-		Host:       host,
-		PubSub:     ps,
-		GraphSync:  gs,
-		RepoPath:   rpath,
-		// TODO: secure keystore
+	opts := exchange.Options{
+		Blockstore:          bs,
+		MultiStore:          ms,
+		RepoPath:            rpath,
 		Keystore:            ks,
 		FilecoinRPCEndpoint: args.filEndpoint,
 		FilecoinRPCHeader: http.Header{
@@ -162,7 +141,7 @@ func run() error {
 		Regions: regions,
 	}
 
-	exch, err := pop.NewExchange(ctx, settings)
+	exch, err := exchange.New(ctx, host, ds, opts)
 	if err != nil {
 		return err
 	}
