@@ -12,11 +12,9 @@ import (
 	"time"
 
 	keystore "github.com/ipfs/go-ipfs-keystore"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	"github.com/myelnet/pop"
+	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/internal/testutil"
-	"github.com/myelnet/pop/supply"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,23 +30,14 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	nd.ms = tn.Ms
 	nd.dag = tn.DAG
 	nd.host = tn.Host
-	nd.gs = tn.Gs
-	nd.ps, err = pubsub.NewGossipSub(ctx, nd.host)
-	require.NoError(t, err)
 
-	settings := pop.Settings{
-		Datastore:  nd.ds,
+	opts := exchange.Options{
 		Blockstore: nd.bs,
 		MultiStore: nd.ms,
-		Host:       nd.host,
-		PubSub:     nd.ps,
-		GraphSync:  nd.gs,
 		RepoPath:   t.TempDir(),
 		Keystore:   keystore.NewMemKeystore(),
-		Regions:    []supply.Region{supply.Regions["Global"]},
 	}
-
-	nd.exch, err = pop.NewExchange(ctx, settings)
+	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, opts)
 	require.NoError(t, err)
 
 	return nd

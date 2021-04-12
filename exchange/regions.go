@@ -1,7 +1,8 @@
-package supply
+package exchange
 
 import (
 	"math"
+	"path"
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
@@ -162,4 +163,18 @@ func ParseRegions(list []string) []Region {
 		})
 	}
 	return regions
+}
+
+// RegionFromTopic formats a topic string into a Region struct
+func RegionFromTopic(topic string) Region {
+	_, name := path.Split(topic)
+	r, ok := Regions[name]
+	if !ok {
+		return Region{
+			Name: name,
+			Code: CustomRegion,
+			PPB:  big.Zero(), // TODO: handle pricing for custom region
+		}
+	}
+	return r
 }

@@ -1,4 +1,4 @@
-package supply
+package exchange
 
 import (
 	"context"
@@ -8,11 +8,164 @@ import (
 
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-eventbus"
+	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/stretchr/testify/require"
+	bhost "github.com/tchardin/go-libp2p-blankhost"
 )
+
+func TestReplication(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	mn := mocknet.New(ctx)
+
+	withSwarmT := func(tn *testutil.TestNode) {
+		netw := swarmt.GenSwarm(t, context.Background())
+		h := bhost.NewBlankHost(netw, bhost.WithConnectionManager(
+			connmgr.NewConnManager(10, 11, time.Second),
+		))
+		tn.Host = h
+	}
+	names := make(map[string]peer.ID)
+	setupNode := func(name string) (*testutil.TestNode, *Replication) {
+		n := testutil.NewTestNode(mn, t, withSwarmT)
+		names[name] = n.Host.ID()
+		n.SetupDataTransfer(ctx, t)
+		repl := NewReplication(
+			n.Host,
+			NewMetadataStore(n.Ds, n.Ms),
+			n.Dt,
+			[]Region{global},
+		)
+		require.NoError(t, repl.Start(ctx))
+		return n, repl
+	}
+
+	// Topology:
+	/*
+	   A -- B -- C -- D
+	   | \/ | \/ | \/ |
+	   | /\	| /\ | /\ |
+	   H -- G -- F -- E
+	*/
+
+	nA, _ := setupNode("A")
+
+	nB, rB := setupNode("B")
+
+	testutil.Connect(nA, nB)
+
+	nC, _ := setupNode("C")
+
+	testutil.Connect(nB, nC)
+
+	nD, rD := setupNode("D")
+
+	testutil.Connect(nC, nD)
+
+	nE, _ := setupNode("E")
+
+	testutil.Connect(nD, nE)
+	testutil.Connect(nC, nE)
+
+	nF, rF := setupNode("F")
+
+	testutil.Connect(nD, nF)
+	testutil.Connect(nE, nF)
+	testutil.Connect(nC, nF)
+	testutil.Connect(nB, nF)
+
+	nG, _ := setupNode("G")
+
+	testutil.Connect(nC, nG)
+	testutil.Connect(nF, nG)
+	testutil.Connect(nB, nG)
+	testutil.Connect(nA, nG)
+
+	nH, rH := setupNode("H")
+
+	testutil.Connect(nB, nH)
+	testutil.Connect(nG, nH)
+	testutil.Connect(nA, nH)
+
+	time.Sleep(time.Second)
+
+	// 1) D write
+	{
+		fname := nD.CreateRandomFile(t, 256000)
+		link, storeID, _ := nD.LoadFileToNewStore(ctx, t, fname)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, rD.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 3
+		res := rD.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["C"], names["E"], names["F"]:
+			default:
+				t.Fatal("sent to wrong peer")
+			}
+		}
+	}
+
+	// 2) F write
+	{
+		fname := nF.CreateRandomFile(t, 256000)
+		link, storeID, _ := nF.LoadFileToNewStore(ctx, t, fname)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, rF.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 5
+		res := rF.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["E"], names["D"], names["C"], names["B"], names["G"]:
+			default:
+				t.Fatal("wrong peer")
+			}
+		}
+	}
+
+	// 3) B write
+	{
+		fname := nB.CreateRandomFile(t, 256000)
+		link, storeID, _ := nB.LoadFileToNewStore(ctx, t, fname)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, rB.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 5
+		res := rB.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["C"], names["F"], names["G"], names["H"], names["A"]:
+			default:
+				t.Fatal("wrong peer")
+			}
+		}
+	}
+
+	// 4) H write
+	{
+		fname := nH.CreateRandomFile(t, 256000)
+		link, storeID, _ := nH.LoadFileToNewStore(ctx, t, fname)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, rH.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 3
+		res := rH.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["A"], names["B"], names["G"]:
+			default:
+				t.Fatal("wrong peer")
+			}
+		}
+	}
+}
 
 func TestMultiRequestStreams(t *testing.T) {
 	// Loop is useful for detecting any flakiness
@@ -42,14 +195,15 @@ func TestMultiRequestStreams(t *testing.T) {
 				},
 			}
 
-			hn := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, regions)
-			hn.Register(rootCid, storeID)
+			mds := &MetadataStore{n1.Ds, n1.Ms}
+			hn := NewReplication(n1.Host, mds, n1.Dt, regions)
+			mds.Register(rootCid, storeID)
 			sub, err := hn.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
 			require.NoError(t, err)
 			require.NoError(t, hn.Start(ctx))
 
 			tnds := make(map[peer.ID]*testutil.TestNode)
-			receivers := make(map[peer.ID]*Supply)
+			receivers := make(map[peer.ID]*Replication)
 
 			for i := 0; i < 7; i++ {
 				tnode := testutil.NewTestNode(mn, t)
@@ -59,7 +213,8 @@ func TestMultiRequestStreams(t *testing.T) {
 					require.NoError(t, err)
 				})
 
-				hn1 := New(tnode.Host, tnode.Dt, tnode.Ds, tnode.Ms, regions)
+				mds := &MetadataStore{tnode.Ds, tnode.Ms}
+				hn1 := NewReplication(tnode.Host, mds, tnode.Dt, regions)
 				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
 				tnds[tnode.Host.ID()] = tnode
@@ -90,7 +245,7 @@ func TestMultiRequestStreams(t *testing.T) {
 
 			time.Sleep(time.Second)
 			for _, r := range recs {
-				store, err := receivers[r.Provider].GetStore(rootCid)
+				store, err := receivers[r.Provider].store.GetStore(rootCid)
 				require.NoError(t, err)
 				tnds[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 			}
@@ -121,8 +276,9 @@ func TestSendRequestNoPeers(t *testing.T) {
 		},
 	}
 
-	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, regions)
-	supply.Register(rootCid, storeID)
+	mds := &MetadataStore{n1.Ds, n1.Ms}
+	supply := NewReplication(n1.Host, mds, n1.Dt, regions)
+	mds.Register(rootCid, storeID)
 	require.NoError(t, supply.Start(bgCtx))
 
 	options := DispatchOptions{
@@ -161,13 +317,14 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		Regions["Asia"],
 	}
 
-	supply := New(n1.Host, n1.Dt, n1.Ds, n1.Ms, asia)
+	mds := &MetadataStore{n1.Ds, n1.Ms}
+	supply := NewReplication(n1.Host, mds, n1.Dt, asia)
 	sub, err := n1.Host.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
 
 	asiaNodes := make(map[peer.ID]*testutil.TestNode)
-	asiaSupplies := make(map[peer.ID]*Supply)
+	asiaSupplies := make(map[peer.ID]*Replication)
 	// We add a bunch of asian retrieval providers
 	for i := 0; i < 5; i++ {
 		n := testutil.NewTestNode(mn, t)
@@ -178,7 +335,8 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		})
 
 		// Create a supply for each node
-		s := New(n.Host, n.Dt, n.Ds, n.Ms, asia)
+		mds := &MetadataStore{n.Ds, n.Ms}
+		s := NewReplication(n.Host, mds, n.Dt, asia)
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -190,7 +348,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	}
 
 	africaNodes := make(map[peer.ID]*testutil.TestNode)
-	var africaSupplies []*Supply
+	var africaSupplies []*Replication
 	// Add african providers
 	for i := 0; i < 3; i++ {
 		n := testutil.NewTestNode(mn, t)
@@ -201,7 +359,8 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		})
 
 		// Create a supply for each node
-		s := New(n.Host, n.Dt, n.Ds, n.Ms, africa)
+		mds := &MetadataStore{n.Ds, n.Ms}
+		s := NewReplication(n.Host, mds, n.Dt, africa)
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
@@ -214,7 +373,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	require.NoError(t, supply.Register(rootCid, storeID))
+	require.NoError(t, mds.Register(rootCid, storeID))
 
 	// Wait for all peers to be received in the peer manager
 	for i := 0; i < 5; i++ {
@@ -237,7 +396,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		recipients = append(recipients, rec)
 	}
 	for _, p := range recipients {
-		store, err := asiaSupplies[p.Provider].GetStore(rootCid)
+		store, err := asiaSupplies[p.Provider].store.GetStore(rootCid)
 		require.NoError(t, err)
 
 		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)

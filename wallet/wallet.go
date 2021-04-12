@@ -176,20 +176,20 @@ type Driver interface {
 	Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error
 }
 
-// IPFS wallet wraps an IPFS keystore
-type IPFS struct {
+// KeystoreWallet wraps an IPFS keystore
+type KeystoreWallet struct {
 	keystore keystore.Keystore
 	// API to interact with Filecoin chain
 	fAPI fil.API
 
-	lk          sync.Mutex
+	mu          sync.Mutex
 	keys        map[address.Address]*Key // cache so we don't read from the Keystore too much
 	defaultAddr address.Address
 }
 
-// NewIPFS creates a new IPFS keystore based wallet implementing the Driver methods
-func NewIPFS(ks keystore.Keystore, f fil.API) Driver {
-	w := &IPFS{
+// NewFromKeystore creates a new IPFS keystore based wallet implementing the Driver methods
+func NewFromKeystore(ks keystore.Keystore, f fil.API) Driver {
+	w := &KeystoreWallet{
 		keystore:    ks,
 		keys:        make(map[address.Address]*Key),
 		fAPI:        f,
@@ -207,9 +207,9 @@ func NewIPFS(ks keystore.Keystore, f fil.API) Driver {
 }
 
 // NewKey generates a brand new key for the given type in our wallet and returns the address
-func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) {
-	i.lk.Lock()
-	defer i.lk.Unlock()
+func (w *KeystoreWallet) NewKey(ctx context.Context, kt KeyType) (address.Address, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	sig, err := KeyTypeSig(kt)
 	if err != nil {
@@ -230,23 +230,23 @@ func (i *IPFS) NewKey(ctx context.Context, kt KeyType) (address.Address, error) 
 		return address.Undef, err
 	}
 
-	if err := i.keystore.Put(KNamePrefix+k.Address.String(), k); err != nil {
+	if err := w.keystore.Put(KNamePrefix+k.Address.String(), k); err != nil {
 		return address.Undef, fmt.Errorf("unable to save to keystore: %v", err)
 	}
-	i.keys[k.Address] = k
+	w.keys[k.Address] = k
 
-	if i.defaultAddr == address.Undef {
-		if err := i.keystore.Put(KDefault, k); err != nil {
+	if w.defaultAddr == address.Undef {
+		if err := w.keystore.Put(KDefault, k); err != nil {
 			return address.Undef, fmt.Errorf("failed to set new key as default: %v", err)
 		}
-		i.defaultAddr = k.Address
+		w.defaultAddr = k.Address
 	}
 	return k.Address, nil
 }
 
 // read default address from keystore
-func (i *IPFS) getDefaultAddress() (address.Address, error) {
-	k, err := i.keystore.Get(KDefault)
+func (w *KeystoreWallet) getDefaultAddress() (address.Address, error) {
+	k, err := w.keystore.Get(KDefault)
 	if err != nil {
 		return address.Undef, err
 	}
@@ -259,36 +259,36 @@ func (i *IPFS) getDefaultAddress() (address.Address, error) {
 }
 
 // DefaultAddress of the wallet used for receiving payments as provider and paying when retrieving
-func (i *IPFS) DefaultAddress() address.Address {
-	i.lk.Lock()
-	defer i.lk.Unlock()
+func (w *KeystoreWallet) DefaultAddress() address.Address {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	return i.defaultAddr
+	return w.defaultAddr
 }
 
 // SetDefaultAddress for receiving and sending payments as provider or client
-func (i *IPFS) SetDefaultAddress(addr address.Address) error {
-	i.lk.Lock()
-	defer i.lk.Unlock()
+func (w *KeystoreWallet) SetDefaultAddress(addr address.Address) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	k, err := i.keystore.Get(KNamePrefix + addr.String())
+	k, err := w.keystore.Get(KNamePrefix + addr.String())
 	if err != nil {
 		return err
 	}
 
-	_ = i.keystore.Delete(KDefault)
+	_ = w.keystore.Delete(KDefault)
 
-	if err := i.keystore.Put(KDefault, k); err != nil {
+	if err := w.keystore.Put(KDefault, k); err != nil {
 		return err
 	}
-	i.defaultAddr = addr
+	w.defaultAddr = addr
 
 	return nil
 }
 
 // List all the addresses in the wallet
-func (i *IPFS) List() ([]address.Address, error) {
-	all, err := i.keystore.List()
+func (w *KeystoreWallet) List() ([]address.Address, error) {
+	all, err := w.keystore.List()
 	if err != nil {
 		return nil, err
 	}
@@ -316,9 +316,9 @@ func (i *IPFS) List() ([]address.Address, error) {
 }
 
 // ImportKey in the wallet from a private key and key type
-func (i *IPFS) ImportKey(ctx context.Context, k *KeyInfo) (address.Address, error) {
-	i.lk.Lock()
-	defer i.lk.Unlock()
+func (w *KeystoreWallet) ImportKey(ctx context.Context, k *KeyInfo) (address.Address, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	sig, err := KeyTypeSig(k.KType)
 	if err != nil {
@@ -329,16 +329,16 @@ func (i *IPFS) ImportKey(ctx context.Context, k *KeyInfo) (address.Address, erro
 	if err != nil {
 		return address.Undef, err
 	}
-	if err := i.keystore.Put(KNamePrefix+key.Address.String(), key); err != nil {
+	if err := w.keystore.Put(KNamePrefix+key.Address.String(), key); err != nil {
 		return address.Undef, err
 	}
-	i.keys[key.Address] = key
+	w.keys[key.Address] = key
 	return key.Address, nil
 }
 
 // Sign a message with the key associated with the given address. Generates a valid Filecoin signature
-func (i *IPFS) Sign(ctx context.Context, addr address.Address, msg []byte) (*crypto.Signature, error) {
-	k, err := i.getKey(addr)
+func (w *KeystoreWallet) Sign(ctx context.Context, addr address.Address, msg []byte) (*crypto.Signature, error) {
+	k, err := w.getKey(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +354,7 @@ func (i *IPFS) Sign(ctx context.Context, addr address.Address, msg []byte) (*cry
 }
 
 // Verify a signature for the given bytes
-func (i *IPFS) Verify(ctx context.Context, k address.Address, msg []byte, sig *crypto.Signature) (bool, error) {
+func (w *KeystoreWallet) Verify(ctx context.Context, k address.Address, msg []byte, sig *crypto.Signature) (bool, error) {
 	signer, err := SigTypeSig(sig.Type)
 	if err != nil {
 		return false, err
@@ -366,15 +366,15 @@ func (i *IPFS) Verify(ctx context.Context, k address.Address, msg []byte, sig *c
 	return true, nil
 }
 
-func (i *IPFS) getKey(addr address.Address) (*Key, error) {
-	i.lk.Lock()
-	defer i.lk.Unlock()
+func (w *KeystoreWallet) getKey(addr address.Address) (*Key, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	k, ok := i.keys[addr]
+	k, ok := w.keys[addr]
 	if ok {
 		return k, nil
 	}
-	ki, err := i.keystore.Get(KNamePrefix + addr.String())
+	ki, err := w.keystore.Get(KNamePrefix + addr.String())
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +384,7 @@ func (i *IPFS) getKey(addr address.Address) (*Key, error) {
 		return nil, err
 	}
 
-	i.keys[k.Address] = k
+	w.keys[k.Address] = k
 	return k, nil
 }
 
@@ -427,11 +427,11 @@ func ActSigType(typ KeyType) crypto.SigType {
 // ------------------ Filecoin Methods -------------------------
 
 // Balance for a given address
-func (i *IPFS) Balance(ctx context.Context, addr address.Address) (fil.BigInt, error) {
-	if i.fAPI == nil {
+func (w *KeystoreWallet) Balance(ctx context.Context, addr address.Address) (fil.BigInt, error) {
+	if w.fAPI == nil {
 		return big.Zero(), ErrNoAPI
 	}
-	state, err := i.fAPI.StateReadState(ctx, addr, fil.EmptyTSK)
+	state, err := w.fAPI.StateReadState(ctx, addr, fil.EmptyTSK)
 	if err != nil {
 		return big.Zero(), err
 	}
@@ -441,12 +441,12 @@ func (i *IPFS) Balance(ctx context.Context, addr address.Address) (fil.BigInt, e
 // Transfer from an address in our wallet to any given address
 // FIL amount is passed as a human readable string
 // this methods blocks execution until the transaction was seen on chain
-func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error {
-	if i.fAPI == nil {
+func (w *KeystoreWallet) Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error {
+	if w.fAPI == nil {
 		return ErrNoAPI
 	}
 	// Immediately fail if we don't have the address to avoid unnecessary requests
-	if _, err := i.getKey(from); err != nil {
+	if _, err := w.getKey(from); err != nil {
 		return err
 	}
 
@@ -463,12 +463,12 @@ func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Ad
 		Method: method,
 	}
 
-	msg, err = i.fAPI.GasEstimateMessageGas(ctx, msg, nil, fil.EmptyTSK)
+	msg, err = w.fAPI.GasEstimateMessageGas(ctx, msg, nil, fil.EmptyTSK)
 	if err != nil {
 		return err
 	}
 
-	act, err := i.fAPI.StateGetActor(ctx, msg.From, fil.EmptyTSK)
+	act, err := w.fAPI.StateGetActor(ctx, msg.From, fil.EmptyTSK)
 	if err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Ad
 		return err
 	}
 
-	sig, err := i.Sign(ctx, msg.From, mbl.Cid().Bytes())
+	sig, err := w.Sign(ctx, msg.From, mbl.Cid().Bytes())
 	if err != nil {
 		return err
 	}
@@ -489,11 +489,11 @@ func (i *IPFS) Transfer(ctx context.Context, from address.Address, to address.Ad
 		Signature: *sig,
 	}
 
-	if _, err := i.fAPI.MpoolPush(ctx, smsg); err != nil {
+	if _, err := w.fAPI.MpoolPush(ctx, smsg); err != nil {
 		return fmt.Errorf("MpoolPush failed with error: %v", err)
 	}
 
-	mwait, err := i.fAPI.StateWaitMsg(ctx, smsg.Cid(), uint64(5))
+	mwait, err := w.fAPI.StateWaitMsg(ctx, smsg.Cid(), uint64(5))
 	if err != nil {
 		return fmt.Errorf("Failed to wait for msg: %s", err)
 	}

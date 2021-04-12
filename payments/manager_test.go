@@ -17,7 +17,6 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	keystore "github.com/ipfs/go-ipfs-keystore"
-	cbor "github.com/ipfs/go-ipld-cbor"
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
@@ -34,7 +33,7 @@ func TestAddFunds(t *testing.T) {
 
 	ks := keystore.NewMemKeystore()
 
-	w := wallet.NewIPFS(ks, api)
+	w := wallet.NewFromKeystore(ks, api)
 
 	addr1, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
@@ -43,9 +42,8 @@ func TestAddFunds(t *testing.T) {
 	require.NoError(t, err)
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
-	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
 
-	mgr := New(bgCtx, api, w, ds, cborstore)
+	mgr := New(bgCtx, api, w, ds, &mockBlocks{make(map[cid.Cid]block.Block)})
 
 	act := &fil.Actor{
 		Code:    blockGen.Next().Cid(),
@@ -135,7 +133,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 
 	ks := keystore.NewMemKeystore()
 
-	w := wallet.NewIPFS(ks, api)
+	w := wallet.NewFromKeystore(ks, api)
 
 	from, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
@@ -147,9 +145,8 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	payeeAddr := tutils.NewIDAddr(t, 103)
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
-	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
 
-	mgr := New(bgCtx, api, w, ds, cborstore)
+	mgr := New(bgCtx, api, w, ds, &mockBlocks{make(map[cid.Cid]block.Block)})
 
 	createAmt := big.NewInt(10)
 	act := &fil.Actor{
@@ -264,7 +261,7 @@ func TestBestSpendable(t *testing.T) {
 
 	ks := keystore.NewMemKeystore()
 
-	w := wallet.NewIPFS(ks, api)
+	w := wallet.NewFromKeystore(ks, api)
 
 	from, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
@@ -273,9 +270,8 @@ func TestBestSpendable(t *testing.T) {
 	payeeAddr := tutils.NewIDAddr(t, 103)
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
-	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
 
-	mgr := New(bgCtx, api, w, ds, cborstore)
+	mgr := New(bgCtx, api, w, ds, &mockBlocks{make(map[cid.Cid]block.Block)})
 
 	createAmt := big.NewInt(20)
 	act := &fil.Actor{
@@ -409,7 +405,7 @@ func TestCollectChannel(t *testing.T) {
 
 	ks := keystore.NewMemKeystore()
 
-	w := wallet.NewIPFS(ks, api)
+	w := wallet.NewFromKeystore(ks, api)
 
 	from, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
@@ -418,9 +414,8 @@ func TestCollectChannel(t *testing.T) {
 	payeeAddr := tutils.NewIDAddr(t, 103)
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
-	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
 
-	mgr := New(bgCtx, api, w, ds, cborstore)
+	mgr := New(bgCtx, api, w, ds, &mockBlocks{make(map[cid.Cid]block.Block)})
 
 	createAmt := big.NewInt(20)
 	act := &fil.Actor{

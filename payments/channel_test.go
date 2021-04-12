@@ -71,7 +71,7 @@ func TestChannel(t *testing.T) {
 
 	ks := keystore.NewMemKeystore()
 
-	w := wallet.NewIPFS(ks, api)
+	w := wallet.NewFromKeystore(ks, api)
 
 	addr1, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestLoadActorState(t *testing.T) {
 
 	api.SetObject([]byte("testing"))
 
-	w := wallet.NewIPFS(ks, api)
+	w := wallet.NewFromKeystore(ks, api)
 
 	store := NewStore(dssync.MutexWrap(ds.NewMapDatastore()))
 	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})

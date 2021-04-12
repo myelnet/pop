@@ -49,14 +49,14 @@ type Payments struct {
 }
 
 // New creates a new instance of payments manager
-func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, cbors *cbor.BasicIpldStore) *Payments {
+func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, bs cbor.IpldBlockstore) *Payments {
 	store := NewStore(ds)
 	return &Payments{
 		ctx:      ctx,
 		api:      api,
 		wal:      w,
 		store:    store,
-		actStore: cbors,
+		actStore: cbor.NewCborStore(bs),
 		channels: make(map[string]*channel),
 	}
 }

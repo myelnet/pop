@@ -147,7 +147,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Check if we have the blocks locally
-	sID, err := s.node.exch.Supply().GetStoreID(root)
+	sID, err := s.node.exch.Registrar().GetStoreID(root)
 	if err != nil {
 		if err == datastore.ErrNotFound {
 			// try to retrieve the blocks
@@ -159,7 +159,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// If all went well we should have the blocks now
-			sID, err = s.node.exch.Supply().GetStoreID(root)
+			sID, err = s.node.exch.Registrar().GetStoreID(root)
 			if err != nil {
 				http.Error(w, "Unable to find content", http.StatusNotFound)
 				return
