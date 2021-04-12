@@ -8,6 +8,7 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
 )
 
 const (
@@ -27,6 +28,14 @@ type ContentRecord struct {
 type MetadataStore struct {
 	ds datastore.Batching
 	ms *multistore.MultiStore
+}
+
+// NewMetadataStore sets up the metadata store at the right namespace
+func NewMetadataStore(ds datastore.Batching, ms *multistore.MultiStore) *MetadataStore {
+	return &MetadataStore{
+		ds: namespace.Wrap(ds, datastore.NewKey("/metadata")),
+		ms: ms,
+	}
 }
 
 // Register a new content record in our supply

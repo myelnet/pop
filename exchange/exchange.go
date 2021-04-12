@@ -9,7 +9,6 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -48,10 +47,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err != nil {
 		return nil, err
 	}
-	metads := &MetadataStore{
-		ds: namespace.Wrap(ds, datastore.NewKey("/metadata")),
-		ms: opts.MultiStore,
-	}
+	metads := NewMetadataStore(ds, opts.MultiStore)
 	// register a pubsub topic for each region
 	exch := &Exchange{
 		h:     h,
@@ -220,28 +216,4 @@ func (e *Exchange) ListMiners(ctx context.Context) ([]address.Address, error) {
 // GetStoreID exposes a method to get the store ID used by a given CID
 func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
 	return e.meta.GetStoreID(id)
-}
-
-// Get sends a Get request and executes the receive offers
-func (e *Exchange) Get(ctx context.Context, root cid.Cid) error {
-	return nil
-}
-
-// PutOptions describes how the Put action should be performed
-type PutOptions struct {
-	// Local only caches the given content on the local node
-	Local bool
-	// StoreID is the ID of the store used to import the content
-	StoreID multistore.StoreID
-}
-
-// Put sends a Put request and allows recipients to pull the blocks
-func (e *Exchange) Put(ctx context.Context, root cid.Cid, opts PutOptions) error {
-	if opts.Local {
-		err := e.meta.Register(root, opts.StoreID)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }

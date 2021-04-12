@@ -18,7 +18,7 @@ import (
 )
 
 func TestReplication(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
 	mn := mocknet.New(ctx)
@@ -30,11 +30,19 @@ func TestReplication(t *testing.T) {
 		))
 		tn.Host = h
 	}
-	setupNode := func(name string) (*testutil.TestNode, *Exchange) {
+	names := make(map[string]peer.ID)
+	setupNode := func(name string) (*testutil.TestNode, *Replication) {
 		n := testutil.NewTestNode(mn, t, withSwarmT)
-		exch, err := New(ctx, n.Host, n.Ds, Options{})
-		require.NoError(t, err)
-		return n, exch
+		names[name] = n.Host.ID()
+		n.SetupDataTransfer(ctx, t)
+		repl := NewReplication(
+			n.Host,
+			NewMetadataStore(n.Ds, n.Ms),
+			n.Dt,
+			[]Region{global},
+		)
+		require.NoError(t, repl.Start(ctx))
+		return n, repl
 	}
 
 	// Topology:
@@ -47,7 +55,7 @@ func TestReplication(t *testing.T) {
 
 	nA, _ := setupNode("A")
 
-	nB, eB := setupNode("B")
+	nB, rB := setupNode("B")
 
 	testutil.Connect(nA, nB)
 
@@ -55,28 +63,30 @@ func TestReplication(t *testing.T) {
 
 	testutil.Connect(nB, nC)
 
-	nD, eD := setupNode("D")
+	nD, rD := setupNode("D")
 
 	testutil.Connect(nC, nD)
 
-	nE, eE := setupNode("E")
+	nE, _ := setupNode("E")
 
 	testutil.Connect(nD, nE)
 	testutil.Connect(nC, nE)
 
-	nF, _ := setupNode("F")
+	nF, rF := setupNode("F")
 
 	testutil.Connect(nD, nF)
 	testutil.Connect(nE, nF)
 	testutil.Connect(nC, nF)
+	testutil.Connect(nB, nF)
 
 	nG, _ := setupNode("G")
 
 	testutil.Connect(nC, nG)
 	testutil.Connect(nF, nG)
 	testutil.Connect(nB, nG)
+	testutil.Connect(nA, nG)
 
-	nH, _ := setupNode("H")
+	nH, rH := setupNode("H")
 
 	testutil.Connect(nB, nH)
 	testutil.Connect(nG, nH)
@@ -84,74 +94,77 @@ func TestReplication(t *testing.T) {
 
 	time.Sleep(time.Second)
 
-	// => {A, B, C, D, E, F}
-
 	// 1) D write
 	{
 		fname := nD.CreateRandomFile(t, 256000)
 		link, storeID, _ := nD.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, eD.Put(ctx, rootCid, PutOptions{
-			Local:   true,
-			StoreID: storeID,
-		}))
+		require.NoError(t, rD.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 3
+		res := rD.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["C"], names["E"], names["F"]:
+			default:
+				t.Fatal("sent to wrong peer")
+			}
+		}
 	}
 
-	// => {A, B, C, D, E, F}
-
-	// 2) E write
+	// 2) F write
 	{
-		fname := nE.CreateRandomFile(t, 256000)
-		link, storeID, _ := nE.LoadFileToNewStore(ctx, t, fname)
+		fname := nF.CreateRandomFile(t, 256000)
+		link, storeID, _ := nF.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, eE.Put(ctx, rootCid, PutOptions{
-			Local:   true,
-			StoreID: storeID,
-		}))
+		require.NoError(t, rF.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 5
+		res := rF.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["E"], names["D"], names["C"], names["B"], names["G"]:
+			default:
+				t.Fatal("wrong peer")
+			}
+		}
 	}
-
-	// => {B, C, D, E}
 
 	// 3) B write
 	{
 		fname := nB.CreateRandomFile(t, 256000)
 		link, storeID, _ := nB.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, eB.Put(ctx, rootCid, PutOptions{
-			Local:   true,
-			StoreID: storeID,
-		}))
+		require.NoError(t, rB.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 5
+		res := rB.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["C"], names["F"], names["G"], names["H"], names["A"]:
+			default:
+				t.Fatal("wrong peer")
+			}
+		}
 	}
 
-	// => {B, C}
-
-	// 4) A read
-
-	// => {B, C}
-
-	// 5) A write
-	// {
-	// 	fname := nA.CreateRandomFile(t, 256000)
-	// 	link, _, _ := nA.LoadFileToNewStore(ctx, t, fname)
-	// 	rootCid := link.(cidlink.Link).Cid
-	// 	require.NoError(t, eA.Put(ctx, rootCid))
-	// }
-
-	// => {B}
-
-	// 6) A read
-
-	// => {A, B}
-
-	// 7) D read
-
-	// => {A, B}
-
-	// 8) F read
-
-	// => {A, B, C}
-
-	time.Sleep(time.Second)
+	// 4) H write
+	{
+		fname := nH.CreateRandomFile(t, 256000)
+		link, storeID, _ := nH.LoadFileToNewStore(ctx, t, fname)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, rH.store.Register(rootCid, storeID))
+		opts := DefaultDispatchOptions
+		opts.RF = 3
+		res := rH.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		for r := range res {
+			switch r.Provider {
+			case names["A"], names["B"], names["G"]:
+			default:
+				t.Fatal("wrong peer")
+			}
+		}
+	}
 }
 
 func TestMultiRequestStreams(t *testing.T) {

@@ -229,10 +229,7 @@ func TestExchangeE2E(t *testing.T) {
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
-			require.NoError(t, client.Put(ctx, rootCid, PutOptions{
-				StoreID: storeID,
-				Local:   true,
-			}))
+			require.NoError(t, client.meta.Register(rootCid, storeID))
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
