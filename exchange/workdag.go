@@ -1,8 +1,8 @@
-package node
+package exchange
 
 import (
-	"bufio"
 	"bytes"
+	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,11 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"text/tabwriter"
 
-	"github.com/filecoin-project/go-commp-utils/writer"
 	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-state-types/abi"
 	cid "github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -25,42 +24,81 @@ import (
 	unixfile "github.com/ipfs/go-unixfs/file"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
-	"github.com/ipld/go-car"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/pop/filecoin"
 )
 
 var (
 	// ErrEntryNotFound is returned by Index.Entry, if an entry is not found.
 	ErrEntryNotFound = errors.New("entry not found")
+	// ErrRefNotFound is returned when looking for a ref that doesn't exist
+	ErrRefNotFound = errors.New("ref not found")
 )
 
-// KStoreID is datastore key for persisting the last ID of a store for the current workdag
-const KStoreID = "storeid"
+const (
+	// KStoreID is datastore key for persisting the last ID of a store for the current workdag
+	KStoreID = "storeid"
 
-// KIndex is the datastore key for persisting the index of a workdag
-const KIndex = "index"
+	// KIndex is the datastore key for persisting the index of a workdag
+	KIndex = "index"
+)
 
-// Workdag represents any local content that hasn't been committed into a car file yet.
+// DefaultHashFunction used for generating CIDs of imported data
+// although less convenient than SHA2, BLAKE2B seems to be more peformant in most cases
+const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
+
+// Workdag manages our DAG operations. It stores a whole index of any content stored by the node.
+// It also implements a Least Frequently Used cache eviction mechanism to maintain storage withing given
+// bounds.
 type Workdag struct {
 	storeID multistore.StoreID
 	store   *multistore.Store
 	ms      *multistore.MultiStore
 	ds      datastore.Batching
+	// Upper bound is the store usage amount afyer which we start evicting refs from the store
+	ub uint64
+	// Lower bound is the size we target when evicting to make room for new content
+	// the interval between ub and lb is to try not evicting after every write once we reach ub
+	lb uint64
+	// current size of content committed to the store
+	size uint64
+	// linked list keeps track of our frequencies as fast as possible
+	freqs *list.List
+
+	// cache a mutex protected version of the index in memory
+	imu sync.Mutex
+	idx *Index
+}
+
+// WorkdagOption customizes the behavior of the workdag directly
+type WorkdagOption func(*Workdag)
+
+// WithBounds sets the upper and lower bounds of the LFU store
+func WithBounds(up, lo uint64) WorkdagOption {
+	return func(wd *Workdag) {
+		wd.ub = up
+		wd.lb = lo
+	}
 }
 
 // NewWorkdag instanciates a workdag, checks if we have a store ID and loads the right store
-func NewWorkdag(ms *multistore.MultiStore, ds datastore.Batching) (*Workdag, error) {
+func NewWorkdag(ms *multistore.MultiStore, ds datastore.Batching, opts ...WorkdagOption) (*Workdag, error) {
 	w := &Workdag{
-		ds: namespace.Wrap(ds, datastore.NewKey("/workdag")),
-		ms: ms,
+		ds:    namespace.Wrap(ds, datastore.NewKey("/workdag")),
+		ms:    ms,
+		freqs: list.New(),
+	}
+	for _, o := range opts {
+		o(w)
 	}
 	idx, err := w.Index()
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
 		idx = &Index{
 			StoreID: ms.Next(),
+			Refs:    make(map[string]*DataRef),
 		}
 	} else if err != nil {
 		return nil, err
@@ -69,6 +107,36 @@ func NewWorkdag(ms *multistore.MultiStore, ds datastore.Batching) (*Workdag, err
 	w.store, err = ms.Get(idx.StoreID)
 	if err != nil {
 		return nil, err
+	}
+refs:
+	for _, v := range idx.Refs {
+		w.size += uint64(v.PayloadSize)
+		if e := w.freqs.Front(); e == nil {
+			// insert the first element in the list
+			li := newListEntry(v.Freq)
+			li.entries[v] = 1
+			v.freqNode = w.freqs.PushFront(li)
+			continue refs
+		}
+		for e := w.freqs.Front(); e != nil; e = e.Next() {
+			le := e.Value.(*listEntry)
+			if le.freq == v.Freq {
+				le.entries[v] = 1
+				v.freqNode = e
+				continue refs
+			}
+			if le.freq > v.Freq {
+				li := newListEntry(v.Freq)
+				li.entries[v] = 1
+				v.freqNode = w.freqs.InsertBefore(li, e)
+				continue refs
+			}
+		}
+		// if we're still here it means we're the highest frequency in the list so we
+		// insert it at the back
+		li := newListEntry(v.Freq)
+		li.entries[v] = 1
+		v.freqNode = w.freqs.PushBack(li)
 	}
 
 	return w, w.SetIndex(idx)
@@ -86,6 +154,10 @@ func (w *Workdag) StoreID() multistore.StoreID {
 
 // SetIndex updates the Workdag index after an operation
 func (w *Workdag) SetIndex(idx *Index) error {
+	w.imu.Lock()
+	w.idx = idx
+	w.imu.Unlock()
+
 	enc, err := json.Marshal(idx)
 	if err != nil {
 		return err
@@ -96,11 +168,17 @@ func (w *Workdag) SetIndex(idx *Index) error {
 
 // Index decodes and returns the workdag index from the datastore
 func (w *Workdag) Index() (*Index, error) {
-	var idx Index
+	w.imu.Lock()
+	if w.idx != nil {
+		defer w.imu.Unlock()
+		return w.idx, nil
+	}
+	w.imu.Unlock()
 	enc, err := w.ds.Get(datastore.NewKey(KIndex))
 	if err != nil {
 		return nil, err
 	}
+	var idx Index
 	if err := json.Unmarshal(enc, &idx); err != nil {
 		return nil, err
 	}
@@ -160,7 +238,7 @@ func (w *Workdag) doAddFile(ctx context.Context, f files.File, opts AddOptions) 
 	prefix.MhType = DefaultHashFunction
 
 	params := helpers.DagBuilderParams{
-		Maxlinks:   unixfsLinksPerLevel,
+		Maxlinks:   1024,
 		RawLeaves:  true,
 		CidBuilder: prefix,
 		Dagserv:    bufferedDS,
@@ -251,42 +329,22 @@ type CommitOptions struct {
 type DataRef struct {
 	PayloadCID  cid.Cid
 	PayloadSize int64
-	// Piece is a Filecoin unit of storage
-	PieceCID  cid.Cid
-	PieceSize abi.PaddedPieceSize
-	StoreID   multistore.StoreID
+	StoreID     multistore.StoreID
+	Freq        int64
+	// do not serialize
+	freqNode *list.Element
 }
 
-// Commit stores the current contents of the index in an array to yield a single root CID
-func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, error) {
-	idx, err := w.Index()
-	if err != nil {
-		return nil, err
-	}
-
-	if len(idx.Entries) == 0 {
-		return nil, errors.New("workdag clean, nothing to commit")
-	}
-
-	// We need a single root CID so we make a list with the roots of all
-	// dagpb roots and use that in our CAR generation
+// assemble all the entries into a single dag Node
+func (w *Workdag) assembleEntries(entries []*Entry) (ipld.Node, error) {
+	// We need a single root CID so we make a list with the roots of all dagpb roots
 	nb := basicnode.Prototype.List.NewBuilder()
-
-	lb := cidlink.LinkBuilder{
-		Prefix: cid.Prefix{
-			Version:  1,
-			Codec:    0x71, // dag-cbor as per multicodec
-			MhType:   DefaultHashFunction,
-			MhLength: -1,
-		},
-	}
-
-	as, err := nb.BeginList(int64(len(idx.Entries)))
+	as, err := nb.BeginList(int64(len(entries)))
 	if err != nil {
 		return nil, err
 	}
 
-	for _, e := range idx.Entries {
+	for _, e := range entries {
 		// Each entry is a map with 2 keys: Name and Link
 		mas, err := as.AssembleValue().BeginMap(2)
 		if err != nil {
@@ -318,11 +376,42 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 	if err != nil {
 		return nil, err
 	}
+	return nb.Build(), nil
+}
 
+// Commit stores the current contents of the index in an array to yield a single root CID
+func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, error) {
+	lb := cidlink.LinkBuilder{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    0x71, // dag-cbor as per multicodec
+			MhType:   DefaultHashFunction,
+			MhLength: -1,
+		},
+	}
+
+	idx, err := w.Index()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(idx.Entries) == 0 {
+		return nil, errors.New("workdag clean, nothing to commit")
+	}
+
+	var size int64
+	for _, e := range idx.Entries {
+		size += e.Size
+	}
+
+	nd, err := w.assembleEntries(idx.Entries)
+	if err != nil {
+		return nil, err
+	}
 	lnk, err := lb.Build(
 		ctx,
 		ipld.LinkContext{},
-		nb.Build(),
+		nd,
 		w.store.Storer,
 	)
 	if err != nil {
@@ -330,35 +419,17 @@ func (w *Workdag) Commit(ctx context.Context, opts CommitOptions) (*DataRef, err
 	}
 	c := lnk.(cidlink.Link)
 
-	wr := &writer.Writer{}
-	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
-
-	err = car.WriteCar(ctx, w.store.DAG, []cid.Cid{c.Cid}, wr)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := bw.Flush(); err != nil {
-		return nil, err
-	}
-
-	dataCIDSize, err := wr.Sum()
-	if err != nil {
-		return nil, err
-	}
-
 	ref := &DataRef{
 		PayloadCID:  c.Cid,
-		PayloadSize: dataCIDSize.PayloadSize,
-		PieceSize:   dataCIDSize.PieceSize,
-		PieceCID:    dataCIDSize.PieceCID,
+		PayloadSize: size,
 		StoreID:     w.storeID,
+	}
+	if err := w.SetRef(c.Cid.String(), ref); err != nil {
+		return nil, err
 	}
 	// First we clear the entries once they'v been committed
 	var emptyEntries []*Entry
 	idx.Entries = emptyEntries
-	// Add our new commit
-	idx.Commits = append(idx.Commits, ref)
 	// Rotate the store
 	idx.StoreID = w.ms.Next()
 	w.storeID = idx.StoreID
@@ -424,6 +495,124 @@ func (w *Workdag) Unpack(ctx context.Context, root cid.Cid, s multistore.StoreID
 	return fls, nil
 }
 
+// SetRef adds a ref in the index and increments the LFU queue
+func (w *Workdag) SetRef(key string, ref *DataRef) error {
+	idx, err := w.Index()
+	if err != nil {
+		return err
+	}
+	idx.Refs[key] = ref
+	w.size += uint64(ref.PayloadSize)
+	if w.ub > 0 && w.lb > 0 {
+		if w.size > w.ub {
+			w.evict(w.size - w.lb)
+		}
+	}
+	// We evict the item before adding the new one
+	w.increment(ref)
+	return w.SetIndex(idx)
+}
+
+// GetRef gets a ref in the index and increments the LFU queue registering as a Read
+func (w *Workdag) GetRef(key string) (*DataRef, error) {
+	idx, err := w.Index()
+	if err != nil {
+		return nil, err
+	}
+	ref, ok := idx.Refs[key]
+	if !ok {
+		return nil, ErrRefNotFound
+	}
+	w.increment(ref)
+	return ref, w.SetIndex(idx)
+}
+
+type listEntry struct {
+	entries map[*DataRef]byte
+	freq    int64
+}
+
+func newListEntry(freq int64) *listEntry {
+	return &listEntry{
+		entries: make(map[*DataRef]byte),
+		freq:    freq,
+	}
+}
+
+func (w *Workdag) increment(ref *DataRef) {
+	currentPlace := ref.freqNode
+	var nextFreq int64
+	var nextPlace *list.Element
+	if currentPlace == nil {
+		// new entry
+		nextFreq = 1
+		nextPlace = w.freqs.Front()
+	} else {
+		// move up
+		nextFreq = currentPlace.Value.(*listEntry).freq + 1
+		nextPlace = currentPlace.Next()
+	}
+
+	if nextPlace == nil || nextPlace.Value.(*listEntry).freq != nextFreq {
+		// create a new list entry
+		li := &listEntry{
+			freq:    nextFreq,
+			entries: make(map[*DataRef]byte),
+		}
+		if currentPlace != nil {
+			nextPlace = w.freqs.InsertAfter(li, currentPlace)
+		} else {
+			nextPlace = w.freqs.PushFront(li)
+		}
+	}
+	ref.Freq = nextFreq
+	ref.freqNode = nextPlace
+	nextPlace.Value.(*listEntry).entries[ref] = 1
+	if currentPlace != nil {
+		// remove from current position
+		w.remEntry(currentPlace, ref)
+	}
+}
+
+func (w *Workdag) remEntry(place *list.Element, entry *DataRef) {
+	le := place.Value.(*listEntry)
+	entries := le.entries
+	delete(entries, entry)
+	if len(entries) == 0 {
+		w.freqs.Remove(place)
+	}
+}
+
+func (w *Workdag) evict(size uint64) uint64 {
+	// No lock here so it can be called
+	// from within the lock (during Set)
+	var evicted uint64
+	for evicted < size {
+		if place := w.freqs.Front(); place != nil {
+			for entry := range place.Value.(*listEntry).entries {
+				if evicted < size {
+					idx, err := w.Index()
+					if err != nil {
+						continue
+					}
+					delete(idx.Refs, entry.PayloadCID.String())
+					w.SetIndex(idx)
+
+					err = w.ms.Delete(entry.StoreID)
+					if err != nil {
+						continue
+					}
+
+					w.remEntry(place, entry)
+					evicted += uint64(entry.PayloadSize)
+					w.size -= uint64(entry.PayloadSize)
+				}
+			}
+		}
+	}
+	return evicted
+}
+
 // Index contains the information about which objects are currently checked out
 // in the workdag, having information about the working files.
 type Index struct {
@@ -432,8 +621,9 @@ type Index struct {
 	// Entries is the collection of staged dags. The order of
 	// this collection is not guaranteed
 	Entries []*Entry
-	// Commits is a collection of archived dags ready to be stored.
-	Commits []*DataRef
+	// Refs is a collection of archived dags stored locally.
+	// the key is a CID.String()
+	Refs map[string]*DataRef
 }
 
 // Add creates a new Entry and returns it. The caller should first check that

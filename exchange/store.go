@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	// KStoreID is the local store ID where that content is stored
-	KStoreID = "store"
 	// KSize is the full content size
 	KSize = "size"
 )

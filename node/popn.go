@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-commp-utils/writer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
@@ -26,6 +28,7 @@ import (
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-path"
+	"github.com/ipld/go-car"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -34,7 +37,6 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
-	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/filecoin/storage"
@@ -45,7 +47,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
@@ -401,8 +402,15 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 		sendErr(ErrNoDAGForPacking)
 		return
 	}
+	// Keep a reference to the store before it gets rotated
+	store := w.Store()
 
 	ref, err := w.Commit(ctx, CommitOptions{})
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	piece, err := nd.archive(ctx, store.DAG, ref.PayloadCID)
 	if err != nil {
 		sendErr(err)
 		return
@@ -415,9 +423,9 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 	nd.send(Notify{
 		PackResult: &PackResult{
 			DataCID:   ref.PayloadCID.String(),
-			DataSize:  ref.PayloadSize,
-			PieceCID:  ref.PieceCID.String(),
-			PieceSize: int64(ref.PieceSize),
+			DataSize:  piece.PayloadSize,
+			PieceCID:  piece.CID.String(),
+			PieceSize: int64(piece.PieceSize),
 		},
 	})
 }
@@ -824,4 +832,37 @@ func (nd *node) importAddress(pk string) {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
 	}
+}
+
+// PieceRef contains Filecoin metadata about a storage piece
+type PieceRef struct {
+	CID         cid.Cid
+	PayloadSize int64
+	PieceSize   abi.PaddedPieceSize
+}
+
+// archive a DAG into a CAR
+func (nd *node) archive(ctx context.Context, DAG ipldformat.DAGService, root cid.Cid) (*PieceRef, error) {
+	wr := &writer.Writer{}
+	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
+
+	err = car.WriteCar(ctx, DAG, []cid.Cid{root}, wr)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := bw.Flush(); err != nil {
+		return nil, err
+	}
+
+	dataCIDSize, err := wr.Sum()
+	if err != nil {
+		return nil, err
+	}
+
+	return &PieceRef{
+		CID:         dataCIDSize.PieceCID,
+		PayloadSize: dataCIDSize.PayloadSize,
+		PieceSize:   dataCIDSize.PieceSize,
+	}, nil
 }
