@@ -36,7 +36,9 @@ type Exchange struct {
 	disco *GossipDisco
 	// Replication scheme
 	rpl *Replication
-	// Local content index
+	// Index keeps track of all content stored under this exchange
+	idx *Index
+	// Workdag manipulates DAGs
 	wdg *Workdag
 }
 
@@ -47,7 +49,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err != nil {
 		return nil, err
 	}
-	metads, err := NewWorkdag(opts.MultiStore, ds)
+	idx, err := NewIndex(ds, opts.MultiStore)
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +58,9 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		h:     h,
 		ds:    ds,
 		opts:  opts,
-		wdg:   metads,
-		rpl:   NewReplication(h, metads, opts.DataTransfer, opts.Regions),
+		idx:   idx,
+		wdg:   NewWorkdag(opts.MultiStore),
+		rpl:   NewReplication(h, idx, opts.DataTransfer, opts.Regions),
 		disco: NewGossipDisco(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
@@ -74,7 +77,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		payments.New(ctx, opts.FilecoinAPI, exch.w, ds, opts.Blockstore),
 		opts.DataTransfer,
-		metads,
+		idx,
 		h.ID(),
 	)
 	if err != nil {
@@ -90,9 +93,13 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 }
 
 func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
+	store, err := e.idx.GetStore(q.PayloadCID)
+	if err != nil {
+		return deal.QueryResponse{}, err
+	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
-	stats, err := e.wdg.Stat(ctx, q.PayloadCID, AllSelector())
+	stats, err := e.wdg.Stat(ctx, store, q.PayloadCID, AllSelector())
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
@@ -183,6 +190,16 @@ func (e *Exchange) R() *Replication {
 	return e.rpl
 }
 
+// Workdag exposes the workdag methods
+func (e *Exchange) Workdag() *Workdag {
+	return e.wdg
+}
+
+// Index returns the exchange data index
+func (e *Exchange) Index() *Index {
+	return e.idx
+}
+
 // ListMiners returns a list of miners based on the regions this exchange is part of
 // We keep a context as this could also query a remote service or API
 func (e *Exchange) ListMiners(ctx context.Context) ([]address.Address, error) {
@@ -208,5 +225,5 @@ func (e *Exchange) ListMiners(ctx context.Context) ([]address.Address, error) {
 
 // GetStoreID exposes a method to get the store ID used by a given CID
 func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
-	return e.wdg.GetStoreID(id)
+	return e.idx.GetStoreID(id)
 }

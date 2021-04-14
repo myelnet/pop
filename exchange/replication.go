@@ -75,7 +75,7 @@ type Replication struct {
 	dt        datatransfer.Manager
 	pm        *PeerMgr
 	hs        *HeyService
-	wd        *Workdag
+	idx       *Index
 	rgs       []Region
 	reqProtos []protocol.ID
 
@@ -87,7 +87,7 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, wd *Workdag, dt datatransfer.Manager, rgs []Region) *Replication {
+func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Region) *Replication {
 	pm := NewPeerMgr(h, rgs)
 	hs := NewHeyService(h, pm)
 	r := &Replication{
@@ -96,20 +96,20 @@ func NewReplication(h host.Host, wd *Workdag, dt datatransfer.Manager, rgs []Reg
 		hs:        hs,
 		dt:        dt,
 		rgs:       rgs,
+		idx:       idx,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
 		schemes:   make(map[peer.ID]struct{}),
 		pulls:     make(map[cid.Cid]*peer.Set),
-		wd:        wd,
 	}
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
-	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.wd))
+	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx))
 
 	// TODO: clean this up
 	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
 		if event.Code == datatransfer.Error && channelState.Recipient() == h.ID() {
 			// If transfers fail and we're the recipient we need to remove it from our index
-			r.wd.Index().DropRef(channelState.BaseCID())
+			r.idx.DropRef(channelState.BaseCID())
 		}
 	})
 
@@ -162,8 +162,8 @@ func (r *Replication) handleRequest(s network.Stream) {
 	// TODO: validate request
 	// Create a new store to receive our new blocks
 	// It will be automatically picked up in the TransportConfigurer
-	storeID := r.wd.ms.Next()
-	err = r.wd.Index().SetRef(&DataRef{
+	storeID := r.idx.ms.Next()
+	err = r.idx.SetRef(&DataRef{
 		PayloadCID:  req.PayloadCID,
 		PayloadSize: int64(req.Size),
 		StoreID:     storeID,
@@ -358,7 +358,7 @@ type StoreConfigurableTransport interface {
 }
 
 // TransportConfigurer configurers the graphsync transport to use a custom blockstore per content
-func TransportConfigurer(wd *Workdag) datatransfer.TransportConfigurer {
+func TransportConfigurer(idx *Index) datatransfer.TransportConfigurer {
 	return func(channelID datatransfer.ChannelID, voucher datatransfer.Voucher, transport datatransfer.Transport) {
 		warn := func(err error) {
 			fmt.Println("attempting to configure data store:", err)
@@ -371,7 +371,7 @@ func TransportConfigurer(wd *Workdag) datatransfer.TransportConfigurer {
 		if !ok {
 			return
 		}
-		store, err := wd.GetStore(request.PayloadCID)
+		store, err := idx.GetStore(request.PayloadCID)
 		if err != nil {
 			warn(err)
 			return

@@ -55,8 +55,9 @@ func TestWorkdag(t *testing.T) {
 
 	filevals, filepaths := genTestFiles(t)
 
-	wd, err := NewWorkdag(ms, ds)
+	idx, err := NewIndex(ds, ms)
 	require.NoError(t, err)
+	wd := NewWorkdag(ms)
 
 	tx := wd.Tx(ctx)
 	sID := tx.StoreID()
@@ -72,7 +73,7 @@ func TestWorkdag(t *testing.T) {
 
 	ref, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref))
+	require.NoError(t, idx.SetRef(ref))
 
 	tx = wd.Tx(ctx)
 	_, err = tx.Put(KeyFromPath(filepaths[0]), PutOptions{Path: filepaths[0], ChunkSize: int64(1 << 10)})
@@ -85,12 +86,11 @@ func TestWorkdag(t *testing.T) {
 
 	require.NotEqual(t, sID, tx.StoreID())
 
-	// We can load a new workdag from store as well
-	wd, err = NewWorkdag(ms, ds)
+	// We can load a new index from store as well
+	idx, err = NewIndex(ds, ms)
 	require.NoError(t, err)
 
-	// Our index remembers the last commit
-	idx := wd.Index()
+	// it remembers the last commit
 	require.Equal(t, 1, len(idx.Refs))
 
 	// Now check if we can unpack it back into a list of files
@@ -135,7 +135,7 @@ func BenchmarkAdd(b *testing.B) {
 	ms, err := multistore.NewMultiDstore(ds)
 	require.NoError(b, err)
 
-	wd, err := NewWorkdag(ms, ds)
+	wd := NewWorkdag(ms)
 	require.NoError(b, err)
 
 	var filepaths []string
@@ -160,7 +160,8 @@ func TestWorkdagLFU(t *testing.T) {
 	ms, err := multistore.NewMultiDstore(ds)
 	require.NoError(t, err)
 
-	wd, err := NewWorkdag(ms, ds, WithBounds(512000, 500000))
+	idx, err := NewIndex(ds, ms, WithBounds(512000, 500000))
+	wd := NewWorkdag(ms)
 	require.NoError(t, err)
 
 	harness := &testutil.TestNode{}
@@ -175,7 +176,7 @@ func TestWorkdagLFU(t *testing.T) {
 
 	ref1, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref1))
+	require.NoError(t, idx.SetRef(ref1))
 
 	tx = wd.Tx(ctx)
 	fname3 := harness.CreateRandomFile(t, 44000)
@@ -187,11 +188,11 @@ func TestWorkdagLFU(t *testing.T) {
 
 	ref2, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref2))
+	require.NoError(t, idx.SetRef(ref2))
 
 	// Adding some reads
-	_, err = wd.Index().GetRef(ref2.PayloadCID)
-	_, err = wd.Index().GetRef(ref2.PayloadCID)
+	_, err = idx.GetRef(ref2.PayloadCID)
+	_, err = idx.GetRef(ref2.PayloadCID)
 
 	tx = wd.Tx(ctx)
 	// Now add a very large piece
@@ -205,18 +206,18 @@ func TestWorkdagLFU(t *testing.T) {
 
 	ref3, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref3))
+	require.NoError(t, idx.SetRef(ref3))
 
 	// Now our first ref should be evicted
-	_, err = wd.Index().GetRef(ref1.PayloadCID)
+	_, err = idx.GetRef(ref1.PayloadCID)
 	require.Error(t, err)
 
 	// But our second ref should still be around
-	_, err = wd.Index().GetRef(ref2.PayloadCID)
+	_, err = idx.GetRef(ref2.PayloadCID)
 	require.NoError(t, err)
 
 	// Test reinitializing the list from the stored frequencies
-	wd, err = NewWorkdag(ms, ds, WithBounds(512000, 500000))
+	idx, err = NewIndex(ds, ms, WithBounds(512000, 500000))
 	require.NoError(t, err)
 
 	tx = wd.Tx(ctx)
@@ -227,7 +228,7 @@ func TestWorkdagLFU(t *testing.T) {
 
 	ref4, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref4))
+	require.NoError(t, idx.SetRef(ref4))
 
 	tx = wd.Tx(ctx)
 	fname8 := harness.CreateRandomFile(t, 60000)
@@ -236,14 +237,14 @@ func TestWorkdagLFU(t *testing.T) {
 
 	ref5, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref5))
+	require.NoError(t, idx.SetRef(ref5))
 
 	// ref2 should still be around
-	_, err = wd.Index().GetRef(ref2.PayloadCID)
+	_, err = idx.GetRef(ref2.PayloadCID)
 	require.NoError(t, err)
 
 	// ref3 is gone
-	_, err = wd.Index().GetRef(ref3.PayloadCID)
+	_, err = idx.GetRef(ref3.PayloadCID)
 	require.Error(t, err)
 }
 
@@ -254,7 +255,8 @@ func TestWorkdagRace(t *testing.T) {
 	ms, err := multistore.NewMultiDstore(ds)
 	require.NoError(t, err)
 
-	wd, err := NewWorkdag(ms, ds, WithBounds(512000, 500000))
+	wd := NewWorkdag(ms)
+	idx, err := NewIndex(ds, ms, WithBounds(512000, 500000))
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -271,20 +273,22 @@ func TestWorkdagRace(t *testing.T) {
 			fname2 := harness.CreateRandomFile(t, 156000)
 			_, err = tx.Put(KeyFromPath(fname2), PutOptions{Path: fname2, ChunkSize: int64(1 << 10)})
 
-			_, err = tx.Commit()
+			ref, err := tx.Commit()
 			require.NoError(t, err)
+			require.NoError(t, idx.SetRef(ref))
 		}()
 	}
 	wg.Wait()
 }
 
-func TestWorkdagDropRef(t *testing.T) {
+func TestIndexDropRef(t *testing.T) {
 	ctx := context.Background()
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
 	ms, err := multistore.NewMultiDstore(ds)
 	require.NoError(t, err)
 
-	wd, err := NewWorkdag(ms, ds)
+	wd := NewWorkdag(ms)
+	idx, err := NewIndex(ds, ms)
 	require.NoError(t, err)
 
 	harness := &testutil.TestNode{}
@@ -298,10 +302,13 @@ func TestWorkdagDropRef(t *testing.T) {
 
 	ref, err := tx.Commit()
 	require.NoError(t, err)
-	require.NoError(t, wd.Index().SetRef(ref))
+	require.NoError(t, idx.SetRef(ref))
 
-	err = wd.Index().DropRef(ref.PayloadCID)
+	err = idx.DropRef(ref.PayloadCID)
 	require.NoError(t, err)
+
+	_, err = idx.GetRef(ref.PayloadCID)
+	require.Error(t, err)
 }
 
 func TestWorkdagStat(t *testing.T) {
@@ -310,9 +317,7 @@ func TestWorkdagStat(t *testing.T) {
 	ms, err := multistore.NewMultiDstore(ds)
 	require.NoError(t, err)
 
-	wd, err := NewWorkdag(ms, ds)
-	require.NoError(t, err)
-
+	wd := NewWorkdag(ms)
 	testCases := []struct {
 		name      string
 		dataSize  int
@@ -349,9 +354,8 @@ func TestWorkdagStat(t *testing.T) {
 
 			ref, err := tx.Commit()
 			require.NoError(t, err)
-			require.NoError(t, wd.Index().SetRef(ref))
 
-			stats, err := wd.Stat(ctx, ref.PayloadCID, AllSelector())
+			stats, err := wd.Stat(ctx, tx.Store(), ref.PayloadCID, AllSelector())
 			require.NoError(t, err)
 
 			require.Equal(t, testCase.numBlocks, stats.NumBlocks)

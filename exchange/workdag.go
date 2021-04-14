@@ -4,19 +4,15 @@ import (
 	"bytes"
 	"container/list"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"text/tabwriter"
 
 	"github.com/filecoin-project/go-multistore"
 	cid "github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
@@ -54,97 +50,16 @@ const (
 // although less convenient than SHA2, BLAKE2B seems to be more peformant in most cases
 const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 
-// Workdag manages our DAG operations. It stores a whole index of any content stored by the node.
-// It also implements a Least Frequently Used cache eviction mechanism to maintain storage withing given
-// bounds based on https://github.com/dgrijalva/lfu-go.
+// Workdag manages our DAG operations, it combines multiple DAGs into a single one for storage.
 type Workdag struct {
-	ms  *multistore.MultiStore
-	ds  datastore.Batching
-	ub  uint64
-	lb  uint64
-	idx *Index
-}
-
-// WorkdagOption customizes the behavior of the workdag directly
-type WorkdagOption func(*Workdag)
-
-// WithBounds sets the upper and lower bounds of the LFU store
-func WithBounds(up, lo uint64) WorkdagOption {
-	return func(wd *Workdag) {
-		wd.ub = up
-		wd.lb = lo
-	}
+	ms *multistore.MultiStore
 }
 
 // NewWorkdag instanciates a workdag, checks if we have a store ID and loads the right store
-func NewWorkdag(ms *multistore.MultiStore, ds datastore.Batching, opts ...WorkdagOption) (*Workdag, error) {
-	w := &Workdag{
-		ds: namespace.Wrap(ds, datastore.NewKey("/workdag")),
+func NewWorkdag(ms *multistore.MultiStore) *Workdag {
+	return &Workdag{
 		ms: ms,
 	}
-	for _, o := range opts {
-		o(w)
-	}
-	return w, w.loadIndex()
-}
-
-func (w *Workdag) loadIndex() error {
-	idx := &Index{
-		freqs: list.New(),
-		ub:    w.ub,
-		lb:    w.lb,
-		ds:    w.ds,
-		ms:    w.ms,
-	}
-
-	enc, err := w.ds.Get(datastore.NewKey(KIndex))
-	if err != nil && errors.Is(err, datastore.ErrNotFound) {
-		idx.Refs = make(map[string]*DataRef)
-	} else if err != nil {
-		return err
-	}
-	if err == nil {
-		var refs map[string]*DataRef
-		if err := json.Unmarshal(enc, &refs); err != nil {
-			return err
-		}
-		idx.Refs = refs
-	}
-
-	// Loads the ref frequencies in a doubly linked list for faster access
-refs:
-	for _, v := range idx.Refs {
-		idx.size += uint64(v.PayloadSize)
-		if e := idx.freqs.Front(); e == nil {
-			// insert the first element in the list
-			li := newListEntry(v.Freq)
-			li.entries[v] = 1
-			v.freqNode = idx.freqs.PushFront(li)
-			continue refs
-		}
-		for e := idx.freqs.Front(); e != nil; e = e.Next() {
-			le := e.Value.(*listEntry)
-			if le.freq == v.Freq {
-				le.entries[v] = 1
-				v.freqNode = e
-				continue refs
-			}
-			if le.freq > v.Freq {
-				li := newListEntry(v.Freq)
-				li.entries[v] = 1
-				v.freqNode = idx.freqs.InsertBefore(li, e)
-				continue refs
-			}
-		}
-		// if we're still here it means we're the highest frequency in the list so we
-		// insert it at the back
-		li := newListEntry(v.Freq)
-		li.entries[v] = 1
-		v.freqNode = idx.freqs.PushBack(li)
-	}
-
-	w.idx = idx
-	return nil
 }
 
 // Tx creates a new DAG transaction
@@ -481,12 +396,8 @@ type DAGStat struct {
 
 // Stat returns stats about a selected part of DAG given a cid
 // The cid must be registered in the index
-func (w *Workdag) Stat(ctx context.Context, root cid.Cid, sel ipld.Node) (DAGStat, error) {
+func (w *Workdag) Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.Node) (DAGStat, error) {
 	res := DAGStat{}
-	store, err := w.GetStore(root)
-	if err != nil {
-		return res, err
-	}
 	link := cidlink.Link{Cid: root}
 	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
 		return basicnode.Prototype.Any, nil
@@ -535,183 +446,4 @@ func (w *Workdag) Stat(ctx context.Context, root cid.Cid, sel ipld.Node) (DAGSta
 		return nil
 	})
 	return res, nil
-}
-
-// GetStoreID returns the StoreID of the store which has the given content
-func (w *Workdag) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
-	ref, err := w.idx.GetRef(id)
-	if err != nil {
-		return 0, err
-	}
-	return ref.StoreID, nil
-}
-
-// GetStore returns the store associated with a data CID
-func (w *Workdag) GetStore(id cid.Cid) (*multistore.Store, error) {
-	storeID, err := w.GetStoreID(id)
-	if err != nil {
-		return nil, err
-	}
-	return w.ms.Get(storeID)
-}
-
-// Index returns the stored workdag index
-func (w *Workdag) Index() *Index {
-	return w.idx
-}
-
-// Index contains the information about which objects are currently stored
-// the key is a CID.String()
-type Index struct {
-	ms *multistore.MultiStore
-	ds datastore.Batching
-	// Upper bound is the store usage amount afyer which we start evicting refs from the store
-	ub uint64
-	// Lower bound is the size we target when evicting to make room for new content
-	// the interval between ub and lb is to try not evicting after every write once we reach ub
-	lb uint64
-
-	mu sync.Mutex
-	// current size of content committed to the store
-	size uint64
-	// linked list keeps track of our frequencies to access as fast as possible
-	freqs *list.List
-	Refs  map[string]*DataRef
-}
-
-// Flush persists the Refs to the store
-func (idx *Index) Flush() error {
-	enc, err := json.Marshal(idx.Refs)
-	if err != nil {
-		return err
-	}
-
-	return idx.ds.Put(datastore.NewKey(KIndex), enc)
-}
-
-// DropRef removes all content linked to a root CID and associated Refs
-func (idx *Index) DropRef(k cid.Cid) error {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	if ref, ok := idx.Refs[k.String()]; ok {
-		idx.remEntry(ref.freqNode, ref)
-
-		err := idx.ms.Delete(ref.StoreID)
-		if err != nil {
-			return err
-		}
-
-		delete(idx.Refs, k.String())
-		return idx.Flush()
-	}
-	return ErrRefNotFound
-}
-
-// SetRef adds a ref in the index and increments the LFU queue
-func (idx *Index) SetRef(ref *DataRef) error {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	idx.Refs[ref.PayloadCID.String()] = ref
-	idx.size += uint64(ref.PayloadSize)
-	if idx.ub > 0 && idx.lb > 0 {
-		if idx.size > idx.ub {
-			idx.evict(idx.size - idx.lb)
-		}
-	}
-	// We evict the item before adding the new one
-	idx.increment(ref)
-	return idx.Flush()
-}
-
-// GetRef gets a ref in the index for a given root CID and increments the LFU list registering a Read
-func (idx *Index) GetRef(k cid.Cid) (*DataRef, error) {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	ref, ok := idx.Refs[k.String()]
-	if !ok {
-		return nil, ErrRefNotFound
-	}
-	idx.increment(ref)
-	return ref, idx.Flush()
-}
-
-type listEntry struct {
-	entries map[*DataRef]byte
-	freq    int64
-}
-
-func newListEntry(freq int64) *listEntry {
-	return &listEntry{
-		entries: make(map[*DataRef]byte),
-		freq:    freq,
-	}
-}
-
-func (idx *Index) increment(ref *DataRef) {
-	currentPlace := ref.freqNode
-	var nextFreq int64
-	var nextPlace *list.Element
-	if currentPlace == nil {
-		// new entry
-		nextFreq = 1
-		nextPlace = idx.freqs.Front()
-	} else {
-		// move up
-		nextFreq = currentPlace.Value.(*listEntry).freq + 1
-		nextPlace = currentPlace.Next()
-	}
-
-	if nextPlace == nil || nextPlace.Value.(*listEntry).freq != nextFreq {
-		// create a new list entry
-		li := &listEntry{
-			freq:    nextFreq,
-			entries: make(map[*DataRef]byte),
-		}
-		if currentPlace != nil {
-			nextPlace = idx.freqs.InsertAfter(li, currentPlace)
-		} else {
-			nextPlace = idx.freqs.PushFront(li)
-		}
-	}
-	ref.Freq = nextFreq
-	ref.freqNode = nextPlace
-	nextPlace.Value.(*listEntry).entries[ref] = 1
-	if currentPlace != nil {
-		// remove from current position
-		idx.remEntry(currentPlace, ref)
-	}
-}
-
-func (idx *Index) remEntry(place *list.Element, entry *DataRef) {
-	le := place.Value.(*listEntry)
-	entries := le.entries
-	delete(entries, entry)
-	if len(entries) == 0 {
-		idx.freqs.Remove(place)
-	}
-}
-
-func (idx *Index) evict(size uint64) uint64 {
-	// No lock here so it can be called
-	// from within the lock (during Set)
-	var evicted uint64
-	for evicted < size {
-		if place := idx.freqs.Front(); place != nil {
-			for entry := range place.Value.(*listEntry).entries {
-				if evicted < size {
-					delete(idx.Refs, entry.PayloadCID.String())
-
-					err := idx.ms.Delete(entry.StoreID)
-					if err != nil {
-						continue
-					}
-
-					idx.remEntry(place, entry)
-					evicted += uint64(entry.PayloadSize)
-					idx.size -= uint64(entry.PayloadSize)
-				}
-			}
-		}
-	}
-	return evicted
 }

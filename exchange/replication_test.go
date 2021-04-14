@@ -35,11 +35,11 @@ func TestReplication(t *testing.T) {
 		n := testutil.NewTestNode(mn, t, withSwarmT)
 		names[name] = n.Host.ID()
 		n.SetupDataTransfer(ctx, t)
-		wdg, err := NewWorkdag(n.Ms, n.Ds)
+		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
 		repl := NewReplication(
 			n.Host,
-			wdg,
+			idx,
 			n.Dt,
 			[]Region{global},
 		)
@@ -101,7 +101,7 @@ func TestReplication(t *testing.T) {
 		fname := nD.CreateRandomFile(t, 256000)
 		link, storeID, _ := nD.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rD.wd.Index().SetRef(&DataRef{
+		require.NoError(t, rD.idx.SetRef(&DataRef{
 			PayloadCID: rootCid,
 			StoreID:    storeID,
 		}))
@@ -122,7 +122,7 @@ func TestReplication(t *testing.T) {
 		fname := nF.CreateRandomFile(t, 256000)
 		link, storeID, _ := nF.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rF.wd.Index().SetRef(&DataRef{
+		require.NoError(t, rF.idx.SetRef(&DataRef{
 			PayloadCID: rootCid,
 			StoreID:    storeID,
 		}))
@@ -143,7 +143,7 @@ func TestReplication(t *testing.T) {
 		fname := nB.CreateRandomFile(t, 256000)
 		link, storeID, _ := nB.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rB.wd.Index().SetRef(&DataRef{
+		require.NoError(t, rB.idx.SetRef(&DataRef{
 			PayloadCID: rootCid,
 			StoreID:    storeID,
 		}))
@@ -164,7 +164,7 @@ func TestReplication(t *testing.T) {
 		fname := nH.CreateRandomFile(t, 256000)
 		link, storeID, _ := nH.LoadFileToNewStore(ctx, t, fname)
 		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rH.wd.Index().SetRef(&DataRef{
+		require.NoError(t, rH.idx.SetRef(&DataRef{
 			PayloadCID: rootCid,
 			StoreID:    storeID,
 		}))
@@ -209,13 +209,13 @@ func TestMultiRequestStreams(t *testing.T) {
 				},
 			}
 
-			wdg, err := NewWorkdag(n1.Ms, n1.Ds)
+			idx, err := NewIndex(n1.Ds, n1.Ms)
 			require.NoError(t, err)
-			hn := NewReplication(n1.Host, wdg, n1.Dt, regions)
-			wdg.Index().SetRef(&DataRef{
+			hn := NewReplication(n1.Host, idx, n1.Dt, regions)
+			require.NoError(t, idx.SetRef(&DataRef{
 				PayloadCID: rootCid,
 				StoreID:    storeID,
-			})
+			}))
 			sub, err := hn.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
 			require.NoError(t, err)
 			require.NoError(t, hn.Start(ctx))
@@ -230,9 +230,9 @@ func TestMultiRequestStreams(t *testing.T) {
 					err := tnode.Dt.Stop(ctx)
 					require.NoError(t, err)
 				})
-				wdg, err := NewWorkdag(tnode.Ms, tnode.Ds)
+				idx, err := NewIndex(tnode.Ds, tnode.Ms)
 				require.NoError(t, err)
-				hn1 := NewReplication(tnode.Host, wdg, tnode.Dt, regions)
+				hn1 := NewReplication(tnode.Host, idx, tnode.Dt, regions)
 				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
 				tnds[tnode.Host.ID()] = tnode
@@ -263,7 +263,7 @@ func TestMultiRequestStreams(t *testing.T) {
 
 			time.Sleep(time.Second)
 			for _, r := range recs {
-				store, err := receivers[r.Provider].wd.GetStore(rootCid)
+				store, err := receivers[r.Provider].idx.GetStore(rootCid)
 				require.NoError(t, err)
 				tnds[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 			}
@@ -294,13 +294,13 @@ func TestSendRequestNoPeers(t *testing.T) {
 		},
 	}
 
-	wdg, err := NewWorkdag(n1.Ms, n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, wdg, n1.Dt, regions)
-	wdg.Index().SetRef(&DataRef{
+	supply := NewReplication(n1.Host, idx, n1.Dt, regions)
+	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID: rootCid,
 		StoreID:    storeID,
-	})
+	}))
 	require.NoError(t, supply.Start(bgCtx))
 
 	options := DispatchOptions{
@@ -339,9 +339,9 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		Regions["Asia"],
 	}
 
-	wdg, err := NewWorkdag(n1.Ms, n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, wdg, n1.Dt, asia)
+	supply := NewReplication(n1.Host, idx, n1.Dt, asia)
 	sub, err := n1.Host.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
@@ -357,9 +357,9 @@ func TestSendRequestDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		wdg, err := NewWorkdag(n.Ms, n.Ds)
+		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
-		s := NewReplication(n.Host, wdg, n.Dt, asia)
+		s := NewReplication(n.Host, idx, n.Dt, asia)
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -381,11 +381,10 @@ func TestSendRequestDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		// Create a supply for each node
-		wdg, err := NewWorkdag(n.Ms, n.Ds)
+		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
 
-		s := NewReplication(n.Host, wdg, n.Dt, africa)
+		s := NewReplication(n.Host, idx, n.Dt, africa)
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
@@ -398,7 +397,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
-	require.NoError(t, wdg.Index().SetRef(&DataRef{
+	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID: rootCid,
 		StoreID:    storeID,
 	}))
@@ -424,7 +423,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		recipients = append(recipients, rec)
 	}
 	for _, p := range recipients {
-		store, err := asiaSupplies[p.Provider].wd.GetStore(rootCid)
+		store, err := asiaSupplies[p.Provider].idx.GetStore(rootCid)
 		require.NoError(t, err)
 
 		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
