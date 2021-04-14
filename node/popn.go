@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-commp-utils/writer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
@@ -26,6 +28,7 @@ import (
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-path"
+	"github.com/ipld/go-car"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -34,7 +37,6 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
-	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/filecoin/storage"
@@ -45,7 +47,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
 const unixfsLinksPerLevel = 1024
 const KLibp2pHost = "libp2p-host"
 
@@ -87,6 +88,8 @@ type Options struct {
 	// Regions is a list of regions a provider chooses to support.
 	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
 	Regions []string
+	// Capacity is the maxium storage capacity dedicated to the exchange
+	Capacity uint64
 }
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
@@ -109,8 +112,17 @@ type node struct {
 	mu     sync.Mutex
 	notify func(Notify)
 
-	qmu    sync.Mutex // mutex for the storage quote
+	// cache the last storage quote
+	qmu    sync.Mutex
 	sQuote *storage.Quote
+
+	// keep track of an ongoing transaction
+	txmu sync.Mutex
+	tx   *exchange.Tx
+
+	// keep track of the last added content
+	rmu     sync.Mutex
+	lastRef *exchange.DataRef
 }
 
 // New puts together all the components of the ipfs node
@@ -184,7 +196,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{opts.FilToken},
 		},
-		Regions: regions,
+		Regions:  regions,
+		Capacity: opts.Capacity,
 	}
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
@@ -320,12 +333,12 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		})
 	}
 
-	w, err := NewWorkdag(nd.ms, nd.ds)
-	if err != nil {
-		sendErr(err)
-		return
+	nd.txmu.Lock()
+	defer nd.txmu.Unlock()
+	if nd.tx == nil {
+		nd.tx = nd.exch.Workdag().Tx(ctx)
 	}
-	root, err := w.Add(ctx, AddOptions{
+	root, err := nd.tx.Put(exchange.KeyFromPath(args.Path), exchange.PutOptions{
 		Path:      args.Path,
 		ChunkSize: int64(args.ChunkSize),
 	})
@@ -335,7 +348,7 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 	}
 	// We could get the size from the index entry but DAGStat gives more feedback into
 	// how the file actually got chunked
-	stats, err := exchange.DAGStat(ctx, w.Store().Bstore, root, exchange.AllSelector())
+	stats, err := nd.exch.Workdag().Stat(ctx, nd.tx.Store(), root, exchange.AllSelector())
 	if err != nil {
 		log.Error().Err(err).Msg("record not found")
 	}
@@ -357,23 +370,23 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 			},
 		})
 	}
+	nd.txmu.Lock()
+	defer nd.txmu.Unlock()
+	if nd.tx != nil {
+		s, err := nd.tx.Status()
+		if err != nil {
+			sendErr(err)
+			return
+		}
 
-	w, err := NewWorkdag(nd.ms, nd.ds)
-	if err != nil {
-		sendErr(err)
+		nd.send(Notify{
+			StatusResult: &StatusResult{
+				Output: s.String(),
+			},
+		})
 		return
 	}
-	s, err := w.Status()
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	nd.send(Notify{
-		StatusResult: &StatusResult{
-			Output: s.String(),
-		},
-	})
+	sendErr(errors.New("no pending transaction"))
 }
 
 // Pack packages multiple unix FS dags into an archive for storage
@@ -387,27 +400,22 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 			},
 		})
 	}
-	w, err := NewWorkdag(nd.ms, nd.ds)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	status, err := w.Status()
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	if len(status) == 0 {
+	if nd.tx == nil {
 		sendErr(ErrNoDAGForPacking)
 		return
 	}
 
-	ref, err := w.Commit(ctx, CommitOptions{})
+	ref, err := nd.tx.Commit()
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	err = nd.exch.Registrar().Register(ref.PayloadCID, ref.StoreID)
+	piece, err := nd.archive(ctx, nd.tx.Store().DAG, ref.PayloadCID)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	err = nd.exch.Index().SetRef(ref)
 	if err != nil {
 		sendErr(err)
 		return
@@ -415,28 +423,19 @@ func (nd *node) Pack(ctx context.Context, args *PackArgs) {
 	nd.send(Notify{
 		PackResult: &PackResult{
 			DataCID:   ref.PayloadCID.String(),
-			DataSize:  ref.PayloadSize,
-			PieceCID:  ref.PieceCID.String(),
-			PieceSize: int64(ref.PieceSize),
+			DataSize:  piece.PayloadSize,
+			PieceCID:  piece.CID.String(),
+			PieceSize: int64(piece.PieceSize),
 		},
 	})
+	nd.rmu.Lock()
+	nd.lastRef = ref
+	nd.rmu.Unlock()
 }
 
 // getCommit is an internal function to select a commit with a given string cid
 // it is used when quoting the commit storage price or pushing to storage providers
-func (nd *node) getCommit(cstr string) (*DataRef, error) {
-	w, err := NewWorkdag(nd.ms, nd.ds)
-	if err != nil {
-		return nil, err
-	}
-	idx, err := w.Index()
-	if err != nil {
-		return nil, err
-	}
-	if len(idx.Commits) == 0 {
-		return nil, ErrDAGNotPacked
-	}
-	com := idx.Commits[len(idx.Commits)-1]
+func (nd *node) getCommit(cstr string) (*exchange.DataRef, error) {
 	// Select the commit with the matching CID
 	// TODO: should prob error out if we don't find it
 	if cstr != "" {
@@ -444,14 +443,20 @@ func (nd *node) getCommit(cstr string) (*DataRef, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, c := range idx.Commits {
-			if ccid.Equals(c.PayloadCID) {
-				com = c
-			}
+		ref, err := nd.exch.Index().PeekRef(ccid)
+		if err != nil {
+			return nil, err
 		}
+		return ref, nil
 	}
 
-	return com, nil
+	nd.rmu.Lock()
+	defer nd.rmu.Unlock()
+	if nd.lastRef != nil {
+		return nd.lastRef, nil
+	}
+
+	return nil, ErrDAGNotPacked
 }
 
 // Quote returns an estimation of market price for storing a commit on Filecoin
@@ -472,8 +477,19 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(err)
 		return
 	}
+	store, err := nd.ms.Get(com.StoreID)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	piece, err := nd.archive(ctx, store.DAG, com.PayloadCID)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
 	quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
-		PieceSize: uint64(com.PieceSize),
+		PieceSize: uint64(piece.PieceSize),
 		Duration:  args.Duration,
 		RF:        args.StorageRF,
 		MaxPrice:  args.MaxPrice,
@@ -611,7 +627,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		return
 	}
 	// Check our supply if we may already have it
-	sID, err := nd.exch.Registrar().GetStoreID(root)
+	sID, err := nd.exch.Index().GetStoreID(root)
 	if err == nil && args.Out != "" {
 		err := nd.export(ctx, root, segs[0], args.Out, sID)
 		if err != nil {
@@ -738,7 +754,11 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			}
 		}
 		// Register new blocks in our supply by default
-		err = nd.exch.Registrar().Register(c, session.StoreID())
+		err = nd.exch.Index().SetRef(&exchange.DataRef{
+			PayloadCID:  c,
+			StoreID:     session.StoreID(),
+			PayloadSize: int64(resp.Size),
+		})
 		if err != nil {
 			return err
 		}
@@ -756,12 +776,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 
 // extractFile from an archive
 func (nd *node) extractFile(ctx context.Context, root cid.Cid, name string, sid multistore.StoreID) (files.Node, error) {
-	w, err := NewWorkdag(nd.ms, nd.ds)
-	if err != nil {
-		return nil, err
-	}
-
-	fls, err := w.Unpack(ctx, root, sid)
+	fls, err := nd.exch.Workdag().Unpack(ctx, root, sid)
 	if err != nil {
 		return nil, err
 	}
@@ -824,4 +839,37 @@ func (nd *node) importAddress(pk string) {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
 	}
+}
+
+// PieceRef contains Filecoin metadata about a storage piece
+type PieceRef struct {
+	CID         cid.Cid
+	PayloadSize int64
+	PieceSize   abi.PaddedPieceSize
+}
+
+// archive a DAG into a CAR
+func (nd *node) archive(ctx context.Context, DAG ipldformat.DAGService, root cid.Cid) (*PieceRef, error) {
+	wr := &writer.Writer{}
+	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
+
+	err := car.WriteCar(ctx, DAG, []cid.Cid{root}, wr)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := bw.Flush(); err != nil {
+		return nil, err
+	}
+
+	dataCIDSize, err := wr.Sum()
+	if err != nil {
+		return nil, err
+	}
+
+	return &PieceRef{
+		CID:         dataCIDSize.PieceCID,
+		PayloadSize: dataCIDSize.PayloadSize,
+		PieceSize:   dataCIDSize.PieceSize,
+	}, nil
 }

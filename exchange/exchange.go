@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -36,8 +37,10 @@ type Exchange struct {
 	disco *GossipDisco
 	// Replication scheme
 	rpl *Replication
-	// Persist Metadata about content
-	meta *MetadataStore
+	// Index keeps track of all content stored under this exchange
+	idx *Index
+	// Workdag manipulates DAGs
+	wdg *Workdag
 }
 
 // New creates a long running exchange process from a libp2p host, an IPFS datastore and some optional
@@ -47,14 +50,23 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err != nil {
 		return nil, err
 	}
-	metads := NewMetadataStore(ds, opts.MultiStore)
+	idx, err := NewIndex(
+		ds,
+		opts.MultiStore,
+		// leave a 20% lower bound so we don't evict too frequently
+		WithBounds(opts.Capacity, opts.Capacity-uint64(math.Round(float64(opts.Capacity)*0.2))),
+	)
+	if err != nil {
+		return nil, err
+	}
 	// register a pubsub topic for each region
 	exch := &Exchange{
 		h:     h,
 		ds:    ds,
 		opts:  opts,
-		meta:  metads,
-		rpl:   NewReplication(h, metads, opts.DataTransfer, opts.Regions),
+		idx:   idx,
+		wdg:   NewWorkdag(opts.MultiStore),
+		rpl:   NewReplication(h, idx, opts.DataTransfer, opts.Regions),
 		disco: NewGossipDisco(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
@@ -71,7 +83,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		payments.New(ctx, opts.FilecoinAPI, exch.w, ds, opts.Blockstore),
 		opts.DataTransfer,
-		metads,
+		idx,
 		h.ID(),
 	)
 	if err != nil {
@@ -87,18 +99,17 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 }
 
 func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
-	store, err := e.meta.GetStore(q.PayloadCID)
+	store, err := e.idx.GetStore(q.PayloadCID)
 	if err != nil {
-		// TODO: we need to log when we couldn't find some content so we can try looking for it
-		return deal.QueryResponse{}, fmt.Errorf("no store found for %s: %w", q.PayloadCID, err)
+		return deal.QueryResponse{}, err
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
-	stats, err := DAGStat(ctx, store.Bstore, q.PayloadCID, AllSelector())
+	stats, err := e.wdg.Stat(ctx, store, q.PayloadCID, AllSelector())
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
-		return deal.QueryResponse{}, fmt.Errorf("%s failed to get content stat: %w", e.h.ID(), err)
+		return deal.QueryResponse{}, fmt.Errorf("%s content unavailable: %w", e.h.ID(), err)
 	}
 	resp := deal.QueryResponse{
 		Status:                     deal.QueryResponseAvailable,
@@ -159,11 +170,6 @@ func (e *Exchange) Wallet() wallet.Driver {
 	return e.w
 }
 
-// Registrar returns the metadata store API
-func (e *Exchange) Registrar() *MetadataStore {
-	return e.meta
-}
-
 // DataTransfer returns the data transfer manager instance for this exchange
 func (e *Exchange) DataTransfer() datatransfer.Manager {
 	return e.opts.DataTransfer
@@ -188,6 +194,16 @@ func (e *Exchange) Retrieval() retrieval.Manager {
 // R exposes replication scheme methods
 func (e *Exchange) R() *Replication {
 	return e.rpl
+}
+
+// Workdag exposes the workdag methods
+func (e *Exchange) Workdag() *Workdag {
+	return e.wdg
+}
+
+// Index returns the exchange data index
+func (e *Exchange) Index() *Index {
+	return e.idx
 }
 
 // ListMiners returns a list of miners based on the regions this exchange is part of
@@ -215,5 +231,5 @@ func (e *Exchange) ListMiners(ctx context.Context) ([]address.Address, error) {
 
 // GetStoreID exposes a method to get the store ID used by a given CID
 func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
-	return e.meta.GetStoreID(id)
+	return e.idx.GetStoreID(id)
 }
