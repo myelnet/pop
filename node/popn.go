@@ -88,6 +88,8 @@ type Options struct {
 	// Regions is a list of regions a provider chooses to support.
 	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
 	Regions []string
+	// Capacity is the maxium storage capacity dedicated to the exchange
+	Capacity uint64
 }
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
@@ -194,7 +196,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{opts.FilToken},
 		},
-		Regions: regions,
+		Regions:  regions,
+		Capacity: opts.Capacity,
 	}
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
