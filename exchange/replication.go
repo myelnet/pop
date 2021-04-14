@@ -75,7 +75,7 @@ type Replication struct {
 	dt        datatransfer.Manager
 	pm        *PeerMgr
 	hs        *HeyService
-	store     *MetadataStore
+	wd        *Workdag
 	rgs       []Region
 	reqProtos []protocol.ID
 
@@ -87,7 +87,7 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, metads *MetadataStore, dt datatransfer.Manager, rgs []Region) *Replication {
+func NewReplication(h host.Host, wd *Workdag, dt datatransfer.Manager, rgs []Region) *Replication {
 	pm := NewPeerMgr(h, rgs)
 	hs := NewHeyService(h, pm)
 	r := &Replication{
@@ -99,17 +99,17 @@ func NewReplication(h host.Host, metads *MetadataStore, dt datatransfer.Manager,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
 		schemes:   make(map[peer.ID]struct{}),
 		pulls:     make(map[cid.Cid]*peer.Set),
-		store:     metads,
+		wd:        wd,
 	}
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
-	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.store))
+	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.wd))
 
 	// TODO: clean this up
 	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
 		if event.Code == datatransfer.Error && channelState.Recipient() == h.ID() {
 			// If transfers fail and we're the recipient we need to remove it from our index
-			r.store.RemoveRecord(channelState.BaseCID())
+			r.wd.Index().DropRef(channelState.BaseCID())
 		}
 	})
 
@@ -162,11 +162,12 @@ func (r *Replication) handleRequest(s network.Stream) {
 	// TODO: validate request
 	// Create a new store to receive our new blocks
 	// It will be automatically picked up in the TransportConfigurer
-	storeID := r.store.ms.Next()
-	err = r.store.PutRecord(req.PayloadCID, &ContentRecord{Labels: map[string]string{
-		KStoreID: fmt.Sprintf("%d", storeID),
-		KSize:    fmt.Sprintf("%d", req.Size),
-	}})
+	storeID := r.wd.ms.Next()
+	err = r.wd.Index().SetRef(&DataRef{
+		PayloadCID:  req.PayloadCID,
+		PayloadSize: int64(req.Size),
+		StoreID:     storeID,
+	})
 	if err != nil {
 		return
 	}
@@ -357,7 +358,7 @@ type StoreConfigurableTransport interface {
 }
 
 // TransportConfigurer configurers the graphsync transport to use a custom blockstore per content
-func TransportConfigurer(s *MetadataStore) datatransfer.TransportConfigurer {
+func TransportConfigurer(wd *Workdag) datatransfer.TransportConfigurer {
 	return func(channelID datatransfer.ChannelID, voucher datatransfer.Voucher, transport datatransfer.Transport) {
 		warn := func(err error) {
 			fmt.Println("attempting to configure data store:", err)
@@ -370,7 +371,7 @@ func TransportConfigurer(s *MetadataStore) datatransfer.TransportConfigurer {
 		if !ok {
 			return
 		}
-		store, err := s.GetStore(request.PayloadCID)
+		store, err := wd.GetStore(request.PayloadCID)
 		if err != nil {
 			warn(err)
 			return

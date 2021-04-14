@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/filecoin-project/go-multistore"
@@ -57,49 +58,39 @@ func TestWorkdag(t *testing.T) {
 	wd, err := NewWorkdag(ms, ds)
 	require.NoError(t, err)
 
-	for i := 0; i < 6; i++ {
-		_, err := wd.Add(ctx, AddOptions{Path: filepaths[i], ChunkSize: int64(1 << 10)})
-		require.NoError(t, err)
-
-	}
-
-	status, err := wd.Status()
-	require.NoError(t, err)
-	require.Equal(t, 6, len(status))
-
-	// Should handle new instance
-	wd, err = NewWorkdag(ms, ds)
-	require.NoError(t, err)
-
-	for i := 6; i < 8; i++ {
-		_, err := wd.Add(ctx, AddOptions{Path: filepaths[i], ChunkSize: int64(1 << 10)})
+	tx := wd.Tx(ctx)
+	sID := tx.StoreID()
+	for _, p := range filepaths {
+		key := KeyFromPath(p)
+		_, err := tx.Put(key, PutOptions{Path: p, ChunkSize: int64(1 << 10)})
 		require.NoError(t, err)
 	}
 
-	// save the previous store ID
-	sID := wd.StoreID()
-
-	ref, err := wd.Commit(ctx, CommitOptions{})
+	status, err := tx.Status()
 	require.NoError(t, err)
+	require.Equal(t, len(filepaths), len(status))
 
-	_, err = wd.Add(ctx, AddOptions{Path: filepaths[0], ChunkSize: int64(1 << 10)})
+	ref, err := tx.Commit()
+	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref))
+
+	tx = wd.Tx(ctx)
+	_, err = tx.Put(KeyFromPath(filepaths[0]), PutOptions{Path: filepaths[0], ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
 	// We should have a new store with a single entry
-	status, err = wd.Status()
+	status, err = tx.Status()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(status))
 
-	require.NotEqual(t, sID, wd.StoreID())
+	require.NotEqual(t, sID, tx.StoreID())
 
 	// We can load a new workdag from store as well
 	wd, err = NewWorkdag(ms, ds)
 	require.NoError(t, err)
 
 	// Our index remembers the last commit
-	idx, err := wd.Index()
-	require.NoError(t, err)
-
+	idx := wd.Index()
 	require.Equal(t, 1, len(idx.Refs))
 
 	// Now check if we can unpack it back into a list of files
@@ -156,8 +147,9 @@ func BenchmarkAdd(b *testing.B) {
 	b.ResetTimer()
 	runtime.GC()
 
+	tx := wd.Tx(ctx)
 	for i := 0; i < b.N; i++ {
-		_, err := wd.Add(ctx, AddOptions{Path: filepaths[i], ChunkSize: int64(1 << 10)})
+		_, err := tx.Put(KeyFromPath(filepaths[i]), PutOptions{Path: filepaths[i], ChunkSize: int64(1 << 10)})
 		require.NoError(b, err)
 	}
 }
@@ -173,74 +165,200 @@ func TestWorkdagLFU(t *testing.T) {
 
 	harness := &testutil.TestNode{}
 
+	tx := wd.Tx(ctx)
 	fname1 := harness.CreateRandomFile(t, 100000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname1, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname1), PutOptions{Path: fname1, ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
 	fname2 := harness.CreateRandomFile(t, 156000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname2, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname2), PutOptions{Path: fname2, ChunkSize: int64(1 << 10)})
 
-	ref1, err := wd.Commit(ctx, CommitOptions{})
+	ref1, err := tx.Commit()
 	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref1))
 
+	tx = wd.Tx(ctx)
 	fname3 := harness.CreateRandomFile(t, 44000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname3, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname3), PutOptions{Path: fname3, ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
 	fname4 := harness.CreateRandomFile(t, 66000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname4, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname4), PutOptions{Path: fname4, ChunkSize: int64(1 << 10)})
 
-	ref2, err := wd.Commit(ctx, CommitOptions{})
+	ref2, err := tx.Commit()
 	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref2))
 
 	// Adding some reads
-	_, err = wd.GetRef(ref2.PayloadCID.String())
-	_, err = wd.GetRef(ref2.PayloadCID.String())
+	_, err = wd.Index().GetRef(ref2.PayloadCID)
+	_, err = wd.Index().GetRef(ref2.PayloadCID)
 
+	tx = wd.Tx(ctx)
 	// Now add a very large piece
 	fname5 := harness.CreateRandomFile(t, 256000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname5, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname5), PutOptions{Path: fname5, ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
 	fname6 := harness.CreateRandomFile(t, 100000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname6, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname6), PutOptions{Path: fname6, ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
-	ref3, err := wd.Commit(ctx, CommitOptions{})
+	ref3, err := tx.Commit()
 	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref3))
 
 	// Now our first ref should be evicted
-	_, err = wd.GetRef(ref1.PayloadCID.String())
+	_, err = wd.Index().GetRef(ref1.PayloadCID)
 	require.Error(t, err)
 
 	// But our second ref should still be around
-	_, err = wd.GetRef(ref2.PayloadCID.String())
+	_, err = wd.Index().GetRef(ref2.PayloadCID)
 	require.NoError(t, err)
 
 	// Test reinitializing the list from the stored frequencies
 	wd, err = NewWorkdag(ms, ds, WithBounds(512000, 500000))
 	require.NoError(t, err)
 
+	tx = wd.Tx(ctx)
 	// Add more stuff in there
 	fname7 := harness.CreateRandomFile(t, 20000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname7, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname7), PutOptions{Path: fname7, ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
-	_, err = wd.Commit(ctx, CommitOptions{})
+	ref4, err := tx.Commit()
 	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref4))
 
+	tx = wd.Tx(ctx)
 	fname8 := harness.CreateRandomFile(t, 60000)
-	_, err = wd.Add(ctx, AddOptions{Path: fname8, ChunkSize: int64(1 << 10)})
+	_, err = tx.Put(KeyFromPath(fname8), PutOptions{Path: fname8, ChunkSize: int64(1 << 10)})
 	require.NoError(t, err)
 
-	_, err = wd.Commit(ctx, CommitOptions{})
+	ref5, err := tx.Commit()
 	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref5))
 
 	// ref2 should still be around
-	_, err = wd.GetRef(ref2.PayloadCID.String())
+	_, err = wd.Index().GetRef(ref2.PayloadCID)
 	require.NoError(t, err)
 
 	// ref3 is gone
-	_, err = wd.GetRef(ref3.PayloadCID.String())
+	_, err = wd.Index().GetRef(ref3.PayloadCID)
 	require.Error(t, err)
+}
+
+// Testing this with race flag to detect any weirdness
+func TestWorkdagRace(t *testing.T) {
+	ctx := context.Background()
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	ms, err := multistore.NewMultiDstore(ds)
+	require.NoError(t, err)
+
+	wd, err := NewWorkdag(ms, ds, WithBounds(512000, 500000))
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			harness := &testutil.TestNode{}
+			tx := wd.Tx(ctx)
+			fname1 := harness.CreateRandomFile(t, 100000)
+			_, err := tx.Put(KeyFromPath(fname1), PutOptions{Path: fname1, ChunkSize: int64(1 << 10)})
+			require.NoError(t, err)
+
+			fname2 := harness.CreateRandomFile(t, 156000)
+			_, err = tx.Put(KeyFromPath(fname2), PutOptions{Path: fname2, ChunkSize: int64(1 << 10)})
+
+			_, err = tx.Commit()
+			require.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+}
+
+func TestWorkdagDropRef(t *testing.T) {
+	ctx := context.Background()
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	ms, err := multistore.NewMultiDstore(ds)
+	require.NoError(t, err)
+
+	wd, err := NewWorkdag(ms, ds)
+	require.NoError(t, err)
+
+	harness := &testutil.TestNode{}
+	tx := wd.Tx(ctx)
+	fname1 := harness.CreateRandomFile(t, 100000)
+	_, err = tx.Put(KeyFromPath(fname1), PutOptions{Path: fname1, ChunkSize: int64(1 << 10)})
+	require.NoError(t, err)
+
+	fname2 := harness.CreateRandomFile(t, 156000)
+	_, err = tx.Put(KeyFromPath(fname2), PutOptions{Path: fname2, ChunkSize: int64(1 << 10)})
+
+	ref, err := tx.Commit()
+	require.NoError(t, err)
+	require.NoError(t, wd.Index().SetRef(ref))
+
+	err = wd.Index().DropRef(ref.PayloadCID)
+	require.NoError(t, err)
+}
+
+func TestWorkdagStat(t *testing.T) {
+	ctx := context.Background()
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	ms, err := multistore.NewMultiDstore(ds)
+	require.NoError(t, err)
+
+	wd, err := NewWorkdag(ms, ds)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		dataSize  int
+		chunkSize int
+		numBlocks int
+	}{
+		{
+			name:      "Single block",
+			dataSize:  1000,
+			chunkSize: 1024,
+			numBlocks: 2,
+		},
+		{
+			name:      "Couple blocks",
+			dataSize:  2000,
+			chunkSize: 1024,
+			numBlocks: 4,
+		},
+		{
+			name:      "Many blocks",
+			dataSize:  256000,
+			chunkSize: 1024,
+			numBlocks: 252,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+
+			harness := &testutil.TestNode{}
+			tx := wd.Tx(ctx)
+			fname1 := harness.CreateRandomFile(t, testCase.dataSize)
+			_, err = tx.Put(KeyFromPath(fname1), PutOptions{Path: fname1, ChunkSize: int64(testCase.chunkSize)})
+			require.NoError(t, err)
+
+			ref, err := tx.Commit()
+			require.NoError(t, err)
+			require.NoError(t, wd.Index().SetRef(ref))
+
+			stats, err := wd.Stat(ctx, ref.PayloadCID, AllSelector())
+			require.NoError(t, err)
+
+			require.Equal(t, testCase.numBlocks, stats.NumBlocks)
+			// Size of the blocks isn't deterministic as the CID changes every time
+			// but we know it should be greater than the data size
+			require.Greater(t, stats.Size, testCase.dataSize)
+
+		})
+	}
 }
