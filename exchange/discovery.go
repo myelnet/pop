@@ -201,7 +201,7 @@ func (gd *GossipDisco) pump(ctx context.Context, sub *pubsub.Subscription, fn Re
 		}
 		resp, err := fn(ctx, msg.ReceivedFrom, r, *m)
 		if err != nil {
-			fmt.Println("delined query", err)
+			fmt.Println("declined query", err)
 			continue
 		}
 

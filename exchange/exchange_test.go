@@ -229,7 +229,11 @@ func TestExchangeE2E(t *testing.T) {
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
-			require.NoError(t, client.meta.Register(rootCid, storeID))
+			require.NoError(t, client.Index().SetRef(&DataRef{
+				PayloadCID:  rootCid,
+				StoreID:     storeID,
+				PayloadSize: int64(len(origBytes)),
+			}))
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
@@ -249,16 +253,16 @@ func TestExchangeE2E(t *testing.T) {
 
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
-				store, err := providers[r.Provider].meta.GetStore(rootCid)
+				store, err := providers[r.Provider].Index().GetStore(rootCid)
 				require.NoError(t, err)
 				pnodes[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 			}
 
-			err := client.meta.RemoveContent(rootCid)
+			err := client.Index().DropRef(rootCid)
 			require.NoError(t, err)
 
 			// Sanity check to make sure our client does not have a copy of our blocks
-			_, err = client.meta.GetStore(rootCid)
+			_, err = client.Index().GetStore(rootCid)
 			require.Error(t, err)
 
 			// Now we fetch it again from our providers

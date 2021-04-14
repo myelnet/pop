@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2"
@@ -25,6 +26,7 @@ type PopConfig struct {
 	temp        bool
 	privKeyPath string
 	regions     string
+	capacity    string
 	// Exported fields can be set by survey.Ask
 	Bootstrap    string `json:"bootstrap"`
 	FilEndpoint  string `json:"fil-endpoint"`
@@ -52,6 +54,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
+		fs.StringVar(&startArgs.capacity, "capacity", "10GB", "storage space allocated for the node")
 
 		return fs
 	})(),
@@ -136,6 +139,13 @@ Manage your Myel point of presence from the command line.
 		bAddrs = append(bAddrs, startArgs.Bootstrap)
 	}
 
+	var capacity uint64
+	if size, err := units.FromHumanSize(startArgs.capacity); err == nil {
+		capacity = uint64(size)
+	} else {
+		fmt.Println("failed to parse capacity")
+	}
+
 	opts := node.Options{
 		RepoPath:       path,
 		BootstrapPeers: bAddrs,
@@ -143,6 +153,7 @@ Manage your Myel point of presence from the command line.
 		FilToken:       filToken,
 		PrivKey:        privKey,
 		Regions:        regions,
+		Capacity:       capacity,
 	}
 
 	err = node.Run(ctx, opts)

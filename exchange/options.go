@@ -60,6 +60,10 @@ type Options struct {
 	GossipTracer *GossipTracer
 	// Regions is the geographic region this exchange should serve. Defaults to Global only.
 	Regions []Region
+	// Capacity is the maximum storage capacity in bytes this exchange can handle. Once we capacity is reached,
+	// least frequently used content is evicted to make more room for new content.
+	// Default is 10GB.
+	Capacity uint64
 }
 
 // Everything isn't thoroughly validated so we trust users who provide options know what they're doing
@@ -109,6 +113,10 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 			// We don't fail the initialization and continue without it
 			fmt.Println("failed to connect with lotus RPC", err)
 		}
+	}
+	if opts.Capacity == 0 {
+		// Default is 10GB
+		opts.Capacity = 10737418240
 	}
 	return opts, nil
 }

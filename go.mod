@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/AlecAivazis/survey/v2 v2.2.9
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
+	github.com/docker/go-units v0.4.0
 	github.com/filecoin-project/go-address v0.0.5-0.20201103152444-f2023ef3f5bb
 	github.com/filecoin-project/go-amt-ipld/v2 v2.1.1-0.20201006184820-924ee87a1349 // indirect
 	github.com/filecoin-project/go-bitfield v0.2.3-0.20201110211213-fe2c1862e816 // indirect
@@ -66,7 +67,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/stretchr/testify v1.6.1
 	github.com/supranational/blst v0.3.2
-	github.com/tchardin/go-libp2p-blankhost v0.2.1-0.20210408134851-9396bc83e200 // indirect
+	github.com/tchardin/go-libp2p-blankhost v0.2.1-0.20210408134851-9396bc83e200
 	github.com/urfave/cli/v2 v2.2.0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210219115102-f37d292932f2
 	github.com/xorcare/golden v0.6.1-0.20191112154924-b87f686d7542 // indirect
