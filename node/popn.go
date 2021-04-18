@@ -48,6 +48,8 @@ import (
 )
 
 const unixfsLinksPerLevel = 1024
+
+// KLibp2pHost is the keystore key used for storing the host private key
 const KLibp2pHost = "libp2p-host"
 
 // ErrFilecoinRPCOffline is returned when the node is running without a provided filecoin api endpoint + token
@@ -119,10 +121,6 @@ type node struct {
 	// keep track of an ongoing transaction
 	txmu sync.Mutex
 	tx   *exchange.Tx
-
-	// keep track of the last added content
-	rmu     sync.Mutex
-	lastRef *exchange.DataRef
 }
 
 // New puts together all the components of the ipfs node
@@ -324,7 +322,6 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 
 // Add a file to the Workdag
 func (nd *node) Add(ctx context.Context, args *AddArgs) {
-
 	sendErr := func(err error) {
 		nd.send(Notify{
 			AddResult: &AddResult{
@@ -336,25 +333,29 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 	nd.txmu.Lock()
 	defer nd.txmu.Unlock()
 	if nd.tx == nil {
-		nd.tx = nd.exch.Workdag().Tx(ctx)
+		nd.tx = nd.exch.Tx(ctx)
 	}
-	root, err := nd.tx.Put(exchange.KeyFromPath(args.Path), exchange.PutOptions{
-		Path:      args.Path,
-		ChunkSize: int64(args.ChunkSize),
-	})
+	nd.tx.SetChunkSize(int64(args.ChunkSize))
+	err := nd.tx.PutFile(args.Path)
 	if err != nil {
 		sendErr(err)
 		return
 	}
+	status, err := nd.tx.Status()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	froot := status[exchange.KeyFromPath(args.Path)].Cid
 	// We could get the size from the index entry but DAGStat gives more feedback into
 	// how the file actually got chunked
-	stats, err := nd.exch.Workdag().Stat(ctx, nd.tx.Store(), root, exchange.AllSelector())
+	stats, err := exchange.Stat(ctx, nd.tx.Store(), froot, exchange.AllSelector())
 	if err != nil {
 		log.Error().Err(err).Msg("record not found")
 	}
 	nd.send(Notify{
 		AddResult: &AddResult{
-			Cid:       root.String(),
+			Cid:       froot.String(),
 			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
 			NumBlocks: stats.NumBlocks,
 		}})
@@ -381,56 +382,13 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 
 		nd.send(Notify{
 			StatusResult: &StatusResult{
-				Output: s.String(),
+				RootCid: nd.tx.Root().String(),
+				Entries: s.String(),
 			},
 		})
 		return
 	}
 	sendErr(errors.New("no pending transaction"))
-}
-
-// Pack packages multiple unix FS dags into an archive for storage
-// it also registers it in our supply meaning from now on we can provide to
-// any peer trying to retrieve it
-func (nd *node) Pack(ctx context.Context, args *PackArgs) {
-	sendErr := func(err error) {
-		nd.send(Notify{
-			PackResult: &PackResult{
-				Err: err.Error(),
-			},
-		})
-	}
-	if nd.tx == nil {
-		sendErr(ErrNoDAGForPacking)
-		return
-	}
-
-	ref, err := nd.tx.Commit()
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	piece, err := nd.archive(ctx, nd.tx.Store().DAG, ref.PayloadCID)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	err = nd.exch.Index().SetRef(ref)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	nd.send(Notify{
-		PackResult: &PackResult{
-			DataCID:   ref.PayloadCID.String(),
-			DataSize:  piece.PayloadSize,
-			PieceCID:  piece.CID.String(),
-			PieceSize: int64(piece.PieceSize),
-		},
-	})
-	nd.rmu.Lock()
-	nd.lastRef = ref
-	nd.rmu.Unlock()
 }
 
 // getCommit is an internal function to select a commit with a given string cid
@@ -450,10 +408,10 @@ func (nd *node) getCommit(cstr string) (*exchange.DataRef, error) {
 		return ref, nil
 	}
 
-	nd.rmu.Lock()
-	defer nd.rmu.Unlock()
-	if nd.lastRef != nil {
-		return nd.lastRef, nil
+	nd.txmu.Lock()
+	defer nd.txmu.Unlock()
+	if nd.tx != nil {
+		return nd.tx.Ref(), nil
 	}
 
 	return nil, ErrDAGNotPacked
@@ -525,11 +483,23 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			},
 		})
 	}
-	com, err := nd.getCommit(args.Ref)
+	nd.txmu.Lock()
+	err := nd.tx.Commit()
 	if err != nil {
 		sendErr(err)
 		return
 	}
+	ref := nd.tx.Ref()
+	nd.tx.WatchDispatch(func(r exchange.PRecord) {
+		nd.send(Notify{
+			PushResult: &PushResult{
+				Caches: []string{
+					r.Provider.String(),
+				},
+			},
+		})
+	})
+	nd.txmu.Unlock()
 
 	if !args.CacheOnly && args.StorageRF > 0 {
 		if !nd.exch.IsFilecoinOnline() {
@@ -555,7 +525,7 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		}
 
 		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-			com.PayloadCID,
+			ref.PayloadCID,
 			args.Duration,
 			nd.exch.Wallet().DefaultAddress(),
 			miners,
@@ -580,29 +550,6 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 		})
 	}
 
-	if !args.NoCache && args.CacheRF > 0 {
-		// TODO: adjust timeout?
-		ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
-		defer cancel()
-
-		res := nd.exch.R().Dispatch(exchange.Request{
-			PayloadCID: com.PayloadCID,
-			Size:       uint64(com.PayloadSize),
-		}, exchange.DefaultDispatchOptions)
-		for rec := range res {
-			nd.send(Notify{
-				PushResult: &PushResult{
-					Caches: []string{
-						rec.Provider.String(),
-					},
-				},
-			})
-			if err != nil {
-				sendErr(ctx.Err())
-			}
-			return
-		}
-	}
 	// We shouldn't end up in this state as it's the command client role to
 	// validate we won't but just in case we return an empty result
 	nd.send(Notify{
@@ -626,24 +573,32 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		sendErr(err)
 		return
 	}
-	// Check our supply if we may already have it
-	sID, err := nd.exch.Index().GetStoreID(root)
-	if err == nil && args.Out != "" {
-		err := nd.export(ctx, root, segs[0], args.Out, sID)
+	// Check if we're trying to get from an ongoing transaction
+	nd.txmu.Lock()
+	if nd.tx != nil && nd.tx.Root() == root {
+		f, err := nd.tx.GetFile(segs[0])
 		if err != nil {
 			sendErr(err)
 			return
 		}
-	}
-	if err == nil {
+		if args.Out != "" {
+			err = files.WriteTo(f, args.Out)
+			if err != nil {
+				sendErr(err)
+				return
+			}
+		}
 		nd.send(Notify{
 			GetResult: &GetResult{
 				Local: true,
-			}})
+			},
+		})
 		return
 	}
+	nd.txmu.Unlock()
+
 	// Only support a single segment for now
-	args.Segments = segs
+	args.Key = segs[0]
 	// Log progress
 	if args.Verbose {
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
@@ -667,7 +622,24 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 
 // get is a synchronous content retrieval operation which can be called by a CLI request or HTTP
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
-	// TODO handle different predefined selectors
+	// Check our supply if we may already have it
+	f, err := nd.exch.Tx(ctx, exchange.WithRoot(c)).GetFile(args.Key)
+	if err == nil && args.Out != "" {
+		if err != nil {
+			return err
+		}
+		err = files.WriteTo(f, args.Out)
+		if err != nil {
+			return err
+		}
+	}
+	if err == nil {
+		nd.send(Notify{
+			GetResult: &GetResult{
+				Local: true,
+			}})
+		return nil
+	}
 
 	var strategy exchange.SelectionStrategy
 	switch args.Strategy {
@@ -681,11 +653,14 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		return errors.New("unknown strategy")
 	}
 
-	var err error
 	start := time.Now()
 
-	session := nd.exch.NewSession(ctx, c, strategy)
-
+	tx := nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy))
+	defer tx.Close()
+	if err := tx.Query(args.Key); err != nil {
+		return err
+	}
+	// We can query a specific miner on top of gossip
 	if args.Miner != "" {
 		miner, err := address.NewFromString(args.Miner)
 		if err != nil {
@@ -696,22 +671,16 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			// Maybe fall back to a discovery session?
 			return err
 		}
-
-		err = session.QueryFrom(*info)
-	}
-	if args.Miner == "" {
-		// Gossip discovery shouldn't last more than 5 seconds
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		err = session.Query(ctx)
-	}
-	if err != nil {
-		return err
+		err = tx.QueryFrom(*info, args.Key)
+		if err != nil {
+			// Maybe we shouldn't fail here, the transfer could still work with other peers
+			return err
+		}
 	}
 
-	// Checkout waits until we select the first offer it does not mean the first
+	// Triage waits until we select the first offer it might not mean the first
 	// offer that we receive depending on the strategy used
-	selection, err := session.Checkout()
+	selection, err := tx.Triage()
 	if err != nil {
 		return err
 	}
@@ -723,16 +692,16 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// confirmation before retrieving
 	selection.Incline()
 
-	var ref exchange.DealRef
+	var dref exchange.DealRef
 	select {
-	case ref = <-session.Ongoing():
+	case dref = <-tx.Ongoing():
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
 	nd.send(Notify{
 		GetResult: &GetResult{
-			DealID:       ref.ID.String(),
+			DealID:       dref.ID.String(),
 			TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
 			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
 			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
@@ -741,14 +710,18 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	})
 
 	select {
-	case err := <-session.Done():
+	case err := <-tx.Done():
 		if err != nil {
 			return err
 		}
 		end := time.Now()
 		transDuration := end.Sub(start) - discDuration
 		if args.Out != "" {
-			err := nd.export(ctx, c, args.Segments[0], args.Out, session.StoreID())
+			f, err := tx.GetFile(args.Key)
+			if err != nil {
+				return err
+			}
+			err = files.WriteTo(f, args.Out)
 			if err != nil {
 				return err
 			}
@@ -756,7 +729,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		// Register new blocks in our supply by default
 		err = nd.exch.Index().SetRef(&exchange.DataRef{
 			PayloadCID:  c,
-			StoreID:     session.StoreID(),
+			StoreID:     tx.StoreID(),
 			PayloadSize: int64(resp.Size),
 		})
 		if err != nil {
@@ -772,37 +745,6 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-// extractFile from an archive
-func (nd *node) extractFile(ctx context.Context, root cid.Cid, name string, sid multistore.StoreID) (files.Node, error) {
-	fls, err := nd.exch.Workdag().Unpack(ctx, root, sid)
-	if err != nil {
-		return nil, err
-	}
-
-	// We only support flat structures for now
-	// would rather not add mfs into the mix
-	file, ok := fls[name]
-	// This won't be necessary once we support selectors
-	// for now we have to retrieve a whole archive to access a single file
-	if !ok {
-		return nil, ErrNodeNotFound
-	}
-	return file, nil
-}
-
-// export extracts a given file from an archive and writes it to a given path
-func (nd *node) export(ctx context.Context, root cid.Cid, name, out string, sid multistore.StoreID) error {
-	file, err := nd.extractFile(ctx, root, name, sid)
-	if err != nil {
-		return err
-	}
-	err = files.WriteTo(file, out)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 // connPeers returns a list of connected peer IDs

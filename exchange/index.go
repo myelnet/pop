@@ -12,6 +12,12 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 )
 
+// ErrRefNotFound is returned when a given ref is not in the store
+var ErrRefNotFound = errors.New("ref not found")
+
+// KIndex is the datastore key for persisting the index of a workdag
+const KIndex = "idx"
+
 // Index contains the information about which objects are currently stored
 // the key is a CID.String().
 // It also implements a Least Frequently Used cache eviction mechanism to maintain storage withing given
@@ -33,6 +39,16 @@ type Index struct {
 	// linked list keeps track of our frequencies to access as fast as possible
 	freqs *list.List
 	Refs  map[string]*DataRef
+}
+
+// DataRef encapsulates information about a content committed for storage
+type DataRef struct {
+	PayloadCID  cid.Cid
+	PayloadSize int64
+	StoreID     multistore.StoreID
+	Freq        int64
+	// do not serialize
+	freqNode *list.Element
 }
 
 // IndexOption customizes the behavior of the index

@@ -87,7 +87,7 @@ func TestAdd(t *testing.T) {
 	<-added
 }
 
-func TestStatusAndPack(t *testing.T) {
+func TestAddGet(t *testing.T) {
 	ctx := context.Background()
 	mn := mocknet.New(ctx)
 
@@ -132,20 +132,10 @@ func TestStatusAndPack(t *testing.T) {
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.StatusResult.Err, "")
 
-		stat <- n.StatusResult.Output
+		stat <- n.StatusResult.RootCid
 	}
 	cn.Status(ctx, &StatusArgs{})
-	<-stat
-
-	pac := make(chan string, 1)
-	cn.notify = func(n Notify) {
-		require.Equal(t, n.PackResult.Err, "")
-
-		pac <- n.PackResult.DataCID
-	}
-	cn.Pack(ctx, &PackArgs{})
-	out := <-pac
-	require.NotEqual(t, out, "")
+	out := <-stat
 
 	// Export back out
 	path := fmt.Sprintf("/%s/data2", out)
@@ -157,8 +147,10 @@ func TestStatusAndPack(t *testing.T) {
 	}
 	newp := filepath.Join(dir, "newdata2")
 	cn.Get(ctx, &GetArgs{
-		Cid: path,
-		Out: newp,
+		Cid:      path,
+		Out:      newp,
+		Strategy: "SelectFirst",
+		Timeout:  1,
 	})
 	<-loc
 
