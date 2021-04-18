@@ -39,8 +39,6 @@ type Exchange struct {
 	rpl *Replication
 	// Index keeps track of all content stored under this exchange
 	idx *Index
-	// Workdag manipulates DAGs
-	wdg *Workdag
 }
 
 // New creates a long running exchange process from a libp2p host, an IPFS datastore and some optional
@@ -65,7 +63,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds:    ds,
 		opts:  opts,
 		idx:   idx,
-		wdg:   NewWorkdag(opts.MultiStore),
 		rpl:   NewReplication(h, idx, opts.DataTransfer, opts.Regions),
 		disco: NewGossipDisco(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
@@ -105,7 +102,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
-	stats, err := e.wdg.Stat(ctx, store, q.PayloadCID, AllSelector())
+	stats, err := Stat(ctx, store, q.PayloadCID, AllSelector())
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
@@ -125,14 +122,14 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	return resp, nil
 }
 
-// NewSession returns a new retrieval session
-func (e *Exchange) NewSession(ctx context.Context, root cid.Cid, strategy SelectionStrategy) *Session {
+// Tx returns a new transaction
+func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
 	// Track when the session is completed
 	done := make(chan error)
 	// Track any issues with the transfer
-	err := make(chan deal.Status)
+	errs := make(chan deal.Status)
 	// Subscribe to client events to send to the channel
 	cl := e.rtv.Client()
 	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
@@ -141,28 +138,38 @@ func (e *Exchange) NewSession(ctx context.Context, root cid.Cid, strategy Select
 			done <- nil
 			return
 		case deal.StatusCancelled, deal.StatusErrored:
-			err <- state.Status
+			errs <- state.Status
 			return
 		}
 	})
-	session := &Session{
+	ms := e.opts.MultiStore
+	storeID := ms.Next()
+	store, err := ms.Get(storeID)
+	tx := &Tx{
 		ctx:        ctx,
 		cancelCtx:  cancel,
+		ms:         e.opts.MultiStore,
 		disco:      e.disco,
-		root:       root,
 		retriever:  cl,
+		index:      e.idx,
+		repl:       e.rpl,
+		chunkSize:  256000,
 		clientAddr: e.w.DefaultAddress(),
 		done:       done,
-		err:        err,
+		errs:       errs,
 		ongoing:    make(chan DealRef),
-		selecting:  make(chan DealSelection),
-		unsub:      unsubscribe,
-		// We create a fresh new store for this session
-		storeID: e.opts.MultiStore.Next(),
+		// Triage should be manually activated with WithTriage option
+		// triage:  make(chan DealSelection),
+		entries: make(map[string]Entry),
+		unsub:   unsubscribe,
+		storeID: storeID,
+		store:   store,
+		Err:     err,
 	}
-	session.worker = strategy(session)
-	session.worker.Start()
-	return session
+	for _, opt := range opts {
+		opt(tx)
+	}
+	return tx
 }
 
 // Wallet returns the wallet API
@@ -194,11 +201,6 @@ func (e *Exchange) Retrieval() retrieval.Manager {
 // R exposes replication scheme methods
 func (e *Exchange) R() *Replication {
 	return e.rpl
-}
-
-// Workdag exposes the workdag methods
-func (e *Exchange) Workdag() *Workdag {
-	return e.wdg
 }
 
 // Index returns the exchange data index

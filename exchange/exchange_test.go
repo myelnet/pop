@@ -266,29 +266,29 @@ func TestExchangeE2E(t *testing.T) {
 			require.Error(t, err)
 
 			// Now we fetch it again from our providers
-			session := client.NewSession(ctx, rootCid, SelectFirst)
-			defer session.Close()
+			tx := client.Tx(ctx, WithRoot(rootCid), WithStrategy(SelectFirst), WithTriage())
+			defer tx.Close()
 
-			err = session.Query(ctx)
+			err = tx.Query("")
 			require.NoError(t, err)
 
-			selected, err := session.Checkout()
+			selected, err := tx.Triage()
 			require.NoError(t, err)
 
 			selected.Incline()
 
-			ref := <-session.Ongoing()
+			ref := <-tx.Ongoing()
 			require.NoError(t, err)
 			require.NotEqual(t, ref.ID, deal.ID(0))
 
 			select {
-			case err := <-session.Done():
+			case err := <-tx.Done():
 				require.NoError(t, err)
 			case <-ctx.Done():
 				t.Fatal("failed to finish sync")
 			}
 
-			store, err := cnode.Ms.Get(session.StoreID())
+			store, err := cnode.Ms.Get(tx.StoreID())
 			require.NoError(t, err)
 			// And we verify we got the file back
 			cnode.VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)

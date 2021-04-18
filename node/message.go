@@ -30,11 +30,6 @@ type StatusArgs struct {
 	Verbose bool
 }
 
-// PackArgs are passed to the Pack command
-type PackArgs struct {
-	Archive bool
-}
-
 // QuoteArgs are passed to the quote command
 type QuoteArgs struct {
 	Ref       string
@@ -57,7 +52,7 @@ type PushArgs struct {
 // GetArgs get passed to the Get command
 type GetArgs struct {
 	Cid      string
-	Segments []string
+	Key      string
 	Sel      string
 	Out      string
 	Timeout  int
@@ -71,7 +66,6 @@ type Command struct {
 	Ping   *PingArgs
 	Add    *AddArgs
 	Status *StatusArgs
-	Pack   *PackArgs
 	Quote  *QuoteArgs
 	Push   *PushArgs
 	Get    *GetArgs
@@ -96,17 +90,9 @@ type AddResult struct {
 
 // StatusResult gives us the result of status request to pring
 type StatusResult struct {
-	Output string
-	Err    string
-}
-
-// PackResult gives us feedback on the result of the Commit operation
-type PackResult struct {
-	DataCID   string
-	DataSize  int64
-	PieceCID  string
-	PieceSize int64
-	Err       string
+	RootCid string
+	Entries string
+	Err     string
 }
 
 // QuoteResult returns the output of the Quote request
@@ -143,7 +129,6 @@ type Notify struct {
 	PingResult   *PingResult
 	AddResult    *AddResult
 	StatusResult *StatusResult
-	PackResult   *PackResult
 	QuoteResult  *QuoteResult
 	PushResult   *PushResult
 	GetResult    *GetResult
@@ -184,10 +169,6 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Status; c != nil {
 		cs.n.Status(ctx, c)
-		return nil
-	}
-	if c := cmd.Pack; c != nil {
-		cs.n.Pack(ctx, c)
 		return nil
 	}
 	if c := cmd.Quote; c != nil {
@@ -269,10 +250,6 @@ func (cc *CommandClient) Add(args *AddArgs) {
 
 func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
-}
-
-func (cc *CommandClient) Pack(args *PackArgs) {
-	cc.send(Command{Pack: args})
 }
 
 func (cc *CommandClient) Quote(args *QuoteArgs) {

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/ipfs/go-datastore"
 	files "github.com/ipfs/go-ipfs-files"
 	ipath "github.com/ipfs/go-path"
+	"github.com/myelnet/pop/exchange"
 	"github.com/rs/zerolog/log"
 )
 
@@ -146,34 +146,16 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	// Check if we have the blocks locally
-	sID, err := s.node.exch.Index().GetStoreID(root)
+	// try to retrieve the blocks
+	err = s.node.get(r.Context(), root, &GetArgs{Key: segs[0]})
 	if err != nil {
-		if err == datastore.ErrNotFound {
-			// try to retrieve the blocks
-			err = s.node.get(r.Context(), root, &GetArgs{})
-			if err != nil {
-				// TODO: give better feedback into what went wrong
-				http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
-				return
-			}
-
-			// If all went well we should have the blocks now
-			sID, err = s.node.exch.Index().GetStoreID(root)
-			if err != nil {
-				http.Error(w, "Unable to find content", http.StatusNotFound)
-				return
-			}
-
-		} else {
-			http.Error(w, "Unable to find content", http.StatusNotFound)
-			return
-		}
-
+		// TODO: give better feedback into what went wrong
+		http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
+		return
 	}
-	fnd, err := s.node.extractFile(r.Context(), root, segs[0], sID)
+	fnd, err := s.node.exch.Tx(r.Context(), exchange.WithRoot(root)).GetFile(segs[0])
 	if err != nil {
-		http.Error(w, "Unable to create unix files", http.StatusInternalServerError)
+		http.Error(w, "Failed to read file from store", http.StatusInternalServerError)
 		return
 	}
 
