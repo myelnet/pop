@@ -37,7 +37,6 @@ change in the future. To get started run 'pop start'.
 			pingCmd,
 			addCmd,
 			statusCmd,
-			packCmd,
 			pushCmd,
 			getCmd,
 		},

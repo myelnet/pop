@@ -40,13 +40,13 @@ func runStatus(ctx context.Context, args []string) error {
 		if sr.Err != "" {
 			return errors.New(sr.Err)
 		}
-		if sr.Output == "" {
+		if sr.Entries == "" {
 			fmt.Printf("Nothing to pack, workdag clean.\n")
 			return nil
 		}
 		fmt.Printf("Staged for storage:\n")
 		// Output is already formatted but should move it here
-		fmt.Printf("%s\n", sr.Output)
+		fmt.Printf("%s\n", sr.Entries)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
