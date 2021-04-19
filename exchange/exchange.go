@@ -127,7 +127,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
 	// Track when the session is completed
-	done := make(chan error)
+	done := make(chan error, 1)
 	// Track any issues with the transfer
 	errs := make(chan deal.Status)
 	// Subscribe to client events to send to the channel

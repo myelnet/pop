@@ -73,7 +73,6 @@ func (hs *HeyService) Run(ctx context.Context) error {
 			pic := evt.(event.EvtPeerIdentificationCompleted)
 			go func() {
 				if err := hs.SendHey(ctx, pic.Peer); err != nil {
-					fmt.Println("failed to send hey", err)
 					return
 				}
 			}()

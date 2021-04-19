@@ -112,6 +112,7 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 		if err != nil {
 			// We don't fail the initialization and continue without it
 			fmt.Println("failed to connect with lotus RPC", err)
+			opts.FilecoinAPI = nil
 		}
 	}
 	if opts.Capacity == 0 {

@@ -320,11 +320,11 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	}
 }
 
-// Add a file to the Workdag
-func (nd *node) Add(ctx context.Context, args *AddArgs) {
+// Put a file into a new or pending transaction
+func (nd *node) Put(ctx context.Context, args *PutArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
-			AddResult: &AddResult{
+			PutResult: &PutResult{
 				Err: err.Error(),
 			},
 		})
@@ -354,10 +354,11 @@ func (nd *node) Add(ctx context.Context, args *AddArgs) {
 		log.Error().Err(err).Msg("record not found")
 	}
 	nd.send(Notify{
-		AddResult: &AddResult{
+		PutResult: &PutResult{
 			Cid:       froot.String(),
 			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
 			NumBlocks: stats.NumBlocks,
+			Root:      nd.tx.Root().String(),
 		}})
 }
 
@@ -391,9 +392,9 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	sendErr(errors.New("no pending transaction"))
 }
 
-// getCommit is an internal function to select a commit with a given string cid
+// getRef is an internal function to find a ref with a given string cid
 // it is used when quoting the commit storage price or pushing to storage providers
-func (nd *node) getCommit(cstr string) (*exchange.DataRef, error) {
+func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
 	// Select the commit with the matching CID
 	// TODO: should prob error out if we don't find it
 	if cstr != "" {
@@ -430,7 +431,7 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(ErrFilecoinRPCOffline)
 		return
 	}
-	com, err := nd.getCommit(args.Ref)
+	com, err := nd.getRef(args.Ref)
 	if err != nil {
 		sendErr(err)
 		return
@@ -474,16 +475,17 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 	})
 }
 
-// Push deploys a committed DAG archive for storage
-func (nd *node) Push(ctx context.Context, args *PushArgs) {
+// Commit a content transaction for storage
+func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
-			PushResult: &PushResult{
+			CommResult: &CommResult{
 				Err: err.Error(),
 			},
 		})
 	}
 	nd.txmu.Lock()
+	nd.tx.SetCacheRF(args.CacheRF)
 	err := nd.tx.Commit()
 	if err != nil {
 		sendErr(err)
@@ -492,13 +494,15 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 	ref := nd.tx.Ref()
 	nd.tx.WatchDispatch(func(r exchange.PRecord) {
 		nd.send(Notify{
-			PushResult: &PushResult{
+			CommResult: &CommResult{
 				Caches: []string{
 					r.Provider.String(),
 				},
 			},
 		})
 	})
+	nd.tx.Close()
+	nd.tx = nil
 	nd.txmu.Unlock()
 
 	if !args.CacheOnly && args.StorageRF > 0 {
@@ -538,23 +542,17 @@ func (nd *node) Push(ctx context.Context, args *PushArgs) {
 			sendErr(ErrAllDealsFailed)
 			return
 		}
-		var pr PushResult
+		var cr CommResult
 		for _, m := range rcpt.Miners {
-			pr.Miners = append(pr.Miners, m.String())
+			cr.Miners = append(cr.Miners, m.String())
 		}
 		for _, d := range rcpt.DealRefs {
-			pr.Deals = append(pr.Deals, d.String())
+			cr.Deals = append(cr.Deals, d.String())
 		}
 		nd.send(Notify{
-			PushResult: &pr,
+			CommResult: &cr,
 		})
 	}
-
-	// We shouldn't end up in this state as it's the command client role to
-	// validate we won't but just in case we return an empty result
-	nd.send(Notify{
-		PushResult: &PushResult{},
-	})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli
@@ -655,7 +653,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 
 	start := time.Now()
 
-	tx := nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy))
+	tx := nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
 	defer tx.Close()
 	if err := tx.Query(args.Key); err != nil {
 		return err
