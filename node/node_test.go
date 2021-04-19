@@ -360,6 +360,8 @@ func TestGet(t *testing.T) {
 	_ = newTestNode(bgCtx, mn, t)
 	_ = newTestNode(bgCtx, mn, t)
 	_ = newTestNode(bgCtx, mn, t)
+	_ = newTestNode(bgCtx, mn, t)
+	_ = newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
