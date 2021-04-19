@@ -19,8 +19,8 @@ type PingArgs struct {
 	Addr string
 }
 
-// AddArgs get passed to the Add command
-type AddArgs struct {
+// PutArgs get passed to the Put command
+type PutArgs struct {
 	Path      string
 	ChunkSize int
 }
@@ -38,10 +38,9 @@ type QuoteArgs struct {
 	MaxPrice  uint64
 }
 
-// PushArgs are passed to the Push command
-type PushArgs struct {
+// CommArgs are passed to the Commit command
+type CommArgs struct {
 	Ref       string // Ref is the root CID of the archive to push to remote storage
-	NoCache   bool
 	CacheOnly bool
 	CacheRF   int // CacheRF is the cache replication factor or number of cache provider will request
 	StorageRF int // StorageRF if the replication factor for storage
@@ -64,10 +63,10 @@ type GetArgs struct {
 // Command is a message sent from a client to the daemon
 type Command struct {
 	Ping   *PingArgs
-	Add    *AddArgs
+	Put    *PutArgs
 	Status *StatusArgs
 	Quote  *QuoteArgs
-	Push   *PushArgs
+	Commit *CommArgs
 	Get    *GetArgs
 }
 
@@ -80,11 +79,12 @@ type PingResult struct {
 	Err            string
 }
 
-// AddResult gives us feedback on the result of the Add request
-type AddResult struct {
+// PutResult gives us feedback on the result of the Put request
+type PutResult struct {
 	Cid       string
 	Size      string
 	NumBlocks int
+	Root      string
 	Err       string
 }
 
@@ -102,8 +102,8 @@ type QuoteResult struct {
 	Err    string
 }
 
-// PushResult is feedback on the push operation
-type PushResult struct {
+// CommResult is feedback on the push operation
+type CommResult struct {
 	Miners []string
 	Deals  []string
 	Caches []string
@@ -127,10 +127,10 @@ type GetResult struct {
 // Notify is a message sent from the daemon to the client
 type Notify struct {
 	PingResult   *PingResult
-	AddResult    *AddResult
+	PutResult    *PutResult
 	StatusResult *StatusResult
 	QuoteResult  *QuoteResult
-	PushResult   *PushResult
+	CommResult   *CommResult
 	GetResult    *GetResult
 }
 
@@ -163,8 +163,8 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.Ping(ctx, c.Addr)
 		return nil
 	}
-	if c := cmd.Add; c != nil {
-		cs.n.Add(ctx, c)
+	if c := cmd.Put; c != nil {
+		cs.n.Put(ctx, c)
 		return nil
 	}
 	if c := cmd.Status; c != nil {
@@ -175,10 +175,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.Quote(ctx, c)
 		return nil
 	}
-	if c := cmd.Push; c != nil {
+	if c := cmd.Commit; c != nil {
 		// push requests are usually quite long so we don't block the thread so users
-		// can keep adding to the workdag while their previous commit is uploading for example
-		go cs.n.Push(ctx, c)
+		// can start a new transaction while their previous commit is uploading for example
+		go cs.n.Commit(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -244,8 +244,8 @@ func (cc *CommandClient) Ping(addr string) {
 	cc.send(Command{Ping: &PingArgs{Addr: addr}})
 }
 
-func (cc *CommandClient) Add(args *AddArgs) {
-	cc.send(Command{Add: args})
+func (cc *CommandClient) Put(args *PutArgs) {
+	cc.send(Command{Put: args})
 }
 
 func (cc *CommandClient) Status(args *StatusArgs) {
@@ -256,8 +256,8 @@ func (cc *CommandClient) Quote(args *QuoteArgs) {
 	cc.send(Command{Quote: args})
 }
 
-func (cc *CommandClient) Push(args *PushArgs) {
-	cc.send(Command{Push: args})
+func (cc *CommandClient) Commit(args *CommArgs) {
+	cc.send(Command{Commit: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {

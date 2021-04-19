@@ -35,9 +35,9 @@ change in the future. To get started run 'pop start'.
 		Subcommands: []*ffcli.Command{
 			startCmd,
 			pingCmd,
-			addCmd,
+			putCmd,
 			statusCmd,
-			pushCmd,
+			commCmd,
 			getCmd,
 		},
 		FlagSet: rootfs,

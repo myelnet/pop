@@ -79,6 +79,8 @@ type Tx struct {
 	size int64
 	// chunk size is the chunk size to use when adding files
 	chunkSize int64
+	// cacheRF is the cache replication factor used when committing to storage
+	cacheRF int
 	// sel is the selector used to select specific nodes only to retrieve. if not provided we select
 	// all the nodes by default
 	sel iprime.Node
@@ -133,6 +135,12 @@ func WithTriage() TxOption {
 // can be applied for different types of content in the same transaction
 func (tx *Tx) SetChunkSize(size int64) {
 	tx.chunkSize = size
+}
+
+// SetCacheRF sets the cache replication factor before committing
+// we don't set it as an option as the value may only be known when committing
+func (tx *Tx) SetCacheRF(rf int) {
+	tx.cacheRF = rf
 }
 
 // PutFile adds or replaces a file into the transaction
@@ -355,10 +363,14 @@ func (tx *Tx) Commit() error {
 	if err != nil {
 		return err
 	}
+	opts := DefaultDispatchOptions
+	if tx.cacheRF > 0 {
+		opts.RF = tx.cacheRF
+	}
 	tx.dispatching = tx.repl.Dispatch(Request{
 		PayloadCID: tx.root,
 		Size:       uint64(tx.size),
-	}, DefaultDispatchOptions)
+	}, opts)
 	return nil
 }
 
