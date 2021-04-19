@@ -15,8 +15,7 @@ import (
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
-var pushArgs struct {
-	noCache   bool
+var commArgs struct {
 	cacheOnly bool
 	cacheRF   int
 	storageRF int
@@ -24,35 +23,30 @@ var pushArgs struct {
 	maxPrice  uint64
 }
 
-var pushCmd = &ffcli.Command{
-	Name:       "push",
-	ShortUsage: "push <archive-cid>",
-	ShortHelp:  "Push a DAG archive to storage",
+var commCmd = &ffcli.Command{
+	Name:       "commit",
+	ShortUsage: "commit",
+	ShortHelp:  "Commit a DAG transaction to storage",
 	LongHelp: strings.TrimSpace(`
 
-The 'pop push' command deploys a DAG archive previously generated using 'pop commit' on the Filecoin storage
-with a default level of cashing. By default it will attempt multiple storage deals for 6 months with caching in the initial regions. Passing no commit CID will result in selecting the last generated commit.
+The 'pop commit' command deploys a DAG archive initialized with one or multiple 'put' on the Filecoin storage
+with a given level of cashing. By default it will attempt multiple storage deals for 6 months with caching in the initial regions.
 
 `),
-	Exec: runPush,
+	Exec: runCommit,
 	FlagSet: (func() *flag.FlagSet {
-		fs := flag.NewFlagSet("push", flag.ExitOnError)
-		fs.IntVar(&pushArgs.cacheRF, "cache-rf", 6, "number of cache providers to dispatch to")
-		fs.IntVar(&pushArgs.storageRF, "storage-rf", 6, "number of storage providers to start deals with")
-		fs.DurationVar(&pushArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
-		fs.BoolVar(&pushArgs.noCache, "no-cache", false, "prevents node from dispatching content to cache providers")
-		fs.BoolVar(&pushArgs.cacheOnly, "cache-only", false, "only dispatch content for caching")
+		fs := flag.NewFlagSet("commit", flag.ExitOnError)
+		fs.IntVar(&commArgs.cacheRF, "cache-rf", 6, "number of cache providers to dispatch to")
+		fs.IntVar(&commArgs.storageRF, "storage-rf", 6, "number of storage providers to start deals with")
+		fs.DurationVar(&commArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
+		fs.BoolVar(&commArgs.cacheOnly, "cache-only", false, "only dispatch content for caching")
 		// MaxStoragePrice is our price ceiling to filter out bad storage miners who charge too much
-		fs.Uint64Var(&pushArgs.maxPrice, "max-storage-price", uint64(20_000_000_000), "maximum price per byte our node is willing to pay for storage")
+		fs.Uint64Var(&commArgs.maxPrice, "max-storage-price", uint64(20_000_000_000), "maximum price per byte our node is willing to pay for storage")
 		return fs
 	})(),
 }
 
-func runPush(ctx context.Context, args []string) error {
-	if pushArgs.noCache && pushArgs.cacheOnly {
-		return errors.New("no-cache and cache-only are incompatible")
-	}
-
+func runCommit(ctx context.Context, args []string) error {
 	ref := ""
 	if len(args) > 0 {
 		ref = args[0]
@@ -61,10 +55,10 @@ func runPush(ctx context.Context, args []string) error {
 	c, cc, ctx, cancel := connect(ctx)
 	defer cancel()
 
-	prc := make(chan *node.PushResult, 1)
+	crc := make(chan *node.CommResult, 1)
 	cc.SetNotifyCallback(func(n node.Notify) {
-		if pr := n.PushResult; pr != nil {
-			prc <- pr
+		if cr := n.CommResult; cr != nil {
+			crc <- cr
 		}
 	})
 	go receive(ctx, cc, c)
@@ -73,38 +67,37 @@ func runPush(ctx context.Context, args []string) error {
 	var err error
 
 	// When only pushing content to caches we don't ask for a quote
-	if !pushArgs.cacheOnly {
+	if !commArgs.cacheOnly {
 		miners, err = runQuote(ctx, c, cc, ref)
 		if err != nil {
 			return err
 		}
 	}
 
-	cc.Push(&node.PushArgs{
+	cc.Commit(&node.CommArgs{
 		Ref:       ref,
-		NoCache:   pushArgs.noCache,
-		CacheOnly: pushArgs.cacheOnly,
-		CacheRF:   pushArgs.cacheRF,
-		StorageRF: pushArgs.storageRF,
-		Duration:  pushArgs.duration,
+		CacheOnly: commArgs.cacheOnly,
+		CacheRF:   commArgs.cacheRF,
+		StorageRF: commArgs.storageRF,
+		Duration:  commArgs.duration,
 		Miners:    miners,
 	})
 	for {
 		select {
-		case pr := <-prc:
-			if pr.Err != "" {
-				return errors.New(pr.Err)
+		case cr := <-crc:
+			if cr.Err != "" {
+				return errors.New(cr.Err)
 			}
-			if len(pr.Miners) > 0 {
-				fmt.Printf("Started storage deals with %s\n", pr.Miners)
-				if !pushArgs.noCache && pushArgs.cacheRF > 0 {
+			if len(cr.Miners) > 0 {
+				fmt.Printf("Started storage deals with %s\n", cr.Miners)
+				if commArgs.cacheRF > 0 {
 					// Wait for the result of our cache dispatch
 					fmt.Printf("Dispatching to caches...\n")
 					continue
 				}
 			}
-			if len(pr.Caches) > 0 {
-				fmt.Printf("Cached by %s\n", pr.Caches)
+			if len(cr.Caches) > 0 {
+				fmt.Printf("Cached by %s\n", cr.Caches)
 			}
 			return nil
 		case <-ctx.Done():
@@ -126,9 +119,9 @@ func runQuote(ctx context.Context, c net.Conn, cc *node.CommandClient, ref strin
 
 	cc.Quote(&node.QuoteArgs{
 		Ref:       ref,
-		Duration:  pushArgs.duration,
-		StorageRF: pushArgs.storageRF,
-		MaxPrice:  pushArgs.maxPrice,
+		Duration:  commArgs.duration,
+		StorageRF: commArgs.storageRF,
+		MaxPrice:  commArgs.maxPrice,
 	})
 
 	miners := make(map[string]bool)
@@ -166,7 +159,7 @@ func runQuote(ctx context.Context, c net.Conn, cc *node.CommandClient, ref strin
 			Message: fmt.Sprintf(
 				"Store %s during %s for %s?",
 				qr.Ref,
-				pushArgs.duration,
+				commArgs.duration,
 				fil.FIL(total).String(),
 			),
 		}
