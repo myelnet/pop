@@ -39,6 +39,7 @@ change in the future. To get started run 'pop start'.
 			statusCmd,
 			commCmd,
 			getCmd,
+			listCmd,
 		},
 		FlagSet: rootfs,
 		Exec:    func(context.Context, []string) error { return flag.ErrHelp },

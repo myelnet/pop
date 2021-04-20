@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"math/rand"
 	"testing"
 
 	"github.com/filecoin-project/go-multistore"
@@ -93,4 +94,31 @@ func TestIndexDropRef(t *testing.T) {
 
 	_, err = idx.GetRef(ref.PayloadCID)
 	require.Error(t, err)
+}
+
+func TestIndexListRefs(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	ms, err := multistore.NewMultiDstore(ds)
+	require.NoError(t, err)
+
+	idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+
+	var refs []*DataRef
+	// this loop sets 100 refs for 24 bytes = 2400 bytes
+	for i := 0; i < 101; i++ {
+		ref := &DataRef{
+			PayloadCID:  blockGen.Next().Cid(),
+			PayloadSize: 24,
+		}
+		require.NoError(t, idx.SetRef(ref))
+		refs = append(refs, ref)
+
+		// randomly add a read after every write
+		_, err = idx.GetRef(refs[rand.Intn(len(refs))].PayloadCID)
+	}
+
+	list, err := idx.ListRefs()
+	require.NoError(t, err)
+	// we only have room for 41 packets = 984
+	require.Equal(t, 41, len(list))
 }

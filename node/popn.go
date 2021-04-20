@@ -362,8 +362,8 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 		}})
 }
 
-// Status prints the current workdag index. It shows which files have been added but not yet committed
-// and pushed to the network
+// Status prints the current transaction status. It shows which files have been added but not yet committed
+// to the network
 func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
@@ -742,6 +742,29 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// List returns all the roots for the content stored by this node
+func (nd *node) List(ctx context.Context, args *ListArgs) {
+	list, err := nd.exch.Index().ListRefs()
+	if err != nil {
+		nd.send(Notify{
+			ListResult: &ListResult{
+				Err: err.Error(),
+			},
+		})
+		return
+	}
+	for i, ref := range list {
+		nd.send(Notify{
+			ListResult: &ListResult{
+				Root: ref.PayloadCID.String(),
+				Size: ref.PayloadSize,
+				Freq: ref.Freq,
+				Last: i == len(list)-1,
+			},
+		})
 	}
 }
 
