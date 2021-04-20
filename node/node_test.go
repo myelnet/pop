@@ -14,6 +14,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -406,4 +407,52 @@ func TestGet(t *testing.T) {
 
 	res = <-got
 	require.Greater(t, res.TransLatSeconds, 0.0)
+
+	// We should be able to request again this time from local storage
+	got = make(chan *GetResult, 1)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.GetResult.Err, "")
+		got <- n.GetResult
+	}
+	out := filepath.Join(dir, "dataout")
+	cn.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+		Out:      out,
+	})
+	<-got
+	dataout := make([]byte, len(data))
+	file, err := os.Open(out)
+	require.NoError(t, err)
+
+	_, err = file.Read(dataout)
+	require.NoError(t, err)
+	require.EqualValues(t, data, dataout)
+}
+
+func TestList(t *testing.T) {
+	blockGen := blocksutil.NewBlockGenerator()
+	ctx := context.Background()
+	mn := mocknet.New(ctx)
+
+	cn := newTestNode(ctx, mn, t)
+
+	for i := 0; i < 10; i++ {
+		require.NoError(t, cn.exch.Index().SetRef(&exchange.DataRef{
+			PayloadCID:  blockGen.Next().Cid(),
+			PayloadSize: 100,
+		}))
+	}
+	out := make(chan *ListResult, 10)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.ListResult.Err, "")
+		out <- n.ListResult
+		if n.ListResult.Last {
+			close(out)
+		}
+	}
+	cn.List(ctx, &ListArgs{})
+	for range out {
+	}
 }

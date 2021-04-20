@@ -57,6 +57,10 @@ type IndexOption func(*Index)
 // WithBounds sets the upper and lower bounds of the LFU store
 func WithBounds(up, lo uint64) IndexOption {
 	return func(idx *Index) {
+		// Should crash execution rather than running the index with sneaky bugs
+		if up < lo {
+			panic("upper bound cannot be lower than lower bound")
+		}
 		idx.ub = up
 		idx.lb = lo
 	}
@@ -207,6 +211,21 @@ func (idx *Index) PeekRef(k cid.Cid) (*DataRef, error) {
 	return ref, nil
 }
 
+// ListRefs returns all the content refs currently stored on this node as well as their read frequencies
+func (idx *Index) ListRefs() ([]*DataRef, error) {
+	idx.Mu.Lock()
+	defer idx.Mu.Unlock()
+	refs := make([]*DataRef, len(idx.Refs))
+	i := 0
+	for e := idx.freqs.Front(); e != nil; e = e.Next() {
+		for k := range e.Value.(*listEntry).entries {
+			refs[i] = k
+			i++
+		}
+	}
+	return refs, nil
+}
+
 type listEntry struct {
 	entries map[*DataRef]byte
 	freq    int64
@@ -267,21 +286,20 @@ func (idx *Index) evict(size uint64) uint64 {
 	// No lock here so it can be called
 	// from within the lock (during Set)
 	var evicted uint64
-	for evicted < size {
-		if place := idx.freqs.Front(); place != nil {
-			for entry := range place.Value.(*listEntry).entries {
-				if evicted < size {
-					delete(idx.Refs, entry.PayloadCID.String())
+	for place := idx.freqs.Front(); place != nil; place = place.Next() {
+		for entry := range place.Value.(*listEntry).entries {
+			delete(idx.Refs, entry.PayloadCID.String())
 
-					err := idx.ms.Delete(entry.StoreID)
-					if err != nil {
-						continue
-					}
+			err := idx.ms.Delete(entry.StoreID)
+			if err != nil {
+				continue
+			}
 
-					idx.remEntry(place, entry)
-					evicted += uint64(entry.PayloadSize)
-					idx.size -= uint64(entry.PayloadSize)
-				}
+			idx.remEntry(place, entry)
+			evicted += uint64(entry.PayloadSize)
+			idx.size -= uint64(entry.PayloadSize)
+			if evicted >= size {
+				return evicted
 			}
 		}
 	}
