@@ -60,6 +60,11 @@ type GetArgs struct {
 	Strategy string
 }
 
+// ListArgs provides params for the List command
+type ListArgs struct {
+	Page int // potential pagination as the amount may be very large
+}
+
 // Command is a message sent from a client to the daemon
 type Command struct {
 	Ping   *PingArgs
@@ -68,6 +73,7 @@ type Command struct {
 	Quote  *QuoteArgs
 	Commit *CommArgs
 	Get    *GetArgs
+	List   *ListArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -124,6 +130,15 @@ type GetResult struct {
 	Err             string
 }
 
+// ListResult contains the result for a single item of the list
+type ListResult struct {
+	Root string
+	Freq int64
+	Size int64
+	Last bool
+	Err  string
+}
+
 // Notify is a message sent from the daemon to the client
 type Notify struct {
 	PingResult   *PingResult
@@ -132,6 +147,7 @@ type Notify struct {
 	QuoteResult  *QuoteResult
 	CommResult   *CommResult
 	GetResult    *GetResult
+	ListResult   *ListResult
 }
 
 // CommandServer receives commands on the daemon side and executes them
@@ -184,6 +200,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	if c := cmd.Get; c != nil {
 		// Get requests can be quite long and we don't want to block other commands
 		go cs.n.Get(ctx, c)
+		return nil
+	}
+	if c := cmd.List; c != nil {
+		go cs.n.List(ctx, c)
 		return nil
 	}
 	return fmt.Errorf("CommandServer: no command specified")
@@ -262,6 +282,10 @@ func (cc *CommandClient) Commit(args *CommArgs) {
 
 func (cc *CommandClient) Get(args *GetArgs) {
 	cc.send(Command{Get: args})
+}
+
+func (cc *CommandClient) List(args *ListArgs) {
+	cc.send(Command{List: args})
 }
 
 func (cc *CommandClient) SetNotifyCallback(fn func(Notify)) {

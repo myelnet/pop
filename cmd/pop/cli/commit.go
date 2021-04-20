@@ -36,8 +36,8 @@ with a given level of cashing. By default it will attempt multiple storage deals
 	Exec: runCommit,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("commit", flag.ExitOnError)
-		fs.IntVar(&commArgs.cacheRF, "cache-rf", 6, "number of cache providers to dispatch to")
-		fs.IntVar(&commArgs.storageRF, "storage-rf", 6, "number of storage providers to start deals with")
+		fs.IntVar(&commArgs.cacheRF, "cache-rf", 2, "number of cache providers to dispatch to")
+		fs.IntVar(&commArgs.storageRF, "storage-rf", 2, "number of storage providers to start deals with")
 		fs.DurationVar(&commArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
 		fs.BoolVar(&commArgs.cacheOnly, "cache-only", false, "only dispatch content for caching")
 		// MaxStoragePrice is our price ceiling to filter out bad storage miners who charge too much
@@ -82,6 +82,7 @@ func runCommit(ctx context.Context, args []string) error {
 		Duration:  commArgs.duration,
 		Miners:    miners,
 	})
+	received := 0
 	for {
 		select {
 		case cr := <-crc:
@@ -98,8 +99,11 @@ func runCommit(ctx context.Context, args []string) error {
 			}
 			if len(cr.Caches) > 0 {
 				fmt.Printf("Cached by %s\n", cr.Caches)
+				received += len(cr.Caches)
 			}
-			return nil
+			if received == commArgs.cacheRF {
+				return nil
+			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}
