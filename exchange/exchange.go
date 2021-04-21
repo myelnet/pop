@@ -100,9 +100,16 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	if err != nil {
 		return deal.QueryResponse{}, err
 	}
+	if q.Selector == nil {
+		return deal.QueryResponse{}, fmt.Errorf("no selector provided")
+	}
+	sel, err := retrieval.DecodeNode(q.QueryParams.Selector)
+	if err != nil {
+		sel = AllSelector()
+	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
-	stats, err := Stat(ctx, store, q.PayloadCID, AllSelector())
+	stats, err := Stat(ctx, store, q.PayloadCID, sel)
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
@@ -155,6 +162,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		repl:       e.rpl,
 		chunkSize:  256000,
 		clientAddr: e.w.DefaultAddress(),
+		sel:        AllSelector(),
 		done:       done,
 		errs:       errs,
 		ongoing:    make(chan DealRef),

@@ -357,16 +357,13 @@ func TestGet(t *testing.T) {
 	mn := mocknet.New(bgCtx)
 
 	pn := newTestNode(bgCtx, mn, t)
-	// We need a bunch of extra node or else gossip doesn't work
-	_ = newTestNode(bgCtx, mn, t)
-	_ = newTestNode(bgCtx, mn, t)
-	_ = newTestNode(bgCtx, mn, t)
-	_ = newTestNode(bgCtx, mn, t)
-	_ = newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Let the routing propagate to gossip
+	time.Sleep(time.Second)
 
 	dir := t.TempDir()
 

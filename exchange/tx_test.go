@@ -16,6 +16,7 @@ import (
 	"github.com/ipfs/go-path"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -235,4 +236,75 @@ func TestTxRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// Test retrieving a specific value for a key in the IPLD map
+func TestMapFieldSelector(t *testing.T) {
+	ctx := context.Background()
+	mn := mocknet.New(ctx)
+
+	n1 := testutil.NewTestNode(mn, t)
+	opts := Options{
+		RepoPath: n1.DTTmpDir,
+		Keystore: keystore.NewMemKeystore(),
+	}
+	pn, err := New(ctx, n1.Host, n1.Ds, opts)
+	require.NoError(t, err)
+
+	n2 := testutil.NewTestNode(mn, t)
+	cn, err := New(ctx, n2.Host, n2.Ds, Options{
+		RepoPath: n2.DTTmpDir,
+		Keystore: keystore.NewMemKeystore(),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	filevals, filepaths := genTestFiles(t)
+
+	tx := pn.Tx(ctx)
+	for _, p := range filepaths {
+		require.NoError(t, tx.PutFile(p))
+	}
+	require.NoError(t, pn.Index().SetRef(tx.Ref()))
+
+	stat, err := Stat(ctx, tx.Store(), tx.Root(), MapFieldSelector("line2.txt"))
+	require.NoError(t, err)
+	require.Equal(t, 2, stat.NumBlocks)
+	require.Equal(t, 627, stat.Size)
+
+	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
+	key := KeyFromPath(filepaths[0])
+	gtx.sel = MapFieldSelector(key)
+
+	// We skip discovery and send an offer directly
+	qs, err := pn.disco.NewQueryStream(n2.Host.ID())
+	require.NoError(t, err)
+	resp := deal.QueryResponse{
+		Status:                     deal.QueryResponseAvailable,
+		Size:                       uint64(tx.Size()),
+		PaymentAddress:             cn.w.DefaultAddress(),
+		MinPricePerByte:            global.PPB,
+		MaxPaymentInterval:         deal.DefaultPaymentInterval,
+		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+	}
+	pn.rtv.Provider().SetAsk(tx.Root(), resp)
+	require.NoError(t, qs.WriteQueryResponse(resp))
+
+	select {
+	case <-gtx.Done():
+	case <-ctx.Done():
+		t.Fatal("transaction could not complete")
+	}
+	fnd, err := gtx.GetFile(key)
+	require.NoError(t, err)
+	f := fnd.(files.File)
+	bytes, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, bytes, []byte(filevals[key]))
+
+	// Getting any other key should fail
+	_, err = gtx.GetFile(KeyFromPath(filepaths[1]))
+	require.Error(t, err)
 }

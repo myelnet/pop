@@ -113,6 +113,7 @@ func WithStrategy(strategy SelectionStrategy) TxOption {
 	return func(tx *Tx) {
 		tx.worker = strategy(tx)
 		tx.worker.Start()
+		tx.disco.SetReceiver(tx.worker.ReceiveResponse)
 	}
 }
 
@@ -478,8 +479,12 @@ func (ds DealSelection) Decline() {
 
 // Query the discovery service for offers
 func (tx *Tx) Query(key string) error {
+	// We adjust the selector to only fech the DAG associated to the key
+	if key != "" {
+		tx.sel = MapFieldSelector(key)
+	}
 	if tx.worker != nil {
-		return tx.disco.Query(tx.ctx, tx.root, tx.worker.ReceiveResponse)
+		return tx.disco.Query(tx.ctx, tx.root, tx.sel)
 	}
 	return ErrNoStrategy
 }
@@ -500,7 +505,7 @@ func (tx *Tx) Execute(of deal.Offer) error {
 		of.Response.MinPricePerByte,
 		of.Response.MaxPaymentInterval,
 		of.Response.MaxPaymentIntervalIncrease,
-		AllSelector(),
+		tx.sel,
 		nil,
 		of.Response.UnsealPrice,
 	)
