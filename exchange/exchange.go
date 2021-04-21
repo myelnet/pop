@@ -134,9 +134,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
 	// Track when the session is completed
-	// @FIXME: sometimes the event callback receives multiple completed events so I've added
-	// a little buffer so as to not block things
-	done := make(chan error, 2)
+	done := make(chan error, 1)
 	// Track any issues with the transfer
 	errs := make(chan deal.Status)
 	// Subscribe to client events to send to the channel
@@ -144,10 +142,16 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
 		case deal.StatusCompleted:
-			done <- nil
+			select {
+			case done <- nil:
+			default:
+			}
 			return
 		case deal.StatusCancelled, deal.StatusErrored:
-			errs <- state.Status
+			select {
+			case errs <- state.Status:
+			default:
+			}
 			return
 		}
 	})
