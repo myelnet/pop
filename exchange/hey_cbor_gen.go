@@ -29,7 +29,7 @@ func (t *Hey) MarshalCBOR(w io.Writer) error {
 
 	scratch := make([]byte, 9)
 
-	// t.Regions ([]supply.RegionCode) (slice)
+	// t.Regions ([]exchange.RegionCode) (slice)
 	if len(t.Regions) > cbg.MaxLength {
 		return xerrors.Errorf("Slice value in field t.Regions was too long")
 	}
@@ -63,7 +63,7 @@ func (t *Hey) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.Regions ([]supply.RegionCode) (slice)
+	// t.Regions ([]exchange.RegionCode) (slice)
 
 	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {

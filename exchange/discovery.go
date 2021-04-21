@@ -13,6 +13,7 @@ import (
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/ipfs/go-cid"
+	"github.com/ipld/go-ipld-prime"
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/mux"
@@ -145,6 +146,7 @@ type GossipDisco struct {
 	queryProtocols []protocol.ID
 	meta           MessageTracker
 	regions        []Region
+	rmu            sync.Mutex
 	receiveResp    ReceiveResponse
 }
 
@@ -210,21 +212,29 @@ func (gd *GossipDisco) pump(ctx context.Context, sub *pubsub.Subscription, fn Re
 			fmt.Println("failed to create response query stream", err)
 			continue
 		}
-		addrs, err := gd.Addrs()
+		resp.Message, err = gd.ResponseMsg(msg.Message)
 		if err != nil {
 			continue
 		}
-		mid := pubsub.DefaultMsgIdFn(msg.Message)
-		// Our message payload includes the message ID and the recipient peer address
-		// The index indicates where to slice the string to extract both values
-		p := fmt.Sprintf("%d%s%s", len(mid), mid, string(addrs[0].Bytes()))
-		resp.Message = p
 		if err := qs.WriteQueryResponse(resp); err != nil {
 			fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
 			continue
 		}
 
 	}
+}
+
+// ResponseMsg prepares the QueryResponse Message payload
+func (gd *GossipDisco) ResponseMsg(msg *pb.Message) (string, error) {
+	addrs, err := gd.Addrs()
+	if err != nil {
+		return "", err
+	}
+	mid := pubsub.DefaultMsgIdFn(msg)
+	// Our message payload includes the message ID and the recipient peer address
+	// The index indicates where to slice the string to extract both values
+	p := fmt.Sprintf("%d%s%s", len(mid), mid, string(addrs[0].Bytes()))
+	return p, nil
 }
 
 // QueryPeer asks another peer directly for retrieval conditions
@@ -237,7 +247,7 @@ func (gd *GossipDisco) QueryPeer(p peer.AddrInfo, root cid.Cid, fn ReceiveRespon
 
 	err = stream.WriteQuery(deal.Query{
 		PayloadCID:  root,
-		QueryParams: deal.QueryParams{},
+		QueryParams: deal.QueryParams{}, // Filecoin does not support selectors in queries yet
 	})
 	if err != nil {
 		return err
@@ -253,11 +263,14 @@ func (gd *GossipDisco) QueryPeer(p peer.AddrInfo, root cid.Cid, fn ReceiveRespon
 
 // Query asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
-func (gd *GossipDisco) Query(ctx context.Context, root cid.Cid, fn ReceiveResponse) error {
-	gd.receiveResp = fn
+func (gd *GossipDisco) Query(ctx context.Context, root cid.Cid, sel ipld.Node) error {
+	params, err := deal.NewQueryParams(sel)
+	if err != nil {
+		return err
+	}
 	m := deal.Query{
 		PayloadCID:  root,
-		QueryParams: deal.QueryParams{},
+		QueryParams: params,
 	}
 
 	buf := new(bytes.Buffer)
@@ -274,6 +287,13 @@ func (gd *GossipDisco) Query(ctx context.Context, root cid.Cid, fn ReceiveRespon
 	}
 
 	return nil
+}
+
+// SetReceiver sets a callback to receive discovery responses
+func (gd *GossipDisco) SetReceiver(fn ReceiveResponse) {
+	gd.rmu.Lock()
+	gd.receiveResp = fn
+	gd.rmu.Unlock()
 }
 
 // NewQueryStream creates a new query stream using the provided peer.ID to handle the Query protocols
@@ -302,8 +322,20 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 		fmt.Println("failed to peek message", err)
 		return
 	}
-	// TODO: handle messages from Filecoin miners
+	// Here we handle messages from Filecoin miners
 	if len(msg) == 0 {
+		gd.rmu.Lock()
+		defer gd.rmu.Unlock()
+		if gd.receiveResp == nil {
+			fmt.Println("received resp")
+			return
+		}
+		var resp deal.QueryResponse
+		if err := resp.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
+			fmt.Println("failed to read query response", err)
+			return
+		}
+		gd.receiveResp(gd.h.Peerstore().PeerInfo(s.Conn().RemotePeer()), resp)
 		return
 	}
 	// Get the index where to split
@@ -331,6 +363,8 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 		}
 		return
 	}
+	gd.rmu.Lock()
+	defer gd.rmu.Unlock()
 	// Stop if we don't have a receiver set
 	if gd.receiveResp == nil {
 		return

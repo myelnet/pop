@@ -25,9 +25,25 @@ import (
 // for the retrieval deal
 type QueryParams struct {
 	PieceCID *cid.Cid // optional, query if miner has this cid in this piece. some miners may not be able to respond.
+	Selector *cbg.Deferred
 	// MaxPricePerByte            abi.TokenAmount // optional, tell miner uninterested if more expensive than this
 	// MinPaymentInterval         uint64          // optional, tell miner uninterested unless payment interval is greater than this
 	// MinPaymentIntervalIncrease uint64          // optional, tell miner uninterested unless payment interval increase is greater than this
+}
+
+// NewQueryParams formats QueryParams into a struct ready to be encoded for transport
+func NewQueryParams(sel ipld.Node) (QueryParams, error) {
+	var buffer bytes.Buffer
+	if sel == nil {
+		return QueryParams{}, fmt.Errorf("selector required")
+	}
+	err := dagcbor.Encoder(sel, &buffer)
+	if err != nil {
+		return QueryParams{}, fmt.Errorf("error encoding selector: %w", err)
+	}
+	return QueryParams{
+		Selector: &cbg.Deferred{Raw: buffer.Bytes()},
+	}, nil
 }
 
 // Query is a query to a given provider to determine information about a piece
@@ -139,7 +155,7 @@ func NewParams(pricePerByte abi.TokenAmount, paymentInterval uint64, paymentInte
 	var buffer bytes.Buffer
 
 	if sel == nil {
-		return Params{}, fmt.Errorf("selector required for NewParamsV1")
+		return Params{}, fmt.Errorf("selector required")
 	}
 
 	err := dagcbor.Encoder(sel, &buffer)
