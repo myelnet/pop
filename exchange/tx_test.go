@@ -310,7 +310,8 @@ func TestMapFieldSelector(t *testing.T) {
 }
 
 func TestMultiTx(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
 	mn := mocknet.New(ctx)
 
 	n1 := testutil.NewTestNode(mn, t)
