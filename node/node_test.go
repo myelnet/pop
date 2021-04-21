@@ -453,3 +453,112 @@ func TestList(t *testing.T) {
 	for range out {
 	}
 }
+
+func TestMultipleGet(t *testing.T) {
+	bgCtx := context.Background()
+
+	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+	defer cancel()
+	mn := mocknet.New(bgCtx)
+
+	pn := newTestNode(bgCtx, mn, t)
+	cn := newTestNode(bgCtx, mn, t)
+	cn2 := newTestNode(bgCtx, mn, t)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Let the routing propagate to gossip
+	time.Sleep(time.Second)
+
+	dir := t.TempDir()
+
+	data1 := make([]byte, 256000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
+	p1 := filepath.Join(dir, "data1")
+	err := os.WriteFile(p1, data1, 0666)
+	require.NoError(t, err)
+
+	added1 := make(chan string, 1)
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.PutResult.Err, "")
+
+		added1 <- n.PutResult.Cid
+	}
+	pn.Put(ctx, &PutArgs{
+		Path:      p1,
+		ChunkSize: 1024,
+	})
+	<-added1
+
+	data2 := make([]byte, 124000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	p2 := filepath.Join(dir, "data2")
+	err = os.WriteFile(p2, data2, 0666)
+	require.NoError(t, err)
+
+	added2 := make(chan string, 1)
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.PutResult.Err, "")
+
+		added2 <- n.PutResult.Cid
+	}
+	pn.Put(ctx, &PutArgs{
+		Path:      p2,
+		ChunkSize: 1024,
+	})
+	<-added2
+
+	ref, err := pn.getRef("")
+	require.NoError(t, err)
+	require.NoError(t, pn.exch.Index().SetRef(ref))
+
+	got1 := make(chan *GetResult, 2)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.GetResult.Err, "")
+		got1 <- n.GetResult
+	}
+	cn.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res := <-got1
+	require.NotEqual(t, "", res.DealID)
+
+	res = <-got1
+	require.Greater(t, res.TransLatSeconds, 0.0)
+
+	// Now let's try to request the second file
+	got2 := make(chan *GetResult, 2)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.GetResult.Err, "")
+		got2 <- n.GetResult
+	}
+	cn.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res = <-got2
+	require.NotEqual(t, "", res.DealID)
+
+	res = <-got2
+	require.Greater(t, res.TransLatSeconds, 0.0)
+
+	got3 := make(chan *GetResult, 2)
+	cn2.notify = func(n Notify) {
+		require.Equal(t, n.GetResult.Err, "")
+		got3 <- n.GetResult
+	}
+	cn2.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res = <-got3
+	require.NotEqual(t, "", res.DealID)
+
+	res = <-got3
+	require.Greater(t, res.TransLatSeconds, 0.0)
+}
