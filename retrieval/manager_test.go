@@ -258,6 +258,11 @@ func TestRetrieval(t *testing.T) {
 			store, err := n1.Ms.Get(clientStoreID)
 			require.NoError(t, err)
 			n1.VerifyFileTransferred(bgCtx, t, store.DAG, rootCid, origBytes)
+
+			// Check if the file is still intact in the provider blockstore
+			pstore, err := n2.Ms.Get(storeID)
+			require.NoError(t, err)
+			n2.VerifyFileTransferred(bgCtx, t, pstore.DAG, rootCid, origBytes)
 		})
 	}
 }

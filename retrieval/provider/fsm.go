@@ -196,9 +196,5 @@ func CleanupDeal(ctx fsm.Context, environment DealEnvironment, ds deal.ProviderS
 	if err != nil {
 		return ctx.Trigger(EventDataTransferError, err)
 	}
-	err = environment.DeleteStore(ds.StoreID)
-	if err != nil {
-		return ctx.Trigger(EventMultiStoreError, err)
-	}
 	return ctx.Trigger(EventCleanupComplete)
 }
