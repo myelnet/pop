@@ -103,7 +103,7 @@ func (s *server) writeToClients(b []byte) {
 func (s *server) localhostHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is the local IPFS daemon.")
+			io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is your Myel pop.")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
@@ -147,8 +147,9 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// try to retrieve the blocks
-	err = s.node.get(r.Context(), root, &GetArgs{Key: segs[0]})
+	err = s.node.get(r.Context(), root, &GetArgs{Key: segs[0], Strategy: "SelectFirst"})
 	if err != nil {
+		fmt.Printf("ERR %s\n", err)
 		// TODO: give better feedback into what went wrong
 		http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
 		return

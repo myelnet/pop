@@ -712,6 +712,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		if err != nil {
 			return err
 		}
+		tx.Close()
 		end := time.Now()
 		transDuration := end.Sub(start) - discDuration
 		if args.Out != "" {
@@ -752,6 +753,14 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 		nd.send(Notify{
 			ListResult: &ListResult{
 				Err: err.Error(),
+			},
+		})
+		return
+	}
+	if len(list) == 0 {
+		nd.send(Notify{
+			ListResult: &ListResult{
+				Err: "no refs stored",
 			},
 		})
 		return

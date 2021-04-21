@@ -308,3 +308,67 @@ func TestMapFieldSelector(t *testing.T) {
 	_, err = gtx.GetFile(KeyFromPath(filepaths[1]))
 	require.Error(t, err)
 }
+
+func TestMultiTx(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+
+	n1 := testutil.NewTestNode(mn, t)
+	opts := Options{
+		RepoPath: n1.DTTmpDir,
+		Keystore: keystore.NewMemKeystore(),
+	}
+	pn, err := New(ctx, n1.Host, n1.Ds, opts)
+	require.NoError(t, err)
+
+	n2 := testutil.NewTestNode(mn, t)
+	cn1, err := New(ctx, n2.Host, n2.Ds, Options{
+		RepoPath: n2.DTTmpDir,
+		Keystore: keystore.NewMemKeystore(),
+	})
+	require.NoError(t, err)
+
+	n3 := testutil.NewTestNode(mn, t)
+	_, err = New(ctx, n3.Host, n3.Ds, Options{
+		RepoPath: n3.DTTmpDir,
+		Keystore: keystore.NewMemKeystore(),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	time.Sleep(time.Second)
+
+	_, filepaths := genTestFiles(t)
+
+	tx := pn.Tx(ctx)
+	for _, p := range filepaths {
+		require.NoError(t, tx.PutFile(p))
+	}
+	require.NoError(t, pn.Index().SetRef(tx.Ref()))
+
+	gtx1 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
+	key1 := KeyFromPath(filepaths[0])
+	require.NoError(t, gtx1.Query(key1))
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("could not finish gtx1")
+	case <-gtx1.Done():
+	}
+
+	_, err = gtx1.GetFile(key1)
+	require.NoError(t, err)
+
+	gtx2 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
+	key2 := KeyFromPath(filepaths[1])
+	require.NoError(t, gtx2.Query(key2))
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("could not finish gtx2")
+	case <-gtx2.Done():
+	}
+}

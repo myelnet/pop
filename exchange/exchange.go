@@ -142,10 +142,16 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
 		case deal.StatusCompleted:
-			done <- nil
+			select {
+			case done <- nil:
+			default:
+			}
 			return
 		case deal.StatusCancelled, deal.StatusErrored:
-			errs <- state.Status
+			select {
+			case errs <- state.Status:
+			default:
+			}
 			return
 		}
 	})
