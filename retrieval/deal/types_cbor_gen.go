@@ -26,7 +26,7 @@ func (t *QueryParams) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{161}); err != nil {
+	if _, err := w.Write([]byte{162}); err != nil {
 		return err
 	}
 
@@ -52,6 +52,22 @@ func (t *QueryParams) MarshalCBOR(w io.Writer) error {
 		if err := cbg.WriteCidBuf(scratch, w, *t.PieceCID); err != nil {
 			return xerrors.Errorf("failed to write cid field t.PieceCID: %w", err)
 		}
+	}
+
+	// t.Selector (typegen.Deferred) (struct)
+	if len("Selector") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"Selector\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("Selector"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("Selector")); err != nil {
+		return err
+	}
+
+	if err := t.Selector.MarshalCBOR(w); err != nil {
+		return err
 	}
 
 	return nil
@@ -90,6 +106,17 @@ func (t *QueryParams) UnmarshalCBOR(r io.Reader) error {
 		}
 
 		switch name {
+		// t.Selector (typegen.Deferred) (struct)
+		case "Selector":
+
+			{
+
+				t.Selector = new(cbg.Deferred)
+
+				if err := t.Selector.UnmarshalCBOR(br); err != nil {
+					return xerrors.Errorf("failed to read deferred field: %w", err)
+				}
+			}
 		// t.PieceCID (cid.Cid) (struct)
 		case "PieceCID":
 

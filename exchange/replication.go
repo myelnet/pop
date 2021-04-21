@@ -11,9 +11,6 @@ import (
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
-	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/ipld/go-ipld-prime/traversal/selector"
-	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-eventbus"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -286,13 +283,6 @@ func (r *Replication) sendAllRequests(req Request, peers []peer.ID) {
 			continue
 		}
 	}
-}
-
-// AllSelector is the default selector that reaches all the blocks
-func AllSelector() ipld.Node {
-	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
-	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
-		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 }
 
 // JoinScheme adds a peer to our scheme set meaning we're in that peer's scheme

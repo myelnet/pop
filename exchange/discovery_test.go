@@ -159,9 +159,10 @@ func TestGossipDisco(t *testing.T) {
 			for _, client := range clients {
 				for _, root := range roots {
 					resps := make(chan deal.QueryResponse)
-					err := client.Query(ctx, root, func(i peer.AddrInfo, r deal.QueryResponse) {
+					client.SetReceiver(func(i peer.AddrInfo, r deal.QueryResponse) {
 						resps <- r
 					})
+					err := client.Query(ctx, root, AllSelector())
 					require.NoError(t, err)
 
 					// execute a job for each offer
