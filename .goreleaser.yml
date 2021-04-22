@@ -1,0 +1,30 @@
+# This is an example .goreleaser.yml file with some sane defaults.
+# Make sure to check the documentation at http://goreleaser.com
+builds:
+  - id: "pop-darwin-amd64"
+    main: "./cmd/pop"
+    env:
+      - CGO_ENABLED=1
+      - CC=o64-clang 
+      - CXX=o64-clang++
+    goos:
+      - darwin
+    hooks:
+      pre: make build
+archives:
+  - replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
