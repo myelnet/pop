@@ -12,6 +12,8 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 )
 
+//go:generate cbor-gen-for DataRef RefMap
+
 // ErrRefNotFound is returned when a given ref is not in the store
 var ErrRefNotFound = errors.New("ref not found")
 
@@ -38,7 +40,13 @@ type Index struct {
 	size uint64
 	// linked list keeps track of our frequencies to access as fast as possible
 	freqs *list.List
-	Refs  map[string]*DataRef
+	// RefMap wraps the Refs
+	RefMap
+}
+
+// RefMap is disctionary indexing all the content stored in the Index
+type RefMap struct {
+	Refs map[string]*DataRef
 }
 
 // DataRef encapsulates information about a content committed for storage
