@@ -14,6 +14,7 @@ require (
 	github.com/filecoin-project/go-crypto v0.0.0-20191218222705-effae4ea9f03
 	github.com/filecoin-project/go-data-transfer v1.4.3
 	github.com/filecoin-project/go-fil-markets v1.2.5
+	github.com/filecoin-project/go-hamt-ipld/v3 v3.0.0
 	github.com/filecoin-project/go-jsonrpc v0.1.2
 	github.com/filecoin-project/go-multistore v0.0.3
 	github.com/filecoin-project/go-state-types v0.0.0-20210119062722-4adba5aaea71

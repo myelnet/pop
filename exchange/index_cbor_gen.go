@@ -17,26 +17,45 @@ var _ = xerrors.Errorf
 var _ = cid.Undef
 var _ = sort.Sort
 
-var lengthBufDataRef = []byte{132}
-
 func (t *DataRef) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufDataRef); err != nil {
+	if _, err := w.Write([]byte{164}); err != nil {
 		return err
 	}
 
 	scratch := make([]byte, 9)
 
 	// t.PayloadCID (cid.Cid) (struct)
+	if len("PayloadCID") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PayloadCID\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PayloadCID"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PayloadCID")); err != nil {
+		return err
+	}
 
 	if err := cbg.WriteCidBuf(scratch, w, t.PayloadCID); err != nil {
 		return xerrors.Errorf("failed to write cid field t.PayloadCID: %w", err)
 	}
 
 	// t.PayloadSize (int64) (int64)
+	if len("PayloadSize") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PayloadSize\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PayloadSize"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PayloadSize")); err != nil {
+		return err
+	}
+
 	if t.PayloadSize >= 0 {
 		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.PayloadSize)); err != nil {
 			return err
@@ -48,12 +67,33 @@ func (t *DataRef) MarshalCBOR(w io.Writer) error {
 	}
 
 	// t.StoreID (multistore.StoreID) (uint64)
+	if len("StoreID") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"StoreID\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("StoreID"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("StoreID")); err != nil {
+		return err
+	}
 
 	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.StoreID)); err != nil {
 		return err
 	}
 
 	// t.Freq (int64) (int64)
+	if len("Freq") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"Freq\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("Freq"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("Freq")); err != nil {
+		return err
+	}
+
 	if t.Freq >= 0 {
 		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.Freq)); err != nil {
 			return err
@@ -76,180 +116,18 @@ func (t *DataRef) UnmarshalCBOR(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if maj != cbg.MajArray {
-		return fmt.Errorf("cbor input should be of type array")
-	}
-
-	if extra != 4 {
-		return fmt.Errorf("cbor input had wrong number of fields")
-	}
-
-	// t.PayloadCID (cid.Cid) (struct)
-
-	{
-
-		c, err := cbg.ReadCid(br)
-		if err != nil {
-			return xerrors.Errorf("failed to read cid field t.PayloadCID: %w", err)
-		}
-
-		t.PayloadCID = c
-
-	}
-	// t.PayloadSize (int64) (int64)
-	{
-		maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
-		var extraI int64
-		if err != nil {
-			return err
-		}
-		switch maj {
-		case cbg.MajUnsignedInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 positive overflow")
-			}
-		case cbg.MajNegativeInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 negative oveflow")
-			}
-			extraI = -1 - extraI
-		default:
-			return fmt.Errorf("wrong type for int64 field: %d", maj)
-		}
-
-		t.PayloadSize = int64(extraI)
-	}
-	// t.StoreID (multistore.StoreID) (uint64)
-
-	{
-
-		maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
-		if err != nil {
-			return err
-		}
-		if maj != cbg.MajUnsignedInt {
-			return fmt.Errorf("wrong type for uint64 field")
-		}
-		t.StoreID = multistore.StoreID(extra)
-
-	}
-	// t.Freq (int64) (int64)
-	{
-		maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
-		var extraI int64
-		if err != nil {
-			return err
-		}
-		switch maj {
-		case cbg.MajUnsignedInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 positive overflow")
-			}
-		case cbg.MajNegativeInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 negative oveflow")
-			}
-			extraI = -1 - extraI
-		default:
-			return fmt.Errorf("wrong type for int64 field: %d", maj)
-		}
-
-		t.Freq = int64(extraI)
-	}
-	return nil
-}
-
-var lengthBufRefMap = []byte{129}
-
-func (t *RefMap) MarshalCBOR(w io.Writer) error {
-	if t == nil {
-		_, err := w.Write(cbg.CborNull)
-		return err
-	}
-	if _, err := w.Write(lengthBufRefMap); err != nil {
-		return err
-	}
-
-	scratch := make([]byte, 9)
-
-	// t.Refs (map[string]*exchange.DataRef) (map)
-	{
-		if len(t.Refs) > 4096 {
-			return xerrors.Errorf("cannot marshal t.Refs map too large")
-		}
-
-		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajMap, uint64(len(t.Refs))); err != nil {
-			return err
-		}
-
-		keys := make([]string, 0, len(t.Refs))
-		for k := range t.Refs {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			v := t.Refs[k]
-
-			if len(k) > cbg.MaxLength {
-				return xerrors.Errorf("Value in field k was too long")
-			}
-
-			if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(k))); err != nil {
-				return err
-			}
-			if _, err := io.WriteString(w, string(k)); err != nil {
-				return err
-			}
-
-			if err := v.MarshalCBOR(w); err != nil {
-				return err
-			}
-
-		}
-	}
-	return nil
-}
-
-func (t *RefMap) UnmarshalCBOR(r io.Reader) error {
-	*t = RefMap{}
-
-	br := cbg.GetPeeker(r)
-	scratch := make([]byte, 8)
-
-	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
-	if err != nil {
-		return err
-	}
-	if maj != cbg.MajArray {
-		return fmt.Errorf("cbor input should be of type array")
-	}
-
-	if extra != 1 {
-		return fmt.Errorf("cbor input had wrong number of fields")
-	}
-
-	// t.Refs (map[string]*exchange.DataRef) (map)
-
-	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
-	if err != nil {
-		return err
-	}
 	if maj != cbg.MajMap {
-		return fmt.Errorf("expected a map (major type 5)")
-	}
-	if extra > 4096 {
-		return fmt.Errorf("t.Refs: map too large")
+		return fmt.Errorf("cbor input should be of type map")
 	}
 
-	t.Refs = make(map[string]*DataRef, extra)
+	if extra > cbg.MaxLength {
+		return fmt.Errorf("DataRef: map struct too large (%d)", extra)
+	}
 
-	for i, l := 0, int(extra); i < l; i++ {
+	var name string
+	n := extra
 
-		var k string
+	for i := uint64(0); i < n; i++ {
 
 		{
 			sval, err := cbg.ReadStringBuf(br, scratch)
@@ -257,31 +135,96 @@ func (t *RefMap) UnmarshalCBOR(r io.Reader) error {
 				return err
 			}
 
-			k = string(sval)
+			name = string(sval)
 		}
 
-		var v *DataRef
+		switch name {
+		// t.PayloadCID (cid.Cid) (struct)
+		case "PayloadCID":
 
-		{
+			{
 
-			b, err := br.ReadByte()
-			if err != nil {
-				return err
+				c, err := cbg.ReadCid(br)
+				if err != nil {
+					return xerrors.Errorf("failed to read cid field t.PayloadCID: %w", err)
+				}
+
+				t.PayloadCID = c
+
 			}
-			if b != cbg.CborNull[0] {
-				if err := br.UnreadByte(); err != nil {
+			// t.PayloadSize (int64) (int64)
+		case "PayloadSize":
+			{
+				maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+				var extraI int64
+				if err != nil {
 					return err
 				}
-				v = new(DataRef)
-				if err := v.UnmarshalCBOR(br); err != nil {
-					return xerrors.Errorf("unmarshaling v pointer: %w", err)
+				switch maj {
+				case cbg.MajUnsignedInt:
+					extraI = int64(extra)
+					if extraI < 0 {
+						return fmt.Errorf("int64 positive overflow")
+					}
+				case cbg.MajNegativeInt:
+					extraI = int64(extra)
+					if extraI < 0 {
+						return fmt.Errorf("int64 negative oveflow")
+					}
+					extraI = -1 - extraI
+				default:
+					return fmt.Errorf("wrong type for int64 field: %d", maj)
 				}
+
+				t.PayloadSize = int64(extraI)
+			}
+			// t.StoreID (multistore.StoreID) (uint64)
+		case "StoreID":
+
+			{
+
+				maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+				if err != nil {
+					return err
+				}
+				if maj != cbg.MajUnsignedInt {
+					return fmt.Errorf("wrong type for uint64 field")
+				}
+				t.StoreID = multistore.StoreID(extra)
+
+			}
+			// t.Freq (int64) (int64)
+		case "Freq":
+			{
+				maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+				var extraI int64
+				if err != nil {
+					return err
+				}
+				switch maj {
+				case cbg.MajUnsignedInt:
+					extraI = int64(extra)
+					if extraI < 0 {
+						return fmt.Errorf("int64 positive overflow")
+					}
+				case cbg.MajNegativeInt:
+					extraI = int64(extra)
+					if extraI < 0 {
+						return fmt.Errorf("int64 negative oveflow")
+					}
+					extraI = -1 - extraI
+				default:
+					return fmt.Errorf("wrong type for int64 field: %d", maj)
+				}
+
+				t.Freq = int64(extraI)
 			}
 
+		default:
+			// Field doesn't exist on this type, so ignore it
+			cbg.ScanForLinks(r, func(cid.Cid) {})
 		}
-
-		t.Refs[k] = v
-
 	}
+
 	return nil
 }
