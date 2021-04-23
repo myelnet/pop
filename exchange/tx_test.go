@@ -261,6 +261,8 @@ func TestMapFieldSelector(t *testing.T) {
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
 
+	time.Sleep(time.Second)
+
 	filevals, filepaths := genTestFiles(t)
 
 	tx := pn.Tx(ctx)
