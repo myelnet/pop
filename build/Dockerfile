@@ -40,12 +40,7 @@ RUN \
 	git-chglog -v; \
 	chmod +x /entrypoint.sh
 
-RUN apt-get update
 
-RUN apt install -y hwloc
-RUN apt install -y libhwloc-dev
-RUN rm -rf /var/lib/apt/lists/*
-CMD lstopo --version
 
 ENV CGO_CFLAGS="-D__BLST_PORTABLE__"
 ENV RUSTFLAGS="-C target-cpu=native -g"
@@ -53,6 +48,18 @@ ENV FFI_BUILD_FROM_SOURCE=1
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN apt-get update
+RUN apt-get install -y hwloc
+RUN apt-get install -y libhwloc-dev
+RUN rm -rf /var/lib/apt/lists/*
+
+ENV LDFLAGS="-L/usr/local/lib"
+ENV CPPFLAGS="-I/usr/local/include"
+ENV CPATH=/usr/local/include
+ENV LIBRARY_PATH=/usr/local/lib
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
 
 ENTRYPOINT ["bash", "/entrypoint.sh"]
 

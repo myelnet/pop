@@ -13,4 +13,6 @@ else
     rm -rf "$key_file"
 fi
 
+lstopo --version
+
 goreleaser "$@"
