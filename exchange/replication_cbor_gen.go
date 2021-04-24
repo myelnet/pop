@@ -16,7 +16,7 @@ var _ = xerrors.Errorf
 var _ = cid.Undef
 var _ = sort.Sort
 
-var lengthBufRequest = []byte{130}
+var lengthBufRequest = []byte{131}
 
 func (t *Request) MarshalCBOR(w io.Writer) error {
 	if t == nil {
@@ -28,6 +28,12 @@ func (t *Request) MarshalCBOR(w io.Writer) error {
 	}
 
 	scratch := make([]byte, 9)
+
+	// t.Method (exchange.Method) (uint64)
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.Method)); err != nil {
+		return err
+	}
 
 	// t.PayloadCID (cid.Cid) (struct)
 
@@ -58,10 +64,24 @@ func (t *Request) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input should be of type array")
 	}
 
-	if extra != 2 {
+	if extra != 3 {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
+	// t.Method (exchange.Method) (uint64)
+
+	{
+
+		maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+		if err != nil {
+			return err
+		}
+		if maj != cbg.MajUnsignedInt {
+			return fmt.Errorf("wrong type for uint64 field")
+		}
+		t.Method = Method(extra)
+
+	}
 	// t.PayloadCID (cid.Cid) (struct)
 
 	{

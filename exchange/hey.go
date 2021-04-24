@@ -7,6 +7,7 @@ import (
 	"time"
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-eventbus"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -37,7 +38,6 @@ type LatencyRecorder interface {
 // PeerManager all the methods to maintain an optimal list of peers
 type PeerManager interface {
 	HeyReceiver
-	HeyGetter
 	LatencyRecorder
 }
 
@@ -46,16 +46,18 @@ type PeerManager interface {
 type HeyService struct {
 	h  host.Host
 	pm PeerManager
+	hg HeyGetter
 }
 
 // NewHeyService creates new instance of the HeyService
-func NewHeyService(h host.Host, pm PeerManager) *HeyService {
-	return &HeyService{h, pm}
+func NewHeyService(h host.Host, pm PeerManager, hg HeyGetter) *HeyService {
+	return &HeyService{h, pm, hg}
 }
 
 // Hey is the greeting message which takes in network info
 type Hey struct {
-	Regions []RegionCode
+	Regions   []RegionCode
+	IndexRoot *cid.Cid // If the node has an empty index the root will be nil
 }
 
 // Run starts a new goroutine in which we listen for new peers we successfully connected to
@@ -105,7 +107,7 @@ func (hs *HeyService) SendHey(ctx context.Context, pid peer.ID) error {
 		return err
 	}
 
-	hmsg := hs.pm.GetHey()
+	hmsg := hs.hg.GetHey()
 
 	start := time.Now()
 	if err := cborutil.WriteCborRPC(s, &hmsg); err != nil {

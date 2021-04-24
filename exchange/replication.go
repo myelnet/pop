@@ -9,6 +9,7 @@ import (
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-hamt-ipld/v3"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/jpillora/backoff"
@@ -20,19 +21,32 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 )
 
+//go:generate cbor-gen-for Request
+
 // PopRequestProtocolID is the protocol for requesting caches to store new content
 const PopRequestProtocolID = protocol.ID("/myel/pop/request/1.0")
 
 // Request describes the content to pull
 type Request struct {
+	Method     Method
 	PayloadCID cid.Cid
 	Size       uint64
 }
 
-// Type defines AddRequest as a datatransfer voucher for pulling the data from the request
+// Type defines Request as a datatransfer voucher for pulling the data from the request
 func (Request) Type() datatransfer.TypeIdentifier {
-	return "DispatchRequestVoucher"
+	return "ReplicationRequestVoucher"
 }
+
+// Method is the replication request method
+type Method uint64
+
+const (
+	// Dispatch is an initial request from a content plublisher
+	Dispatch Method = iota
+	// FetchIndex is a request from one content provider to another to retrieve their index
+	FetchIndex
+)
 
 // RequestStream allows reading and writing CBOR encoded messages to a stream
 type RequestStream struct {
@@ -76,28 +90,25 @@ type Replication struct {
 	rgs       []Region
 	reqProtos []protocol.ID
 
-	mu      sync.Mutex
-	schemes map[peer.ID]struct{}
-
 	pmu   sync.Mutex
 	pulls map[cid.Cid]*peer.Set
+
+	pidxs map[peer.ID]*hamt.Node
 }
 
 // NewReplication starts the exchange replication management system
 func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Region) *Replication {
 	pm := NewPeerMgr(h, rgs)
-	hs := NewHeyService(h, pm)
 	r := &Replication{
 		h:         h,
 		pm:        pm,
-		hs:        hs,
 		dt:        dt,
 		rgs:       rgs,
 		idx:       idx,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
-		schemes:   make(map[peer.ID]struct{}),
 		pulls:     make(map[cid.Cid]*peer.Set),
 	}
+	r.hs = NewHeyService(h, pm, r)
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
 	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx))
@@ -115,7 +126,7 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Regi
 
 // Start initiates listeners to update our scheme if new peers join
 func (r *Replication) Start(ctx context.Context) error {
-	sub, err := r.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
+	sub, err := r.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	if err != nil {
 		return err
 	}
@@ -123,17 +134,40 @@ func (r *Replication) Start(ctx context.Context) error {
 		return err
 	}
 	go func() {
-		for evt := range sub.Out() {
-			pevt := evt.(PeerRegionEvt)
-			switch pevt.Type {
-			case AddPeerEvt:
-				r.JoinScheme(pevt.ID)
-			case RemovePeerEvt:
-				r.LeaveScheme(pevt.ID)
+		var q []HeyEvt
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case evt := <-sub.Out():
+				hevt := evt.(HeyEvt)
+				q = append(q, hevt)
 			}
 		}
 	}()
 	return nil
+}
+
+func (r *Replication) fetchIndex(hvt HeyEvt) error {
+	return nil
+}
+
+// GetHey formats a new Hey message
+func (r *Replication) GetHey() Hey {
+	regions := make([]RegionCode, len(r.rgs))
+	i := 0
+	for _, rg := range r.rgs {
+		regions[i] = rg.Code
+		i++
+	}
+	h := Hey{
+		Regions: regions,
+	}
+	idxr := r.idx.Root()
+	if idxr != cid.Undef {
+		h.IndexRoot = &idxr
+	}
+	return h
 }
 
 // NewRequestStream opens a multi stream with the given peer and sets up the interface to write requests to it
@@ -283,20 +317,6 @@ func (r *Replication) sendAllRequests(req Request, peers []peer.ID) {
 			continue
 		}
 	}
-}
-
-// JoinScheme adds a peer to our scheme set meaning we're in that peer's scheme
-func (r *Replication) JoinScheme(p peer.ID) {
-	r.mu.Lock()
-	r.schemes[p] = struct{}{}
-	r.mu.Unlock()
-}
-
-// LeaveScheme removes a peer from our scheme meaning we ...
-func (r *Replication) LeaveScheme(p peer.ID) {
-	r.mu.Lock()
-	delete(r.schemes, p)
-	r.mu.Unlock()
 }
 
 // AuthorizePull adds a peer to a set giving authorization to pull content without payment

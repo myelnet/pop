@@ -181,6 +181,11 @@ func (idx *Index) GetStore(id cid.Cid) (*multistore.Store, error) {
 	return idx.ms.Get(storeID)
 }
 
+// Root returns the HAMT root CID
+func (idx *Index) Root() cid.Cid {
+	return idx.rootCID
+}
+
 // Flush persists the Refs to the store
 func (idx *Index) Flush() error {
 	if err := idx.root.Flush(context.TODO()); err != nil {
