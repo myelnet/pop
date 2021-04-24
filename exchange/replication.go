@@ -11,9 +11,11 @@ import (
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-hamt-ipld/v3"
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-graphsync/storeutil"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/mux"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -47,6 +49,11 @@ const (
 	// FetchIndex is a request from one content provider to another to retrieve their index
 	FetchIndex
 )
+
+// IndexEvt is emitted when a new index is loaded in the replication service
+type IndexEvt struct {
+	Root cid.Cid
+}
 
 // RequestStream allows reading and writing CBOR encoded messages to a stream
 type RequestStream struct {
@@ -89,6 +96,7 @@ type Replication struct {
 	idx       *Index
 	rgs       []Region
 	reqProtos []protocol.ID
+	emitter   event.Emitter
 
 	pmu   sync.Mutex
 	pulls map[cid.Cid]*peer.Set
@@ -112,6 +120,7 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Regi
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
 	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx))
+	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
 
 	// TODO: clean this up
 	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
@@ -135,21 +144,73 @@ func (r *Replication) Start(ctx context.Context) error {
 	}
 	go func() {
 		var q []HeyEvt
+		var fetchDone chan error
 		for {
+			var updates chan error
+			if len(q) > 0 {
+				updates = fetchDone
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case evt := <-sub.Out():
 				hevt := evt.(HeyEvt)
-				q = append(q, hevt)
+				if hevt.IndexRoot != nil {
+					if fetchDone == nil {
+						fetchDone = make(chan error, 1)
+						go func() {
+							fetchDone <- r.fetchIndex(ctx, hevt)
+						}()
+						continue
+					}
+					q = append(q, hevt)
+				}
+				// We can probably ignore errors
+			case <-updates:
+				if len(q) > 0 {
+					fetchDone = make(chan error, 1)
+					go func() {
+						fetchDone <- r.fetchIndex(ctx, q[0])
+					}()
+					q = q[1:]
+				}
 			}
 		}
 	}()
 	return nil
 }
 
-func (r *Replication) fetchIndex(hvt HeyEvt) error {
-	return nil
+func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
+	done := make(chan struct{}, 1)
+	rcid := *hvt.IndexRoot
+	unsub := r.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+		if chState.Status() == datatransfer.Completed {
+			root := chState.BaseCID()
+			if root != rcid {
+				return
+			}
+			done <- struct{}{}
+		}
+		fmt.Println("event", datatransfer.Statuses[chState.Status()], chState.Message())
+	})
+	defer unsub()
+	req := Request{
+		Method:     FetchIndex,
+		PayloadCID: rcid,
+	}
+	_, err := r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, IndexSelector())
+	if err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		r.emitter.Emit(IndexEvt{
+			Root: rcid,
+		})
+		return nil
+	}
 }
 
 // GetHey formats a new Hey message
@@ -189,22 +250,25 @@ func (r *Replication) handleRequest(s network.Stream) {
 	if err != nil {
 		return
 	}
-
-	// TODO: validate request
-	// Create a new store to receive our new blocks
-	// It will be automatically picked up in the TransportConfigurer
-	storeID := r.idx.ms.Next()
-	err = r.idx.SetRef(&DataRef{
-		PayloadCID:  req.PayloadCID,
-		PayloadSize: int64(req.Size),
-		StoreID:     storeID,
-	})
-	if err != nil {
-		return
-	}
-	_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
-	if err != nil {
-		return
+	// Only the dispatch method is streamed directly at this time
+	switch req.Method {
+	case Dispatch:
+		// TODO: validate request
+		// Create a new store to receive our new blocks
+		// It will be automatically picked up in the TransportConfigurer
+		storeID := r.idx.ms.Next()
+		err = r.idx.SetRef(&DataRef{
+			PayloadCID:  req.PayloadCID,
+			PayloadSize: int64(req.Size),
+			StoreID:     storeID,
+		})
+		if err != nil {
+			return
+		}
+		_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -230,7 +294,12 @@ var DefaultDispatchOptions = DispatchOptions{
 }
 
 // Dispatch to the network until we have propagated the content to enough peers
-func (r *Replication) Dispatch(req Request, opt DispatchOptions) chan PRecord {
+func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) chan PRecord {
+	req := Request{
+		Method:     Dispatch,
+		PayloadCID: root,
+		Size:       size,
+	}
 	resChan := make(chan PRecord, opt.RF)
 	out := make(chan PRecord, opt.RF)
 	// listen for datatransfer events to identify the peers who pulled the content
@@ -349,6 +418,17 @@ func (r *Replication) ValidatePull(
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,
 	selector ipld.Node) (datatransfer.VoucherResult, error) {
+
+	request, ok := voucher.(*Request)
+	if !ok {
+		return nil, fmt.Errorf("bad voucher")
+	}
+	// TODO: For now fetching someone's index it authorized by default
+	// we need some permission system
+	if request.Method == FetchIndex {
+		return nil, nil
+	}
+
 	r.pmu.Lock()
 	defer r.pmu.Unlock()
 	set, ok := r.pulls[baseCid]
@@ -379,6 +459,15 @@ func TransportConfigurer(idx *Index) datatransfer.TransportConfigurer {
 		}
 		gsTransport, ok := transport.(StoreConfigurableTransport)
 		if !ok {
+			return
+		}
+		if request.Method == FetchIndex {
+			loader := storeutil.LoaderForBlockstore(idx.Bstore())
+			storer := storeutil.StorerForBlockstore(idx.Bstore())
+			err := gsTransport.UseStore(channelID, loader, storer)
+			if err != nil {
+				warn(err)
+			}
 			return
 		}
 		store, err := idx.GetStore(request.PayloadCID)

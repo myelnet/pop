@@ -23,3 +23,16 @@ func MapFieldSelector(key string) ipld.Node {
 				ssb.ExploreAll(ssb.ExploreRecursiveEdge())))
 		})).Node()
 }
+
+// IndexSelector is used to query an index without following the links
+func IndexSelector() ipld.Node {
+	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
+	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
+		ssb.ExploreUnion(
+			ssb.ExploreFields(func(efsb builder.ExploreFieldsSpecBuilder) {
+				efsb.Insert("PayloadCID", ssb.Matcher())
+			}),
+			ssb.ExploreAll(ssb.ExploreRecursiveEdge()),
+		),
+	).Node()
+}

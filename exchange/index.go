@@ -34,6 +34,7 @@ type Index struct {
 	ms      *multistore.MultiStore
 	ds      datastore.Batching
 	root    *hamt.Node
+	bstore  blockstore.Blockstore
 	store   cbor.IpldStore
 	rootCID cid.Cid
 	// Upper bound is the store usage amount afyer which we start evicting refs from the store
@@ -88,8 +89,9 @@ func NewIndex(ds datastore.Batching, ms *multistore.MultiStore, opts ...IndexOpt
 	for _, o := range opts {
 		o(idx)
 	}
-
-	idx.store = cbor.NewCborStore(blockstore.NewBlockstore(idx.ds))
+	// keep a reference of the blockstore for loading in graphsync
+	idx.bstore = blockstore.NewBlockstore(idx.ds)
+	idx.store = cbor.NewCborStore(idx.bstore)
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
 	}
@@ -286,6 +288,11 @@ func (idx *Index) ListRefs() ([]*DataRef, error) {
 // Len returns the number of roots this index is currently storing
 func (idx *Index) Len() int {
 	return len(idx.Refs)
+}
+
+// Bstore returns the lower level blockstore storing the hamt
+func (idx *Index) Bstore() blockstore.Blockstore {
+	return idx.bstore
 }
 
 type listEntry struct {
