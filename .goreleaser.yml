@@ -1,14 +1,14 @@
 # This is an example .goreleaser.yml file with some sane defaults.
 # Make sure to check the documentation at http://goreleaser.com
 builds:
-  - id: "pop-darwin-amd64"
+  - id: "pop-linux"
     main: "./cmd/pop"
     env:
       - CGO_ENABLED=1
-      - CC=o64-clang 
-      - CXX=o64-clang++
     goos:
-      - darwin
+      - linux
+    goarch:
+      - amd64
     hooks:
       pre: make build
 archives:
