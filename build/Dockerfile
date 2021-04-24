@@ -51,7 +51,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN apt-get update
 RUN apt-get install -y hwloc
+RUN apt-get install -y jq
 RUN apt-get install -y libhwloc-dev
+RUN apt-get install nvidia-opencl-dev
 RUN rm -rf /var/lib/apt/lists/*
 
 ENV LDFLAGS="-L/usr/local/lib"
