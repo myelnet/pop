@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -15,7 +16,6 @@ import (
 type Peer struct {
 	Regions []RegionCode
 	Latency time.Duration
-	Score   int
 }
 
 // PeerMgr is in charge of maintaining an optimal network of peers to coordinate with
@@ -28,21 +28,11 @@ type PeerMgr struct {
 	peers map[peer.ID]Peer
 }
 
-// PeerRegionEvt is accessible via the libp2p event bus subscription
-type PeerRegionEvt struct {
-	Type PeerEvtType
-	ID   peer.ID
+// HeyEvt is emitted when a Hey is received and accessible via the libp2p event bus subscription
+type HeyEvt struct {
+	Peer      peer.ID
+	IndexRoot *cid.Cid // nil index root means empty index i.e. brand new node
 }
-
-// PeerEvtType enumerates all the different events exposed by the PeerMgr
-type PeerEvtType int
-
-const (
-	// AddPeerEvt is triggered when a new peer is connected
-	AddPeerEvt PeerEvtType = iota
-	// RemovePeerEvt is triggered when we lose connection with a peer
-	RemovePeerEvt
-)
 
 // NewPeerMgr prepares a new PeerMgr instance
 func NewPeerMgr(h host.Host, regions []Region) *PeerMgr {
@@ -56,19 +46,13 @@ func NewPeerMgr(h host.Host, regions []Region) *PeerMgr {
 		regions: reg,
 		peers:   make(map[peer.ID]Peer),
 	}
-	// Mostly for testing purposes although would be useful to subscribe to different
-	// new peers per region etc.
-	pm.emitter, _ = h.EventBus().Emitter(new(PeerRegionEvt))
+	pm.emitter, _ = h.EventBus().Emitter(new(HeyEvt))
 	h.Network().Notify(&network.NotifyBundle{
 		DisconnectedF: func(_ network.Network, c network.Conn) {
 			pm.mu.Lock()
 			defer pm.mu.Unlock()
 			if _, ok := pm.peers[c.RemotePeer()]; ok {
 				delete(pm.peers, c.RemotePeer())
-				pm.emitter.Emit(PeerRegionEvt{
-					Type: RemovePeerEvt,
-					ID:   c.RemotePeer(),
-				})
 			}
 		},
 	})
@@ -80,9 +64,9 @@ func (pm *PeerMgr) Receive(p peer.ID, h Hey) {
 	for _, r := range h.Regions {
 		// We only save peers who are in the same region as us
 		if reg, ok := pm.regions[r]; ok {
-			pm.emitter.Emit(PeerRegionEvt{
-				Type: AddPeerEvt,
-				ID:   p,
+			pm.emitter.Emit(HeyEvt{
+				Peer:      p,
+				IndexRoot: h.IndexRoot,
 			})
 			// These peers should be trimmed last when the number of connections overflows
 			pm.h.ConnManager().TagPeer(p, reg.Name, 10)
@@ -92,19 +76,6 @@ func (pm *PeerMgr) Receive(p peer.ID, h Hey) {
 			}
 			pm.mu.Unlock()
 		}
-	}
-}
-
-// GetHey formats a new Hey message
-func (pm *PeerMgr) GetHey() Hey {
-	regions := make([]RegionCode, len(pm.regions))
-	i := 0
-	for k := range pm.regions {
-		regions[i] = k
-		i++
-	}
-	return Hey{
-		Regions: regions,
 	}
 }
 

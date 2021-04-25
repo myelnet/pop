@@ -237,10 +237,7 @@ func TestExchangeE2E(t *testing.T) {
 
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			res := client.R().Dispatch(Request{
-				PayloadCID: rootCid,
-				Size:       uint64(len(origBytes)),
-			}, DefaultDispatchOptions)
+			res := client.R().Dispatch(rootCid, uint64(len(origBytes)), DefaultDispatchOptions)
 
 			var records []PRecord
 			for rec := range res {
