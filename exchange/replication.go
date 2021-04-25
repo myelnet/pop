@@ -139,45 +139,62 @@ func (r *Replication) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	go r.pumpIndexes(ctx, sub)
 	if err := r.hs.Run(ctx); err != nil {
 		return err
 	}
-	go func() {
-		var q []HeyEvt
-		var fetchDone chan error
-		for {
-			var updates chan error
-			if len(q) > 0 {
-				updates = fetchDone
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case evt := <-sub.Out():
-				hevt := evt.(HeyEvt)
-				if hevt.IndexRoot != nil {
-					if fetchDone == nil {
-						fetchDone = make(chan error, 1)
-						go func() {
-							fetchDone <- r.fetchIndex(ctx, hevt)
-						}()
-						continue
-					}
-					q = append(q, hevt)
-				}
-				// We can probably ignore errors
-			case <-updates:
-				if len(q) > 0 {
-					fetchDone = make(chan error, 1)
+	return nil
+}
+
+func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
+	var q []HeyEvt
+	var fetchDone chan fetchResult
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt := <-sub.Out():
+			hevt := evt.(HeyEvt)
+			if hevt.IndexRoot != nil {
+				if fetchDone == nil {
+					fetchDone = make(chan fetchResult, 1)
 					go func() {
-						fetchDone <- r.fetchIndex(ctx, q[0])
+						err := r.fetchIndex(ctx, hevt)
+						fetchDone <- fetchResult{*hevt.IndexRoot, err}
 					}()
-					q = q[1:]
+					continue
 				}
+				q = append(q, hevt)
+			}
+			// We can probably ignore errors
+		case res := <-fetchDone:
+			if res.err == nil {
+				go func(rt cid.Cid) {
+					err := r.idx.LoadInterest(rt)
+					if err != nil {
+						fmt.Println("failed to load interest", err)
+						return
+					}
+					r.emitter.Emit(IndexEvt{
+						Root: rt,
+					})
+				}(res.root)
+			}
+			if len(q) > 0 {
+				fetchDone = make(chan fetchResult, 1)
+				go func(hvt HeyEvt) {
+					err := r.fetchIndex(ctx, hvt)
+					fetchDone <- fetchResult{*hvt.IndexRoot, err}
+				}(q[0])
+				q = q[1:]
 			}
 		}
-	}()
-	return nil
+	}
+}
+
+type fetchResult struct {
+	root cid.Cid
+	err  error
 }
 
 func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
@@ -191,7 +208,6 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 			}
 			done <- struct{}{}
 		}
-		fmt.Println("event", datatransfer.Statuses[chState.Status()], chState.Message())
 	})
 	defer unsub()
 	req := Request{
@@ -206,9 +222,6 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-done:
-		r.emitter.Emit(IndexEvt{
-			Root: rcid,
-		})
 		return nil
 	}
 }

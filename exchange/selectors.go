@@ -28,11 +28,10 @@ func MapFieldSelector(key string) ipld.Node {
 func IndexSelector() ipld.Node {
 	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
 	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
-		ssb.ExploreUnion(
+		ssb.ExploreAll(
 			ssb.ExploreFields(func(efsb builder.ExploreFieldsSpecBuilder) {
-				efsb.Insert("PayloadCID", ssb.Matcher())
+				efsb.Insert("Value", ssb.ExploreRecursiveEdge())
 			}),
-			ssb.ExploreAll(ssb.ExploreRecursiveEdge()),
 		),
 	).Node()
 }
