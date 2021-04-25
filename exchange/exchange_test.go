@@ -15,6 +15,7 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -266,7 +267,7 @@ func TestExchangeE2E(t *testing.T) {
 			tx := client.Tx(ctx, WithRoot(rootCid), WithStrategy(SelectFirst), WithTriage())
 			defer tx.Close()
 
-			err = tx.Query("")
+			err = tx.Query(sel.All())
 			require.NoError(t, err)
 
 			selected, err := tx.Triage()

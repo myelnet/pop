@@ -21,6 +21,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	sel "github.com/myelnet/pop/selectors"
 )
 
 //go:generate cbor-gen-for Request
@@ -214,7 +215,7 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 		Method:     FetchIndex,
 		PayloadCID: rcid,
 	}
-	_, err := r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, IndexSelector())
+	_, err := r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, sel.Hamt())
 	if err != nil {
 		return err
 	}
@@ -278,7 +279,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 		if err != nil {
 			return
 		}
-		_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
+		_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, sel.All())
 		if err != nil {
 			return
 		}

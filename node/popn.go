@@ -29,6 +29,7 @@ import (
 	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-path"
 	"github.com/ipld/go-car"
+	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -43,6 +44,7 @@ import (
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
 )
@@ -349,7 +351,7 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 	froot := status[exchange.KeyFromPath(args.Path)].Cid
 	// We could get the size from the index entry but DAGStat gives more feedback into
 	// how the file actually got chunked
-	stats, err := exchange.Stat(ctx, nd.tx.Store(), froot, exchange.AllSelector())
+	stats, err := exchange.Stat(ctx, nd.tx.Store(), froot, sel.All())
 	if err != nil {
 		log.Error().Err(err).Msg("record not found")
 	}
@@ -655,7 +657,13 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 
 	tx := nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
 	defer tx.Close()
-	if err := tx.Query(args.Key); err != nil {
+	var sl ipld.Node
+	if args.Key != "" {
+		sl = sel.Key(args.Key)
+	} else {
+		sl = sel.All()
+	}
+	if err := tx.Query(sl); err != nil {
 		return err
 	}
 	// We can query a specific miner on top of gossip

@@ -1,4 +1,4 @@
-package exchange
+package selectors
 
 import (
 	"github.com/ipld/go-ipld-prime"
@@ -7,15 +7,15 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 )
 
-// AllSelector is the default selector that reaches all the blocks
-func AllSelector() ipld.Node {
+// All the default selector that reaches all the blocks
+func All() ipld.Node {
 	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
 	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 }
 
-// MapFieldSelector selects the link and all the children associated with a given key in a Map
-func MapFieldSelector(key string) ipld.Node {
+// Key selects the link and all the children associated with a given key in a Map
+func Key(key string) ipld.Node {
 	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
 	return ssb.ExploreUnion(ssb.Matcher(),
 		ssb.ExploreFields(func(efsb builder.ExploreFieldsSpecBuilder) {
@@ -24,8 +24,8 @@ func MapFieldSelector(key string) ipld.Node {
 		})).Node()
 }
 
-// IndexSelector is used to query an index without following the links
-func IndexSelector() ipld.Node {
+// Hamt is used to query a HAMT without following the links in deferred nodes
+func Hamt() ipld.Node {
 	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
 	return ssb.ExploreRecursive(selector.RecursionLimitNone(),
 		ssb.ExploreAll(

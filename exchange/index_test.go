@@ -19,6 +19,7 @@ import (
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -199,7 +200,7 @@ func TestIndexSelector(t *testing.T) {
 	link := cidlink.Link{Cid: idx.Root()}
 	traverser := ipldutil.TraversalBuilder{
 		Root:     link,
-		Selector: IndexSelector(),
+		Selector: sel.Hamt(),
 	}.Start(context.Background())
 
 	complete := false
