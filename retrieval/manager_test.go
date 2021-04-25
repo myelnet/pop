@@ -25,6 +25,7 @@ import (
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/retrieval/provider"
+	"github.com/myelnet/pop/selectors"
 )
 
 var blockGen = blocksutil.NewBlockGenerator()
@@ -220,7 +221,7 @@ func TestRetrieval(t *testing.T) {
 			paymentInterval := uint64(10000)
 			paymentIntervalIncrease := uint64(1000)
 			unsealPrice := big.Zero()
-			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, AllSelector(), nil, unsealPrice)
+			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, selectors.All(), nil, unsealPrice)
 			require.NoError(t, err)
 			ask := deal.QueryResponse{
 				MinPricePerByte:            pricePerByte,

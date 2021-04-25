@@ -23,7 +23,6 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-ipld-prime"
-	iprime "github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -83,7 +82,7 @@ type Tx struct {
 	cacheRF int
 	// sel is the selector used to select specific nodes only to retrieve. if not provided we select
 	// all the nodes by default
-	sel iprime.Node
+	sel ipld.Node
 	// done is the final message telling us we have received all the blocks and all is well. if the error
 	// is not nil we've run out of options and nothing we can do at this time will get us the content.
 	done chan error
@@ -475,13 +474,10 @@ func (ds DealSelection) Decline() {
 }
 
 // Query the discovery service for offers
-func (tx *Tx) Query(key string) error {
-	// We adjust the selector to only fech the DAG associated to the key
-	if key != "" {
-		tx.sel = MapFieldSelector(key)
-	}
+func (tx *Tx) Query(sel ipld.Node) error {
+	tx.sel = sel
 	if tx.worker != nil {
-		return tx.disco.Query(tx.ctx, tx.root, tx.sel)
+		return tx.disco.Query(tx.ctx, tx.root, sel)
 	}
 	return ErrNoStrategy
 }

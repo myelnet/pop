@@ -17,6 +17,7 @@ import (
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,7 +98,7 @@ func TestStat(t *testing.T) {
 			err = bufferedDS.Commit()
 			require.NoError(t, err)
 
-			stats, err := Stat(ctx, store, nd.Cid(), AllSelector())
+			stats, err := Stat(ctx, store, nd.Cid(), sel.All())
 			require.NoError(t, err)
 
 			require.Equal(t, testCase.numBlocks, stats.NumBlocks)

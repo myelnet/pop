@@ -17,6 +17,7 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -162,7 +163,7 @@ func TestGossipDisco(t *testing.T) {
 					client.SetReceiver(func(i peer.AddrInfo, r deal.QueryResponse) {
 						resps <- r
 					})
-					err := client.Query(ctx, root, AllSelector())
+					err := client.Query(ctx, root, sel.All())
 					require.NoError(t, err)
 
 					// execute a job for each offer

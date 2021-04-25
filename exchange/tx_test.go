@@ -17,6 +17,7 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/retrieval/deal"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,7 +82,7 @@ func TestTx(t *testing.T) {
 			require.NoError(t, mn.ConnectAllButSelf())
 
 			tx = client.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
-			require.NoError(t, tx.Query(KeyFromPath(fname)))
+			require.NoError(t, tx.Query(sel.Key(KeyFromPath(fname))))
 			select {
 			case <-ctx.Done():
 				t.Fatal("tx timeout")
@@ -271,14 +272,14 @@ func TestMapFieldSelector(t *testing.T) {
 	}
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
-	stat, err := Stat(ctx, tx.Store(), tx.Root(), MapFieldSelector("line2.txt"))
+	stat, err := Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
 	require.NoError(t, err)
 	require.Equal(t, 2, stat.NumBlocks)
 	require.Equal(t, 627, stat.Size)
 
 	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key := KeyFromPath(filepaths[0])
-	gtx.sel = MapFieldSelector(key)
+	gtx.sel = sel.Key(key)
 
 	// We skip discovery and send an offer directly
 	qs, err := pn.disco.NewQueryStream(n2.Host.ID())
@@ -353,7 +354,7 @@ func TestMultiTx(t *testing.T) {
 
 	gtx1 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key1 := KeyFromPath(filepaths[0])
-	require.NoError(t, gtx1.Query(key1))
+	require.NoError(t, gtx1.Query(sel.Key(key1)))
 
 	select {
 	case <-ctx.Done():
@@ -366,7 +367,7 @@ func TestMultiTx(t *testing.T) {
 
 	gtx2 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key2 := KeyFromPath(filepaths[1])
-	require.NoError(t, gtx2.Query(key2))
+	require.NoError(t, gtx2.Query(sel.Key(key2)))
 
 	select {
 	case <-ctx.Done():
