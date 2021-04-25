@@ -9,10 +9,13 @@ import (
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-hamt-ipld/v3"
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-graphsync/storeutil"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/mux"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -20,18 +23,36 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 )
 
+//go:generate cbor-gen-for Request
+
 // PopRequestProtocolID is the protocol for requesting caches to store new content
 const PopRequestProtocolID = protocol.ID("/myel/pop/request/1.0")
 
 // Request describes the content to pull
 type Request struct {
+	Method     Method
 	PayloadCID cid.Cid
 	Size       uint64
 }
 
-// Type defines AddRequest as a datatransfer voucher for pulling the data from the request
+// Type defines Request as a datatransfer voucher for pulling the data from the request
 func (Request) Type() datatransfer.TypeIdentifier {
-	return "DispatchRequestVoucher"
+	return "ReplicationRequestVoucher"
+}
+
+// Method is the replication request method
+type Method uint64
+
+const (
+	// Dispatch is an initial request from a content plublisher
+	Dispatch Method = iota
+	// FetchIndex is a request from one content provider to another to retrieve their index
+	FetchIndex
+)
+
+// IndexEvt is emitted when a new index is loaded in the replication service
+type IndexEvt struct {
+	Root cid.Cid
 }
 
 // RequestStream allows reading and writing CBOR encoded messages to a stream
@@ -75,32 +96,31 @@ type Replication struct {
 	idx       *Index
 	rgs       []Region
 	reqProtos []protocol.ID
-
-	mu      sync.Mutex
-	schemes map[peer.ID]struct{}
+	emitter   event.Emitter
 
 	pmu   sync.Mutex
 	pulls map[cid.Cid]*peer.Set
+
+	pidxs map[peer.ID]*hamt.Node
 }
 
 // NewReplication starts the exchange replication management system
 func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Region) *Replication {
 	pm := NewPeerMgr(h, rgs)
-	hs := NewHeyService(h, pm)
 	r := &Replication{
 		h:         h,
 		pm:        pm,
-		hs:        hs,
 		dt:        dt,
 		rgs:       rgs,
 		idx:       idx,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
-		schemes:   make(map[peer.ID]struct{}),
 		pulls:     make(map[cid.Cid]*peer.Set),
 	}
+	r.hs = NewHeyService(h, pm, r)
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
 	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx))
+	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
 
 	// TODO: clean this up
 	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
@@ -115,25 +135,113 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Regi
 
 // Start initiates listeners to update our scheme if new peers join
 func (r *Replication) Start(ctx context.Context) error {
-	sub, err := r.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
+	sub, err := r.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	if err != nil {
 		return err
 	}
+	go r.pumpIndexes(ctx, sub)
 	if err := r.hs.Run(ctx); err != nil {
 		return err
 	}
-	go func() {
-		for evt := range sub.Out() {
-			pevt := evt.(PeerRegionEvt)
-			switch pevt.Type {
-			case AddPeerEvt:
-				r.JoinScheme(pevt.ID)
-			case RemovePeerEvt:
-				r.LeaveScheme(pevt.ID)
+	return nil
+}
+
+func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
+	var q []HeyEvt
+	var fetchDone chan fetchResult
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt := <-sub.Out():
+			hevt := evt.(HeyEvt)
+			if hevt.IndexRoot != nil {
+				if fetchDone == nil {
+					fetchDone = make(chan fetchResult, 1)
+					go func() {
+						err := r.fetchIndex(ctx, hevt)
+						fetchDone <- fetchResult{*hevt.IndexRoot, err}
+					}()
+					continue
+				}
+				q = append(q, hevt)
+			}
+			// We can probably ignore errors
+		case res := <-fetchDone:
+			if res.err == nil {
+				go func(rt cid.Cid) {
+					err := r.idx.LoadInterest(rt)
+					if err != nil {
+						fmt.Println("failed to load interest", err)
+						return
+					}
+					r.emitter.Emit(IndexEvt{
+						Root: rt,
+					})
+				}(res.root)
+			}
+			if len(q) > 0 {
+				fetchDone = make(chan fetchResult, 1)
+				go func(hvt HeyEvt) {
+					err := r.fetchIndex(ctx, hvt)
+					fetchDone <- fetchResult{*hvt.IndexRoot, err}
+				}(q[0])
+				q = q[1:]
 			}
 		}
-	}()
-	return nil
+	}
+}
+
+type fetchResult struct {
+	root cid.Cid
+	err  error
+}
+
+func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
+	done := make(chan struct{}, 1)
+	rcid := *hvt.IndexRoot
+	unsub := r.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+		if chState.Status() == datatransfer.Completed {
+			root := chState.BaseCID()
+			if root != rcid {
+				return
+			}
+			done <- struct{}{}
+		}
+	})
+	defer unsub()
+	req := Request{
+		Method:     FetchIndex,
+		PayloadCID: rcid,
+	}
+	_, err := r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, IndexSelector())
+	if err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
+}
+
+// GetHey formats a new Hey message
+func (r *Replication) GetHey() Hey {
+	regions := make([]RegionCode, len(r.rgs))
+	i := 0
+	for _, rg := range r.rgs {
+		regions[i] = rg.Code
+		i++
+	}
+	h := Hey{
+		Regions: regions,
+	}
+	idxr := r.idx.Root()
+	if idxr != cid.Undef {
+		h.IndexRoot = &idxr
+	}
+	return h
 }
 
 // NewRequestStream opens a multi stream with the given peer and sets up the interface to write requests to it
@@ -155,22 +263,25 @@ func (r *Replication) handleRequest(s network.Stream) {
 	if err != nil {
 		return
 	}
-
-	// TODO: validate request
-	// Create a new store to receive our new blocks
-	// It will be automatically picked up in the TransportConfigurer
-	storeID := r.idx.ms.Next()
-	err = r.idx.SetRef(&DataRef{
-		PayloadCID:  req.PayloadCID,
-		PayloadSize: int64(req.Size),
-		StoreID:     storeID,
-	})
-	if err != nil {
-		return
-	}
-	_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
-	if err != nil {
-		return
+	// Only the dispatch method is streamed directly at this time
+	switch req.Method {
+	case Dispatch:
+		// TODO: validate request
+		// Create a new store to receive our new blocks
+		// It will be automatically picked up in the TransportConfigurer
+		storeID := r.idx.ms.Next()
+		err = r.idx.SetRef(&DataRef{
+			PayloadCID:  req.PayloadCID,
+			PayloadSize: int64(req.Size),
+			StoreID:     storeID,
+		})
+		if err != nil {
+			return
+		}
+		_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, AllSelector())
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -196,7 +307,12 @@ var DefaultDispatchOptions = DispatchOptions{
 }
 
 // Dispatch to the network until we have propagated the content to enough peers
-func (r *Replication) Dispatch(req Request, opt DispatchOptions) chan PRecord {
+func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) chan PRecord {
+	req := Request{
+		Method:     Dispatch,
+		PayloadCID: root,
+		Size:       size,
+	}
 	resChan := make(chan PRecord, opt.RF)
 	out := make(chan PRecord, opt.RF)
 	// listen for datatransfer events to identify the peers who pulled the content
@@ -285,20 +401,6 @@ func (r *Replication) sendAllRequests(req Request, peers []peer.ID) {
 	}
 }
 
-// JoinScheme adds a peer to our scheme set meaning we're in that peer's scheme
-func (r *Replication) JoinScheme(p peer.ID) {
-	r.mu.Lock()
-	r.schemes[p] = struct{}{}
-	r.mu.Unlock()
-}
-
-// LeaveScheme removes a peer from our scheme meaning we ...
-func (r *Replication) LeaveScheme(p peer.ID) {
-	r.mu.Lock()
-	delete(r.schemes, p)
-	r.mu.Unlock()
-}
-
 // AuthorizePull adds a peer to a set giving authorization to pull content without payment
 // We assume that this authorizes the peer to pull as many links from the root CID as they can
 // It runs on the client side to authorize caches
@@ -329,6 +431,17 @@ func (r *Replication) ValidatePull(
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,
 	selector ipld.Node) (datatransfer.VoucherResult, error) {
+
+	request, ok := voucher.(*Request)
+	if !ok {
+		return nil, fmt.Errorf("bad voucher")
+	}
+	// TODO: For now fetching someone's index it authorized by default
+	// we need some permission system
+	if request.Method == FetchIndex {
+		return nil, nil
+	}
+
 	r.pmu.Lock()
 	defer r.pmu.Unlock()
 	set, ok := r.pulls[baseCid]
@@ -359,6 +472,15 @@ func TransportConfigurer(idx *Index) datatransfer.TransportConfigurer {
 		}
 		gsTransport, ok := transport.(StoreConfigurableTransport)
 		if !ok {
+			return
+		}
+		if request.Method == FetchIndex {
+			loader := storeutil.LoaderForBlockstore(idx.Bstore())
+			storer := storeutil.StorerForBlockstore(idx.Bstore())
+			err := gsTransport.UseStore(channelID, loader, storer)
+			if err != nil {
+				warn(err)
+			}
 			return
 		}
 		store, err := idx.GetStore(request.PayloadCID)

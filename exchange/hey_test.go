@@ -13,7 +13,6 @@ import (
 
 type pmanager struct {
 	heys chan Hey
-	hey  Hey
 	lats chan time.Duration
 }
 
@@ -21,13 +20,17 @@ func (pm *pmanager) Receive(p peer.ID, msg Hey) {
 	pm.heys <- msg
 }
 
-func (pm *pmanager) GetHey() Hey {
-	return pm.hey
-}
-
 func (pm *pmanager) RecordLatency(p peer.ID, l time.Duration) error {
 	pm.lats <- l
 	return nil
+}
+
+type hgetter struct {
+	hey Hey
+}
+
+func (hg *hgetter) GetHey() Hey {
+	return hg.hey
 }
 
 func TestHey(t *testing.T) {
@@ -44,7 +47,7 @@ func TestHey(t *testing.T) {
 	hey1 := Hey{
 		Regions: []RegionCode{GlobalRegion},
 	}
-	h1 := &HeyService{n1.Host, &pmanager{h1ch, hey1, l1ch}}
+	h1 := &HeyService{n1.Host, &pmanager{h1ch, l1ch}, &hgetter{hey1}}
 	require.NoError(t, h1.Run(ctx))
 
 	h2ch := make(chan Hey, 1)
@@ -52,7 +55,7 @@ func TestHey(t *testing.T) {
 	hey2 := Hey{
 		Regions: []RegionCode{GlobalRegion, EuropeRegion},
 	}
-	h2 := &HeyService{n2.Host, &pmanager{h2ch, hey2, l2ch}}
+	h2 := &HeyService{n2.Host, &pmanager{h2ch, l2ch}, &hgetter{hey2}}
 	require.NoError(t, h2.Run(ctx))
 
 	mn.SetLinkDefaults(mocknet.LinkOptions{Latency: lat})

@@ -18,7 +18,7 @@ import (
 )
 
 func TestReplication(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	mn := mocknet.New(ctx)
@@ -81,19 +81,6 @@ func TestReplication(t *testing.T) {
 	testutil.Connect(nC, nF)
 	testutil.Connect(nB, nF)
 
-	nG, _ := setupNode("G")
-
-	testutil.Connect(nC, nG)
-	testutil.Connect(nF, nG)
-	testutil.Connect(nB, nG)
-	testutil.Connect(nA, nG)
-
-	nH, rH := setupNode("H")
-
-	testutil.Connect(nB, nH)
-	testutil.Connect(nG, nH)
-	testutil.Connect(nA, nH)
-
 	time.Sleep(time.Second)
 
 	// 1) D write
@@ -107,7 +94,7 @@ func TestReplication(t *testing.T) {
 		}))
 		opts := DefaultDispatchOptions
 		opts.RF = 3
-		res := rD.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		res := rD.Dispatch(rootCid, uint64(256000), opts)
 		for r := range res {
 			switch r.Provider {
 			case names["C"], names["E"], names["F"]:
@@ -127,16 +114,38 @@ func TestReplication(t *testing.T) {
 			StoreID:    storeID,
 		}))
 		opts := DefaultDispatchOptions
-		opts.RF = 5
-		res := rF.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		opts.RF = 4
+		res := rF.Dispatch(rootCid, uint64(256000), opts)
 		for r := range res {
 			switch r.Provider {
-			case names["E"], names["D"], names["C"], names["B"], names["G"]:
+			case names["E"], names["D"], names["C"], names["B"]:
 			default:
 				t.Fatal("wrong peer")
 			}
 		}
 	}
+
+	// New node G joins the network
+	nG, _ := setupNode("G")
+	isubG, err := nG.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
+	require.NoError(t, err)
+
+	testutil.Connect(nC, nG)
+	testutil.Connect(nF, nG)
+	testutil.Connect(nB, nG)
+	testutil.Connect(nA, nG)
+
+	time.Sleep(time.Second)
+
+	// We should be receiving 3 indexes
+	for i := 0; i < 3; i++ {
+		select {
+		case <-isubG.Out():
+		case <-ctx.Done():
+			t.Fatal("G could not receive all indexes")
+		}
+	}
+	isubG.Close()
 
 	// 3) B write
 	{
@@ -148,16 +157,37 @@ func TestReplication(t *testing.T) {
 			StoreID:    storeID,
 		}))
 		opts := DefaultDispatchOptions
-		opts.RF = 5
-		res := rB.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		opts.RF = 4
+		res := rB.Dispatch(rootCid, uint64(256000), opts)
 		for r := range res {
 			switch r.Provider {
-			case names["C"], names["F"], names["G"], names["H"], names["A"]:
+			case names["C"], names["F"], names["G"], names["A"]:
 			default:
 				t.Fatal("wrong peer")
 			}
 		}
 	}
+
+	// New node H joins the network
+	nH, rH := setupNode("H")
+	isubH, err := nH.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
+	require.NoError(t, err)
+
+	testutil.Connect(nB, nH)
+	testutil.Connect(nG, nH)
+	testutil.Connect(nA, nH)
+
+	time.Sleep(time.Second)
+
+	// We should be receiving 3 indexes
+	for i := 0; i < 3; i++ {
+		select {
+		case <-isubH.Out():
+		case <-ctx.Done():
+			t.Fatal("H could not receive all indexes")
+		}
+	}
+	isubH.Close()
 
 	// 4) H write
 	{
@@ -170,7 +200,7 @@ func TestReplication(t *testing.T) {
 		}))
 		opts := DefaultDispatchOptions
 		opts.RF = 3
-		res := rH.Dispatch(Request{rootCid, uint64(256000)}, opts)
+		res := rH.Dispatch(rootCid, uint64(256000), opts)
 		for r := range res {
 			switch r.Provider {
 			case names["A"], names["B"], names["G"]:
@@ -181,7 +211,7 @@ func TestReplication(t *testing.T) {
 	}
 }
 
-func TestMultiRequestStreams(t *testing.T) {
+func TestMultiDispatchStreams(t *testing.T) {
 	// Loop is useful for detecting any flakiness
 	for i := 0; i < 1; i++ {
 		t.Run(fmt.Sprintf("Run %d", i), func(t *testing.T) {
@@ -216,7 +246,7 @@ func TestMultiRequestStreams(t *testing.T) {
 				PayloadCID: rootCid,
 				StoreID:    storeID,
 			}))
-			sub, err := hn.h.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
+			sub, err := hn.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 			require.NoError(t, err)
 			require.NoError(t, hn.Start(ctx))
 
@@ -253,7 +283,7 @@ func TestMultiRequestStreams(t *testing.T) {
 				}
 			}
 
-			res := hn.Dispatch(Request{rootCid, uint64(len(origBytes))}, DefaultDispatchOptions)
+			res := hn.Dispatch(rootCid, uint64(len(origBytes)), DefaultDispatchOptions)
 
 			var recs []PRecord
 			for rec := range res {
@@ -274,7 +304,7 @@ func TestMultiRequestStreams(t *testing.T) {
 
 // In some rare cases where our node isn't connected to any peer we should still
 // be able to fail gracefully
-func TestSendRequestNoPeers(t *testing.T) {
+func TestSendDispatchNoPeers(t *testing.T) {
 	bgCtx := context.Background()
 
 	mn := mocknet.New(bgCtx)
@@ -308,13 +338,13 @@ func TestSendRequestNoPeers(t *testing.T) {
 		BackoffAttemps: 4,
 		RF:             5,
 	}
-	res := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, options)
+	res := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
 	for range res {
 	}
 }
 
 // The role of this test is to make sure we never dispatch content to unwanted regions
-func TestSendRequestDiffRegions(t *testing.T) {
+func TestSendDispatchDiffRegions(t *testing.T) {
 	bgCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
@@ -342,7 +372,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
 	supply := NewReplication(n1.Host, idx, n1.Dt, asia)
-	sub, err := n1.Host.EventBus().Subscribe(new(PeerRegionEvt), eventbus.BufSize(16))
+	sub, err := n1.Host.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
 
@@ -416,7 +446,7 @@ func TestSendRequestDiffRegions(t *testing.T) {
 		BackoffAttemps: 4,
 		RF:             7,
 	}
-	res := supply.Dispatch(Request{rootCid, uint64(len(origBytes))}, options)
+	res := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
 
 	var recipients []PRecord
 	for rec := range res {

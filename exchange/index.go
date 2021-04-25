@@ -31,11 +31,11 @@ const KIndex = "idx"
 // bounds based on https://github.com/dgrijalva/lfu-go.
 // Content is garbage collected during eviction.
 type Index struct {
-	ms      *multistore.MultiStore
-	ds      datastore.Batching
-	root    *hamt.Node
-	store   cbor.IpldStore
-	rootCID cid.Cid
+	ms     *multistore.MultiStore
+	ds     datastore.Batching
+	root   *hamt.Node
+	bstore blockstore.Blockstore
+	store  cbor.IpldStore
 	// Upper bound is the store usage amount afyer which we start evicting refs from the store
 	ub uint64
 	// Lower bound is the size we target when evicting to make room for new content
@@ -48,7 +48,14 @@ type Index struct {
 	// linked list keeps track of our frequencies to access as fast as possible
 	freqs *list.List
 	// We still need to keep a map in memory
-	Refs map[string]*DataRef
+	Refs    map[string]*DataRef
+	rootCID cid.Cid
+
+	imu sync.Mutex
+	// interest frequencies track the most popular content we don't have
+	ifreqs *list.List
+	// Interest is a map of interest ref pointers
+	interest map[string]*DataRef
 }
 
 // DataRef encapsulates information about a content committed for storage
@@ -79,17 +86,20 @@ func WithBounds(up, lo uint64) IndexOption {
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
 func NewIndex(ds datastore.Batching, ms *multistore.MultiStore, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
-		freqs:   list.New(),
-		ds:      namespace.Wrap(ds, datastore.NewKey("/index")),
-		ms:      ms,
-		Refs:    make(map[string]*DataRef),
-		rootCID: cid.Undef,
+		freqs:    list.New(),
+		ifreqs:   list.New(),
+		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
+		ms:       ms,
+		Refs:     make(map[string]*DataRef),
+		interest: make(map[string]*DataRef),
+		rootCID:  cid.Undef,
 	}
 	for _, o := range opts {
 		o(idx)
 	}
-
-	idx.store = cbor.NewCborStore(blockstore.NewBlockstore(idx.ds))
+	// keep a reference of the blockstore for loading in graphsync
+	idx.bstore = blockstore.NewBlockstore(idx.ds)
+	idx.store = cbor.NewCborStore(idx.bstore)
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
 	}
@@ -154,13 +164,64 @@ func (idx *Index) loadFromStore() error {
 		if err != nil {
 			return err
 		}
-		idx.root, err = hamt.LoadNode(context.TODO(), idx.store, r, hamt.UseTreeBitWidth(5))
+		idx.root, err = idx.LoadRoot(r)
 		if err != nil {
 			return err
 		}
 		idx.rootCID = r
 	}
 	return nil
+}
+
+// LoadRoot loads a new HAMT root not from a given CID, it can be used to load a node
+// from a different root than the current one for example
+func (idx *Index) LoadRoot(r cid.Cid) (*hamt.Node, error) {
+	return hamt.LoadNode(context.TODO(), idx.store, r, hamt.UseTreeBitWidth(5))
+}
+
+// LoadInterest loads potential new content in a different doubly linked list
+func (idx *Index) LoadInterest(r cid.Cid) error {
+	root, err := idx.LoadRoot(r)
+	if err != nil {
+		return err
+	}
+
+	idx.imu.Lock()
+	defer idx.imu.Unlock()
+	return root.ForEach(context.TODO(), func(k string, val *cbg.Deferred) error {
+		v := new(DataRef)
+		if err := v.UnmarshalCBOR(bytes.NewReader(val.Raw)); err != nil {
+			return err
+		}
+		idx.interest[v.PayloadCID.String()] = v
+		if e := idx.ifreqs.Front(); e == nil {
+			// insert the first element in the list
+			li := newListEntry(v.Freq)
+			li.entries[v] = 1
+			v.freqNode = idx.ifreqs.PushFront(li)
+			return nil
+		}
+		for e := idx.ifreqs.Front(); e != nil; e = e.Next() {
+			le := e.Value.(*listEntry)
+			if le.freq == v.Freq {
+				le.entries[v] = 1
+				v.freqNode = e
+				return nil
+			}
+			if le.freq > v.Freq {
+				li := newListEntry(v.Freq)
+				li.entries[v] = 1
+				v.freqNode = idx.ifreqs.InsertBefore(li, e)
+				return nil
+			}
+		}
+		// if we're still here it means we're the highest frequency in the list so we
+		// insert it at the back
+		li := newListEntry(v.Freq)
+		li.entries[v] = 1
+		v.freqNode = idx.ifreqs.PushBack(li)
+		return nil
+	})
 }
 
 // GetStoreID returns the StoreID of the store which has the given content
@@ -181,7 +242,14 @@ func (idx *Index) GetStore(id cid.Cid) (*multistore.Store, error) {
 	return idx.ms.Get(storeID)
 }
 
-// Flush persists the Refs to the store
+// Root returns the HAMT root CID
+func (idx *Index) Root() cid.Cid {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	return idx.rootCID
+}
+
+// Flush persists the Refs to the store, callers must take care of the mutex
 func (idx *Index) Flush() error {
 	if err := idx.root.Flush(context.TODO()); err != nil {
 		return err
@@ -281,6 +349,11 @@ func (idx *Index) ListRefs() ([]*DataRef, error) {
 // Len returns the number of roots this index is currently storing
 func (idx *Index) Len() int {
 	return len(idx.Refs)
+}
+
+// Bstore returns the lower level blockstore storing the hamt
+func (idx *Index) Bstore() blockstore.Blockstore {
+	return idx.bstore
 }
 
 type listEntry struct {

@@ -1,14 +1,24 @@
 package exchange
 
 import (
+	"bytes"
+	"context"
 	"math/rand"
 	"runtime"
 	"testing"
 
 	"github.com/filecoin-project/go-multistore"
+	blocks "github.com/ipfs/go-block-format"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dss "github.com/ipfs/go-datastore/sync"
+	"github.com/ipfs/go-graphsync/ipldutil"
+	"github.com/ipfs/go-graphsync/storeutil"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
+	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/codec/dagcbor"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -145,4 +155,67 @@ func BenchmarkFlush(b *testing.B) {
 			}))
 		}
 	})
+}
+
+// This selector should query a HAMT without following the links
+func TestIndexSelector(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	ms, err := multistore.NewMultiDstore(ds)
+	require.NoError(t, err)
+
+	idx, err := NewIndex(ds, ms)
+
+	lb := cidlink.LinkBuilder{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    0x71, // dag-cbor as per multicodec
+			MhType:   DefaultHashFunction,
+			MhLength: -1,
+		},
+	}
+
+	for i := 0; i < 10; i++ {
+		nd := basicnode.NewInt(int64(i))
+		lnk, err := lb.Build(
+			context.TODO(),
+			ipld.LinkContext{},
+			nd,
+			storeutil.StorerForBlockstore(idx.Bstore()),
+		)
+		var buffer bytes.Buffer
+		require.NoError(t, dagcbor.Encoder(nd, &buffer))
+		require.NoError(t, err)
+		blk, err := blocks.NewBlockWithCid(buffer.Bytes(), lnk.(cidlink.Link).Cid)
+		require.NoError(t, err)
+		require.NoError(t, idx.Bstore().Put(blk))
+
+		require.NoError(t, idx.SetRef(&DataRef{
+			PayloadCID:  blk.Cid(),
+			PayloadSize: 24,
+			Freq:        3,
+		}))
+	}
+
+	link := cidlink.Link{Cid: idx.Root()}
+	traverser := ipldutil.TraversalBuilder{
+		Root:     link,
+		Selector: IndexSelector(),
+	}.Start(context.Background())
+
+	complete := false
+	for !complete {
+		var err error
+		complete, err = traverser.IsComplete()
+		require.NoError(t, err)
+		lnk, _ := traverser.CurrentRequest()
+		l, ok := lnk.(cidlink.Link)
+		if !ok {
+			continue
+		}
+		key := l.Cid
+		blk, err := idx.Bstore().Get(key)
+		require.NoError(t, err)
+		err = traverser.Advance(bytes.NewBuffer(blk.RawData()))
+		require.NoError(t, err)
+	}
 }
