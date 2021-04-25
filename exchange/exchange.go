@@ -18,6 +18,7 @@ import (
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
 )
 
@@ -105,7 +106,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	sel, err := retrieval.DecodeNode(q.QueryParams.Selector)
 	if err != nil {
-		sel = AllSelector()
+		sel = selectors.All()
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
@@ -168,7 +169,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		repl:       e.rpl,
 		chunkSize:  256000,
 		clientAddr: e.w.DefaultAddress(),
-		sel:        AllSelector(),
+		sel:        selectors.All(),
 		done:       done,
 		errs:       errs,
 		ongoing:    make(chan DealRef),

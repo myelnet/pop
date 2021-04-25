@@ -17,13 +17,14 @@ import (
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/retrieval/provider"
+	"github.com/myelnet/pop/selectors"
 )
 
 var allSelectorBytes []byte
 
 func init() {
 	buf := new(bytes.Buffer)
-	_ = dagcbor.Encoder(AllSelector(), buf)
+	_ = dagcbor.Encoder(selectors.All(), buf)
 	allSelectorBytes = buf.Bytes()
 }
 
