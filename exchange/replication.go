@@ -147,6 +147,9 @@ func (r *Replication) Start(ctx context.Context) error {
 	return nil
 }
 
+// pumpIndexes iterates over a subscription to new Hey msg received when connecting with other provider peers
+// it keeps index roots into a queue and iteratively fetches them. We could potentially fetch them in parallel
+// but we ideally don't want this to be a burden on the node ressources so we take it easy
 func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 	var q []HeyEvt
 	var fetchDone chan fetchResult
@@ -193,21 +196,27 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 	}
 }
 
+// fetchResult associates the root of the index fetched and a possible error
 type fetchResult struct {
 	root cid.Cid
 	err  error
 }
 
+// fetchIndex handles the data transfer for retrieving the index of a given peer anounced in a Hey
+// msg. It blocks until the transfer is completed or fails.
 func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
-	done := make(chan struct{}, 1)
+	done := make(chan error, 1)
 	rcid := *hvt.IndexRoot
 	unsub := r.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
-		if chState.Status() == datatransfer.Completed {
-			root := chState.BaseCID()
-			if root != rcid {
-				return
-			}
-			done <- struct{}{}
+		root := chState.BaseCID()
+		if root != rcid {
+			return
+		}
+		switch chState.Status() {
+		case datatransfer.Completed:
+			done <- nil
+		case datatransfer.Failed, datatransfer.Cancelled:
+			done <- fmt.Errorf(chState.Message())
 		}
 	})
 	defer unsub()
@@ -222,10 +231,13 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-done:
-		return nil
+	case err := <-done:
+		return err
 	}
 }
+
+// balanceIndex checks if any content in the interest list is more popular than content in the supply
+// in which case it will try to retrieve it from the network and insert it in there
 
 // GetHey formats a new Hey message
 func (r *Replication) GetHey() Hey {
