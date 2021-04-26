@@ -215,7 +215,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 	// Loop is useful for detecting any flakiness
 	for i := 0; i < 1; i++ {
 		t.Run(fmt.Sprintf("Run %d", i), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
 			mn := mocknet.New(ctx)

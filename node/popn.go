@@ -348,7 +348,7 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 		sendErr(err)
 		return
 	}
-	froot := status[exchange.KeyFromPath(args.Path)].Cid
+	froot := status[exchange.KeyFromPath(args.Path)].Value
 	// We could get the size from the index entry but DAGStat gives more feedback into
 	// how the file actually got chunked
 	stats, err := exchange.Stat(ctx, nd.tx.Store(), froot, sel.All())

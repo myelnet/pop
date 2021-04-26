@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"sync"
 
@@ -24,6 +25,12 @@ var ErrRefNotFound = errors.New("ref not found")
 
 // KIndex is the datastore key for persisting the index of a workdag
 const KIndex = "idx"
+
+// use 256 hash to prevent collision attacks
+var hashOption = hamt.UseHashFunction(func(input []byte) []byte {
+	res := sha256.Sum256(input)
+	return res[:]
+})
 
 // Index contains the information about which objects are currently stored
 // the key is a CID.String().
@@ -151,7 +158,7 @@ func (idx *Index) loadFromStore() error {
 	// var err error
 	enc, err := idx.ds.Get(datastore.NewKey(KIndex))
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
-		nd, err := hamt.NewNode(idx.store, hamt.UseTreeBitWidth(5))
+		nd, err := hamt.NewNode(idx.store, hamt.UseTreeBitWidth(5), hashOption)
 		if err != nil {
 			return err
 		}
@@ -176,7 +183,7 @@ func (idx *Index) loadFromStore() error {
 // LoadRoot loads a new HAMT root not from a given CID, it can be used to load a node
 // from a different root than the current one for example
 func (idx *Index) LoadRoot(r cid.Cid) (*hamt.Node, error) {
-	return hamt.LoadNode(context.TODO(), idx.store, r, hamt.UseTreeBitWidth(5))
+	return hamt.LoadNode(context.TODO(), idx.store, r, hamt.UseTreeBitWidth(5), hashOption)
 }
 
 // LoadInterest loads potential new content in a different doubly linked list
@@ -250,6 +257,7 @@ func (idx *Index) Root() cid.Cid {
 }
 
 // Flush persists the Refs to the store, callers must take care of the mutex
+// context is not actually used downstream so we use a TODO()
 func (idx *Index) Flush() error {
 	if err := idx.root.Flush(context.TODO()); err != nil {
 		return err

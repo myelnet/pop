@@ -12,11 +12,11 @@ import (
 
 var statusCmd = &ffcli.Command{
 	Name:      "status",
-	ShortHelp: "Print the state of the working DAG",
+	ShortHelp: "Print the state of any ongoing transaction",
 	LongHelp: strings.TrimSpace(`
 
-The 'pop status' command prints all the files that have been added to the blockstore. Files that have
-been chunked and staged in the blockstore but not yet committed into a Car to be pushed to the network.
+The 'pop status' command prints all the files that have been added to a transaction DAG. Files that have
+been chunked and staged in the blockstore but not yet committed to be pushed to the network.
 
 `),
 	Exec: runStatus,
