@@ -28,5 +28,6 @@ snapshot:
 		-v $(CURDIR):/pop \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v $(HOME)/go/src:/go/src \
+		-v $(CURDIR)/extern/darwin-sysroot:/sysroot/macos/amd64/usr/local \
 		-w /pop \
 		pop/golang-cross --snapshot --rm-dist

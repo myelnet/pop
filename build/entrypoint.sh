@@ -13,6 +13,6 @@ else
     rm -rf "$key_file"
 fi
 
-lstopo --version
+cp /install-filcrypto-distro ./extern/filecoin-ffi/install-filcrypto 
 
 goreleaser "$@"

@@ -1,7 +1,5 @@
 FROM goreng/golang-cross-builder:v1.16.2
 
-COPY build/entrypoint.sh /
-
 ARG GO_VERSION=1.16.3
 ARG GOLANG_DIST_SHA=951a3c7c6ce4e56ad883f97d9db74d3d6d80d5fec77455c6ada6c1f7ac4776d2
 
@@ -38,26 +36,25 @@ RUN \
 	tar -xzf $GIT_CHGLOG_DOWNLOAD_FILE -C /usr/bin/ git-chglog; \
 	rm $GIT_CHGLOG_DOWNLOAD_FILE; \
 	git-chglog -v; \
-	chmod +x /entrypoint.sh
-
-
+	chmod +x /
 
 ENV CGO_CFLAGS="-D__BLST_PORTABLE__"
 ENV RUSTFLAGS="-C target-cpu=native -g"
-ENV FFI_BUILD_FROM_SOURCE=1
+ENV FFI_BUILD_FROM_SOURCE=0
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+
+RUN apt-get update -y && \
+    apt-get install hwloc cron git mesa-opencl-icd ocl-icd-opencl-dev gcc git bzr jq pkg-config clang  libhwloc-dev -y
+RUN rm -rf /var/lib/apt/lists/*
+
 RUN apt-get update
-RUN apt-get install -y hwloc
-RUN apt-get install -y jq
-RUN apt-get install -y libhwloc-dev
-RUN apt-get install -y opencl-headers 
+RUN apt-get install -y opencl-headers
 RUN apt-get install -y ocl-icd-opencl-dev
 RUN apt-get install -y ocl-icd-libopencl1
 RUN apt-get install -y clinfo
-RUN rm -rf /var/lib/apt/lists/*
 
 ENV LDFLAGS="-L/usr/local/lib"
 ENV CPPFLAGS="-I/usr/local/include"
@@ -65,6 +62,12 @@ ENV CPATH=/usr/local/include
 ENV LIBRARY_PATH=/usr/local/lib
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
+COPY build/entrypoint.sh /
+RUN chmod +x /entrypoint.sh
+RUN chmod +x /tmp
+
+COPY build/install-filcrypto-distro /
+RUN chmod +x /install-filcrypto-distro
 
 ENTRYPOINT ["bash", "/entrypoint.sh"]
 
