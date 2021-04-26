@@ -1,0 +1,48 @@
+# This is an example .goreleaser.yml file with some sane defaults.
+# Make sure to check the documentation at http://goreleaser.com
+builds:
+  - id: "pop-linux"
+    main: "./cmd/pop"
+    env:
+      - CGO_ENABLED=1
+      - DISTRO=Linux
+    goos:
+      - linux
+    goarch:
+      - amd64
+    hooks:
+      pre: make -B build
+  - id: "pop-darwin-amd64"
+    main: "./cmd/pop"
+    env:
+      - CGO_ENABLED=1
+      - CC=o64-clang
+      - CXX=o64-clang++
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/amd64
+      - PKG_CONFIG_PATH=/sysroot/macos/amd64/usr/local/lib/pkgconfig
+      - LIBRARY_PATH=/sysroot/macos/amd64/usr/local/lib
+      - LD_LIBRARY_PATH=/sysroot/macos/amd64/usr/local/lib
+      - DISTRO=Darwin
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    hooks:
+      pre: make -B build
+archives:
+  - replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
