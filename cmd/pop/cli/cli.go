@@ -30,7 +30,7 @@ func Run(args []string) error {
 		ShortHelp:  "Manage your Myel point of presence from the command line",
 		LongHelp: strings.TrimSpace(`
 This CLI is still under active development. Commands and flags will
-change in the future. To get started run 'pop start'.
+change until a first stable release. To get started run 'pop start'.
 `),
 		Subcommands: []*ffcli.Command{
 			startCmd,

@@ -64,16 +64,16 @@ USAGE
   pop subcommand [flags]
 
 This CLI is still under active development. Commands and flags will
-change in the future.
+change until the first stable release.
 
 SUBCOMMANDS
-  start   Starts an IPFS daemon
+  start   Starts a POP daemon
   ping    Ping the local daemon or a given peer
-  add     Add a file to the working DAG
-  status  Print the state of the working DAG
-  pack    Pack the current index into a DAG archive
-  push    Push a DAG archive to storage
+  put     Put a file into an exchange transaction for storage
+  status  Print the state of any ongoing transaction
+  commit  Commit a DAG transaction to storage
   get     Retrieve content from the network
+  list    List all content indexed in this pop
 ```
 
 ## Library Usage

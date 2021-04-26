@@ -38,7 +38,7 @@ var startArgs PopConfig
 
 var startCmd = &ffcli.Command{
 	Name:      "start",
-	ShortHelp: "Starts a pop daemon",
+	ShortHelp: "Starts a POP daemon",
 	LongHelp: strings.TrimSpace(`
 
 The 'pop start' command starts a pop daemon service.

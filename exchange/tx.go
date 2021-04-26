@@ -41,11 +41,11 @@ var ErrNoStrategy = errors.New("no strategy")
 
 // Entry represents a link to an item in the DAG map
 type Entry struct {
-	// Cid is the content id of the represented
-	Cid cid.Cid
-	// Name is the entry path
-	Name string
-	// Size is the original file size
+	// Key is string name of the entry
+	Key string
+	// Value is the CID of the represented content
+	Value cid.Cid
+	// Size is the original file size. Not encoded in the DAG
 	Size int64
 }
 
@@ -209,7 +209,8 @@ func (tx *Tx) addFile(key string, f files.File) error {
 	}
 
 	e := Entry{}
-	e.Cid = n.Cid()
+	e.Key = key
+	e.Value = n.Cid()
 	e.Size, err = f.Size()
 	if err != nil {
 		return err
@@ -237,8 +238,8 @@ func (s Status) String() string {
 		fmt.Fprintf(
 			w,
 			"%s\t%s\t%s\n",
-			e.Name,
-			e.Cid,
+			e.Key,
+			e.Value,
 			filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
 		)
 		total += e.Size
@@ -277,7 +278,7 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		nas, err := mas.AssembleEntry("Name")
+		nas, err := mas.AssembleEntry("Key")
 		if err != nil {
 			return nil, err
 		}
@@ -285,11 +286,11 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		las, err := mas.AssembleEntry("Link")
+		las, err := mas.AssembleEntry("Value")
 		if err != nil {
 			return nil, err
 		}
-		clk := cidlink.Link{Cid: v.Cid}
+		clk := cidlink.Link{Cid: v.Value}
 		err = las.AssignLink(clk)
 		if err != nil {
 			return nil, err
@@ -384,7 +385,7 @@ func (tx *Tx) getUnixDAG(k cid.Cid, DAG ipldformat.DAGService) (files.Node, erro
 func (tx *Tx) GetFile(k string) (files.Node, error) {
 	// If the key is in our cached entries we can use the current DAG
 	if e, ok := tx.entries[k]; ok {
-		return tx.getUnixDAG(e.Cid, tx.store.DAG)
+		return tx.getUnixDAG(e.Value, tx.store.DAG)
 	}
 	// Check the index if we may already have it from a different transaction
 	if ref, err := tx.index.GetRef(tx.root); err == nil {
@@ -411,7 +412,7 @@ func (tx *Tx) loadFileEntry(k string, store *multistore.Store) (files.Node, erro
 	if err != nil {
 		return nil, err
 	}
-	ln, err := entry.LookupByString("Link")
+	ln, err := entry.LookupByString("Value")
 	if err != nil {
 		return nil, err
 	}
