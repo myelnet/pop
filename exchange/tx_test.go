@@ -362,6 +362,8 @@ func TestMultiTx(t *testing.T) {
 	case <-gtx1.Done():
 	}
 
+	time.Sleep(10 * time.Millisecond)
+
 	_, err = gtx1.GetFile(key1)
 	require.NoError(t, err)
 
