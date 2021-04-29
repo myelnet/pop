@@ -66,6 +66,10 @@ func TestIndexLFU(t *testing.T) {
 	idx, err = NewIndex(ds, ms, WithBounds(512000, 500000))
 	require.NoError(t, err)
 
+	// Add another read to ref2
+	_, err = idx.GetRef(ref2.PayloadCID)
+	require.NoError(t, err)
+
 	ref4 := &DataRef{
 		PayloadCID:  blockGen.Next().Cid(),
 		PayloadSize: 20000,
@@ -85,6 +89,158 @@ func TestIndexLFU(t *testing.T) {
 	// ref3 is gone
 	_, err = idx.GetRef(ref3.PayloadCID)
 	require.Error(t, err)
+}
+
+// This test verifies refs are moving correctly across buckets when incrementing reads and writes
+func TestIndexRanking(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	ms, err := multistore.NewMultiDstore(ds)
+	require.NoError(t, err)
+
+	idx, err := NewIndex(ds, ms, WithBounds(512000, 500000))
+
+	write := func() *DataRef {
+		ref := &DataRef{
+			PayloadCID:  blockGen.Next().Cid(),
+			PayloadSize: 200,
+		}
+		require.NoError(t, idx.SetRef(ref))
+		return ref
+	}
+	read := func(ref *DataRef) {
+		_, err = idx.GetRef(ref.PayloadCID)
+		require.NoError(t, err)
+
+	}
+
+	// t1
+	ref1 := write()
+	require.Equal(t, 1, idx.blist.Len())
+	require.Equal(t, int64(0), ref1.Freq)
+	// t2
+	read(ref1)
+	require.Equal(t, 1, idx.blist.Len())
+	require.Equal(t, int64(1), ref1.Freq)
+	// t3
+	ref2 := write()
+	require.Equal(t, 1, idx.blist.Len())
+	// t4
+	read(ref1)
+	{
+		// we should have 2 buckets
+		require.Equal(t, 2, idx.blist.Len())
+		// ref1 is in the last bucket
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(3), lb.id)
+		require.Equal(t, byte(1), lb.entries[ref1])
+		// ref2 is in the first bucket
+		first := idx.blist.Front()
+		fb := first.Value.(*bucket)
+		require.Equal(t, int64(2), fb.id)
+		require.Equal(t, byte(1), fb.entries[ref2])
+	}
+	// t5
+	read(ref2)
+	{
+		// All refs should be in the same bucket now
+		require.Equal(t, 1, idx.blist.Len())
+		only := idx.blist.Back()
+		b := only.Value.(*bucket)
+		require.Equal(t, int64(3), b.id)
+	}
+	// t6
+	ref3 := write()
+	{
+		// All refs are still in the same bucket
+		require.Equal(t, 1, idx.blist.Len())
+		only := idx.blist.Back()
+		b := only.Value.(*bucket)
+		require.Equal(t, int64(3), b.id)
+		require.Equal(t, 3, len(b.entries))
+	}
+	// t7
+	read(ref1)
+	{
+		// New bucket is created
+		require.Equal(t, 2, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(4), lb.id)
+		require.Equal(t, 1, len(lb.entries))
+		first := idx.blist.Front()
+		fb := first.Value.(*bucket)
+		require.Equal(t, int64(3), fb.id)
+		require.Equal(t, 2, len(fb.entries))
+	}
+	// t8
+	read(ref3)
+	{
+		// ref3 is moved over to the last bucket
+		require.Equal(t, 2, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(4), lb.id)
+		require.Equal(t, 2, len(lb.entries))
+		first := idx.blist.Front()
+		fb := first.Value.(*bucket)
+		require.Equal(t, int64(3), fb.id)
+		require.Equal(t, 1, len(fb.entries))
+	}
+	// t9
+	write()
+	{
+		require.Equal(t, 2, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(4), lb.id)
+		require.Equal(t, 3, len(lb.entries))
+	}
+	// t10
+	read(ref1)
+	{
+		require.Equal(t, 3, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(5), lb.id)
+		require.Equal(t, 1, len(lb.entries))
+	}
+	// t11
+	read(ref3)
+	{
+		require.Equal(t, 3, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(5), lb.id)
+		require.Equal(t, 2, len(lb.entries))
+	}
+	// t12
+	write()
+	{
+		require.Equal(t, 3, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(5), lb.id)
+		require.Equal(t, 3, len(lb.entries))
+	}
+	// t13
+	read(ref3)
+	{
+		require.Equal(t, 4, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(6), lb.id)
+		require.Equal(t, 1, len(lb.entries))
+	}
+	// t14
+	write()
+	{
+		require.Equal(t, 4, idx.blist.Len())
+		last := idx.blist.Back()
+		lb := last.Value.(*bucket)
+		require.Equal(t, int64(6), lb.id)
+		require.Equal(t, 2, len(lb.entries))
+	}
 }
 
 func TestIndexDropRef(t *testing.T) {
@@ -117,7 +273,7 @@ func TestIndexListRefs(t *testing.T) {
 
 	var refs []*DataRef
 	// this loop sets 100 refs for 24 bytes = 2400 bytes
-	for i := 0; i < 101; i++ {
+	for i := 0; i < 103; i++ {
 		ref := &DataRef{
 			PayloadCID:  blockGen.Next().Cid(),
 			PayloadSize: 24,
@@ -219,4 +375,55 @@ func TestIndexSelector(t *testing.T) {
 		err = traverser.Advance(bytes.NewBuffer(blk.RawData()))
 		require.NoError(t, err)
 	}
+}
+
+func TestIndexInterest(t *testing.T) {
+	newIndex := func(n int) *Index {
+		ds := dss.MutexWrap(datastore.NewMapDatastore())
+		ms, err := multistore.NewMultiDstore(ds)
+		require.NoError(t, err)
+
+		idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+		require.NoError(t, err)
+
+		var refs []*DataRef
+		// this loop sets 100 refs for 24 bytes = 2400 bytes
+		for i := 0; i < n; i++ {
+			ref := &DataRef{
+				PayloadCID:  blockGen.Next().Cid(),
+				PayloadSize: 24,
+			}
+			require.NoError(t, idx.SetRef(ref))
+			refs = append(refs, ref)
+
+			// randomly add a read after every write, err doesn't matter
+			_, _ = idx.GetRef(refs[rand.Intn(i+1)].PayloadCID)
+		}
+		return idx
+	}
+	// Our main index
+	idx := newIndex(100)
+
+	// A new index we receive
+	idx1 := newIndex(50)
+	require.NoError(t, idx.LoadInterest(idx1.Root(), idx1.store))
+
+	entry, err := idx.MostInteresting()
+	require.NoError(t, err)
+	require.Equal(t, int64(5), entry.Freq)
+
+	// Another index received
+	idx2 := newIndex(101)
+	require.NoError(t, idx.LoadInterest(idx2.Root(), idx2.store))
+
+	entry2, err := idx.MostInteresting()
+	require.NoError(t, err)
+	require.Equal(t, int64(5), entry2.Freq)
+
+	l := idx.Len()
+	il := idx.InterestLen()
+	// promote the most interesting
+	require.NoError(t, idx.PromoteRef(entry2))
+	require.Equal(t, l+1, idx.Len())
+	require.Equal(t, il-1, idx.InterestLen())
 }

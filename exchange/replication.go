@@ -9,9 +9,10 @@ import (
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-hamt-ipld/v3"
+	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync/storeutil"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/jpillora/backoff"
 	"github.com/libp2p/go-eventbus"
@@ -98,11 +99,13 @@ type Replication struct {
 	rgs       []Region
 	reqProtos []protocol.ID
 	emitter   event.Emitter
+	indexRcvd chan struct{}
 
 	pmu   sync.Mutex
 	pulls map[cid.Cid]*peer.Set
 
-	pidxs map[peer.ID]*hamt.Node
+	smu    sync.Mutex
+	stores map[cid.Cid]*multistore.Store
 }
 
 // NewReplication starts the exchange replication management system
@@ -116,11 +119,13 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Regi
 		idx:       idx,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
 		pulls:     make(map[cid.Cid]*peer.Set),
+		indexRcvd: make(chan struct{}),
+		stores:    make(map[cid.Cid]*multistore.Store),
 	}
 	r.hs = NewHeyService(h, pm, r)
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 	r.dt.RegisterVoucherType(&Request{}, r)
-	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx))
+	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
 	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
 
 	// TODO: clean this up
@@ -140,6 +145,8 @@ func (r *Replication) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Any time we receive a new index, check if any refs should be added to our supply
+	go r.popInterest()
 	go r.pumpIndexes(ctx, sub)
 	if err := r.hs.Run(ctx); err != nil {
 		return err
@@ -156,6 +163,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 	for {
 		select {
 		case <-ctx.Done():
+			close(r.indexRcvd)
 			return
 		case evt := <-sub.Out():
 			hevt := evt.(HeyEvt)
@@ -174,7 +182,8 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 		case res := <-fetchDone:
 			if res.err == nil {
 				go func(rt cid.Cid) {
-					err := r.idx.LoadInterest(rt)
+					store := r.GetStore(rt)
+					err := r.idx.LoadInterest(rt, cbor.NewCborStore(store.Bstore))
 					if err != nil {
 						fmt.Println("failed to load interest", err)
 						return
@@ -182,6 +191,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 					r.emitter.Emit(IndexEvt{
 						Root: rt,
 					})
+					r.indexRcvd <- struct{}{}
 				}(res.root)
 			}
 			if len(q) > 0 {
@@ -193,6 +203,14 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 				q = q[1:]
 			}
 		}
+	}
+}
+
+// popInterest inspects received indexes and if usage is high enough retrieves the content
+// at market price
+func (r *Replication) popInterest() {
+	for range r.indexRcvd {
+
 	}
 }
 
@@ -224,7 +242,16 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 		Method:     FetchIndex,
 		PayloadCID: rcid,
 	}
-	_, err := r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, sel.Hamt())
+
+	store, err := r.idx.ms.Get(r.idx.ms.Next())
+	if err != nil {
+		return err
+	}
+	r.smu.Lock()
+	r.stores[rcid] = store
+	r.smu.Unlock()
+
+	_, err = r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, sel.Hamt())
 	if err != nil {
 		return err
 	}
@@ -234,6 +261,13 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	case err := <-done:
 		return err
 	}
+}
+
+// GetStore returns the store used for a given root index
+func (r *Replication) GetStore(k cid.Cid) *multistore.Store {
+	r.smu.Lock()
+	defer r.smu.Unlock()
+	return r.stores[k]
 }
 
 // balanceIndex checks if any content in the interest list is more popular than content in the supply
@@ -473,8 +507,13 @@ type StoreConfigurableTransport interface {
 	UseStore(datatransfer.ChannelID, ipld.Loader, ipld.Storer) error
 }
 
+// IdxStoreGetter returns the store used for retrieving a given index root
+type IdxStoreGetter interface {
+	GetStore(cid.Cid) *multistore.Store
+}
+
 // TransportConfigurer configurers the graphsync transport to use a custom blockstore per content
-func TransportConfigurer(idx *Index) datatransfer.TransportConfigurer {
+func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransfer.TransportConfigurer {
 	return func(channelID datatransfer.ChannelID, voucher datatransfer.Voucher, transport datatransfer.Transport) {
 		warn := func(err error) {
 			fmt.Println("attempting to configure data store:", err)
@@ -485,6 +524,15 @@ func TransportConfigurer(idx *Index) datatransfer.TransportConfigurer {
 		}
 		gsTransport, ok := transport.(StoreConfigurableTransport)
 		if !ok {
+			return
+		}
+		if request.Method == FetchIndex && channelID.Initiator == pid {
+			// When we're fetching a new index we store it in a new store
+			store := isg.GetStore(request.PayloadCID)
+			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
+			if err != nil {
+				warn(err)
+			}
 			return
 		}
 		if request.Method == FetchIndex {

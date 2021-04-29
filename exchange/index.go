@@ -35,7 +35,7 @@ var hashOption = hamt.UseHashFunction(func(input []byte) []byte {
 // Index contains the information about which objects are currently stored
 // the key is a CID.String().
 // It also implements a Least Frequently Used cache eviction mechanism to maintain storage withing given
-// bounds based on https://github.com/dgrijalva/lfu-go.
+// bounds inspired by https://github.com/dgrijalva/lfu-go.
 // Content is garbage collected during eviction.
 type Index struct {
 	ms     *multistore.MultiStore
@@ -52,15 +52,15 @@ type Index struct {
 	mu sync.Mutex
 	// current size of content committed to the store
 	size uint64
-	// linked list keeps track of our frequencies to access as fast as possible
-	freqs *list.List
+	// linked list keeps track of all refs in least to most popular order to access as fast as possible
+	blist *list.List
 	// We still need to keep a map in memory
 	Refs    map[string]*DataRef
 	rootCID cid.Cid
 
 	imu sync.Mutex
 	// interest frequencies track the most popular content we don't have
-	ifreqs *list.List
+	freqs *list.List
 	// Interest is a map of interest ref pointers
 	interest map[string]*DataRef
 }
@@ -71,8 +71,9 @@ type DataRef struct {
 	PayloadSize int64
 	StoreID     multistore.StoreID
 	Freq        int64
+	BucketID    int64
 	// do not serialize
-	freqNode *list.Element
+	bucketNode *list.Element
 }
 
 // IndexOption customizes the behavior of the index
@@ -93,8 +94,8 @@ func WithBounds(up, lo uint64) IndexOption {
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
 func NewIndex(ds datastore.Batching, ms *multistore.MultiStore, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
+		blist:    list.New(),
 		freqs:    list.New(),
-		ifreqs:   list.New(),
 		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
 		ms:       ms,
 		Refs:     make(map[string]*DataRef),
@@ -119,32 +120,32 @@ func NewIndex(ds datastore.Batching, ms *multistore.MultiStore, opts ...IndexOpt
 		}
 		idx.Refs[v.PayloadCID.String()] = v
 		idx.size += uint64(v.PayloadSize)
-		if e := idx.freqs.Front(); e == nil {
+		if e := idx.blist.Front(); e == nil {
 			// insert the first element in the list
-			li := newListEntry(v.Freq)
+			li := newBucket(v.BucketID)
 			li.entries[v] = 1
-			v.freqNode = idx.freqs.PushFront(li)
+			v.bucketNode = idx.blist.PushFront(li)
 			return nil
 		}
-		for e := idx.freqs.Front(); e != nil; e = e.Next() {
-			le := e.Value.(*listEntry)
-			if le.freq == v.Freq {
-				le.entries[v] = 1
-				v.freqNode = e
+		for e := idx.blist.Front(); e != nil; e = e.Next() {
+			b := e.Value.(*bucket)
+			if b.id == v.BucketID {
+				b.entries[v] = 1
+				v.bucketNode = e
 				return nil
 			}
-			if le.freq > v.Freq {
-				li := newListEntry(v.Freq)
+			if b.id > v.BucketID {
+				li := newBucket(v.BucketID)
 				li.entries[v] = 1
-				v.freqNode = idx.freqs.InsertBefore(li, e)
+				v.bucketNode = idx.blist.InsertBefore(li, e)
 				return nil
 			}
 		}
-		// if we're still here it means we're the highest frequency in the list so we
+		// if we're still here it means we're the highest ID in the list so we
 		// insert it at the back
-		li := newListEntry(v.Freq)
+		li := newBucket(v.BucketID)
 		li.entries[v] = 1
-		v.freqNode = idx.freqs.PushBack(li)
+		v.bucketNode = idx.blist.PushBack(li)
 		return nil
 	})
 	if err != nil {
@@ -171,7 +172,7 @@ func (idx *Index) loadFromStore() error {
 		if err != nil {
 			return err
 		}
-		idx.root, err = idx.LoadRoot(r)
+		idx.root, err = idx.LoadRoot(r, idx.store)
 		if err != nil {
 			return err
 		}
@@ -182,53 +183,8 @@ func (idx *Index) loadFromStore() error {
 
 // LoadRoot loads a new HAMT root not from a given CID, it can be used to load a node
 // from a different root than the current one for example
-func (idx *Index) LoadRoot(r cid.Cid) (*hamt.Node, error) {
-	return hamt.LoadNode(context.TODO(), idx.store, r, hamt.UseTreeBitWidth(5), hashOption)
-}
-
-// LoadInterest loads potential new content in a different doubly linked list
-func (idx *Index) LoadInterest(r cid.Cid) error {
-	root, err := idx.LoadRoot(r)
-	if err != nil {
-		return err
-	}
-
-	idx.imu.Lock()
-	defer idx.imu.Unlock()
-	return root.ForEach(context.TODO(), func(k string, val *cbg.Deferred) error {
-		v := new(DataRef)
-		if err := v.UnmarshalCBOR(bytes.NewReader(val.Raw)); err != nil {
-			return err
-		}
-		idx.interest[v.PayloadCID.String()] = v
-		if e := idx.ifreqs.Front(); e == nil {
-			// insert the first element in the list
-			li := newListEntry(v.Freq)
-			li.entries[v] = 1
-			v.freqNode = idx.ifreqs.PushFront(li)
-			return nil
-		}
-		for e := idx.ifreqs.Front(); e != nil; e = e.Next() {
-			le := e.Value.(*listEntry)
-			if le.freq == v.Freq {
-				le.entries[v] = 1
-				v.freqNode = e
-				return nil
-			}
-			if le.freq > v.Freq {
-				li := newListEntry(v.Freq)
-				li.entries[v] = 1
-				v.freqNode = idx.ifreqs.InsertBefore(li, e)
-				return nil
-			}
-		}
-		// if we're still here it means we're the highest frequency in the list so we
-		// insert it at the back
-		li := newListEntry(v.Freq)
-		li.entries[v] = 1
-		v.freqNode = idx.ifreqs.PushBack(li)
-		return nil
-	})
+func (idx *Index) LoadRoot(r cid.Cid, store cbor.IpldStore) (*hamt.Node, error) {
+	return hamt.LoadNode(context.TODO(), store, r, hamt.UseTreeBitWidth(5), hashOption)
 }
 
 // GetStoreID returns the StoreID of the store which has the given content
@@ -280,7 +236,7 @@ func (idx *Index) DropRef(k cid.Cid) error {
 		return ErrRefNotFound
 	}
 	ref := idx.Refs[k.String()]
-	idx.remEntry(ref.freqNode, ref)
+	idx.remEntry(ref.bucketNode, ref)
 
 	err := idx.ms.Delete(ref.StoreID)
 	if err != nil {
@@ -345,8 +301,8 @@ func (idx *Index) ListRefs() ([]*DataRef, error) {
 	defer idx.mu.Unlock()
 	refs := make([]*DataRef, len(idx.Refs))
 	i := 0
-	for e := idx.freqs.Front(); e != nil; e = e.Next() {
-		for k := range e.Value.(*listEntry).entries {
+	for e := idx.blist.Front(); e != nil; e = e.Next() {
+		for k := range e.Value.(*bucket).entries {
 			refs[i] = k
 			i++
 		}
@@ -356,6 +312,8 @@ func (idx *Index) ListRefs() ([]*DataRef, error) {
 
 // Len returns the number of roots this index is currently storing
 func (idx *Index) Len() int {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
 	return len(idx.Refs)
 }
 
@@ -364,47 +322,54 @@ func (idx *Index) Bstore() blockstore.Blockstore {
 	return idx.bstore
 }
 
-type listEntry struct {
+type bucket struct {
+	id      int64
 	entries map[*DataRef]byte
-	freq    int64
 }
 
-func newListEntry(freq int64) *listEntry {
-	return &listEntry{
+func newBucket(id int64) *bucket {
+	return &bucket{
+		id:      id,
 		entries: make(map[*DataRef]byte),
-		freq:    freq,
 	}
 }
 
 func (idx *Index) increment(ref *DataRef) {
-	currentPlace := ref.freqNode
-	var nextFreq int64
+	currentPlace := ref.bucketNode
+	var nextID int64
 	var nextPlace *list.Element
 	if currentPlace == nil {
 		// new entry
-		nextFreq = 1
-		nextPlace = idx.freqs.Front()
+		nextID = 1
+		nextPlace = idx.blist.Back()
+		if nextPlace != nil {
+			nextID = nextPlace.Value.(*bucket).id
+		}
 	} else {
 		// move up
-		nextFreq = currentPlace.Value.(*listEntry).freq + 1
+		nextID = currentPlace.Value.(*bucket).id + 1
 		nextPlace = currentPlace.Next()
 	}
 
-	if nextPlace == nil || nextPlace.Value.(*listEntry).freq != nextFreq {
+	if nextPlace == nil || nextPlace.Value.(*bucket).id != nextID {
 		// create a new list entry
-		li := &listEntry{
-			freq:    nextFreq,
+		li := &bucket{
+			id:      nextID,
 			entries: make(map[*DataRef]byte),
 		}
 		if currentPlace != nil {
-			nextPlace = idx.freqs.InsertAfter(li, currentPlace)
+			nextPlace = idx.blist.InsertAfter(li, currentPlace)
 		} else {
-			nextPlace = idx.freqs.PushFront(li)
+			nextPlace = idx.blist.PushFront(li)
 		}
 	}
-	ref.Freq = nextFreq
-	ref.freqNode = nextPlace
-	nextPlace.Value.(*listEntry).entries[ref] = 1
+	// frequency starts at 0 and only increments after it was placed in the list
+	if currentPlace != nil {
+		ref.Freq++
+	}
+	ref.BucketID = nextID
+	ref.bucketNode = nextPlace
+	nextPlace.Value.(*bucket).entries[ref] = 1
 	if currentPlace != nil {
 		// remove from current position
 		idx.remEntry(currentPlace, ref)
@@ -412,11 +377,10 @@ func (idx *Index) increment(ref *DataRef) {
 }
 
 func (idx *Index) remEntry(place *list.Element, entry *DataRef) {
-	le := place.Value.(*listEntry)
-	entries := le.entries
-	delete(entries, entry)
-	if len(entries) == 0 {
-		idx.freqs.Remove(place)
+	b := place.Value.(*bucket)
+	delete(b.entries, entry)
+	if len(b.entries) == 0 {
+		idx.blist.Remove(place)
 	}
 }
 
@@ -424,8 +388,8 @@ func (idx *Index) evict(size uint64) uint64 {
 	// No lock here so it can be called
 	// from within the lock (during Set)
 	var evicted uint64
-	for place := idx.freqs.Front(); place != nil; place = place.Next() {
-		for entry := range place.Value.(*listEntry).entries {
+	for place := idx.blist.Front(); place != nil; place = place.Next() {
+		for entry := range place.Value.(*bucket).entries {
 			delete(idx.Refs, entry.PayloadCID.String())
 
 			err := idx.ms.Delete(entry.StoreID)
@@ -442,4 +406,98 @@ func (idx *Index) evict(size uint64) uint64 {
 		}
 	}
 	return evicted
+}
+
+// ---------- Interest --------------
+
+type listEntry struct {
+	entries map[*DataRef]byte
+	freq    int64
+}
+
+func newListEntry(freq int64) *listEntry {
+	return &listEntry{
+		entries: make(map[*DataRef]byte),
+		freq:    freq,
+	}
+}
+
+// LoadInterest loads potential new content in a different doubly linked list
+// in this situation the most popular content is at the back of the list
+func (idx *Index) LoadInterest(r cid.Cid, store cbor.IpldStore) error {
+	root, err := idx.LoadRoot(r, store)
+	if err != nil {
+		return err
+	}
+
+	idx.imu.Lock()
+	defer idx.imu.Unlock()
+	return root.ForEach(context.TODO(), func(k string, val *cbg.Deferred) error {
+		v := new(DataRef)
+		if err := v.UnmarshalCBOR(bytes.NewReader(val.Raw)); err != nil {
+			return err
+		}
+		idx.interest[v.PayloadCID.String()] = v
+		if e := idx.freqs.Front(); e == nil {
+			// insert the first element in the list
+			li := newListEntry(v.Freq)
+			li.entries[v] = 1
+			v.bucketNode = idx.freqs.PushFront(li)
+			return nil
+		}
+		for e := idx.freqs.Front(); e != nil; e = e.Next() {
+			le := e.Value.(*listEntry)
+			if le.freq == v.Freq {
+				le.entries[v] = 1
+				v.bucketNode = e
+				return nil
+			}
+			if le.freq > v.Freq {
+				li := newListEntry(v.Freq)
+				li.entries[v] = 1
+				v.bucketNode = idx.freqs.InsertBefore(li, e)
+				return nil
+			}
+		}
+		// if we're still here it means we're the highest frequency in the list so we
+		// insert it at the back
+		li := newListEntry(v.Freq)
+		li.entries[v] = 1
+		v.bucketNode = idx.freqs.PushBack(li)
+		return nil
+	})
+}
+
+// MostInteresting returns the most interesting ref in the index
+func (idx *Index) MostInteresting() (*DataRef, error) {
+	idx.imu.Lock()
+	defer idx.imu.Unlock()
+	e := idx.freqs.Back()
+	entry := e.Value.(*listEntry)
+	for k := range entry.entries {
+		return k, nil
+	}
+	return nil, errors.New("no interest in index")
+}
+
+// InterestLen returns the number of interesting refs in our index
+func (idx *Index) InterestLen() int {
+	idx.imu.Lock()
+	defer idx.imu.Unlock()
+	return len(idx.interest)
+}
+
+// PromoteRef transfers over a ref from the interest list to the supply list
+// it assumes refs in the interest list are not part of the supply yet
+// in addition, the frequency count is reset
+func (idx *Index) PromoteRef(ref *DataRef) error {
+	le := ref.bucketNode.Value.(*listEntry)
+	entries := le.entries
+	delete(entries, ref)
+	delete(idx.interest, ref.PayloadCID.String())
+	if len(entries) == 0 {
+		idx.freqs.Remove(ref.bucketNode)
+	}
+	ref.bucketNode = nil
+	return idx.SetRef(ref)
 }
