@@ -354,6 +354,8 @@ func TestMultiDispatchStreams(t *testing.T) {
 			err = mn.ConnectAllButSelf()
 			require.NoError(t, err)
 
+			time.Sleep(time.Second)
+
 			// Wait for all peers to be received in the peer manager
 			for i := 0; i < 7; i++ {
 				select {
