@@ -3,9 +3,12 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-eventbus"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
@@ -13,12 +16,85 @@ import (
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 	bhost "github.com/tchardin/go-libp2p-blankhost"
 )
 
+type mockRetriever struct {
+	dt      datatransfer.Manager
+	idx     *Index
+	mu      sync.Mutex
+	routing map[cid.Cid]peer.ID
+}
+
+func NewMockRetriever(dt datatransfer.Manager, idx *Index) *mockRetriever {
+	dt.RegisterVoucherType(&testutil.FakeDTType{}, &testutil.FakeDTValidator{})
+	dt.RegisterTransportConfigurer(&testutil.FakeDTType{}, func(
+		chID datatransfer.ChannelID,
+		voucher datatransfer.Voucher,
+		tp datatransfer.Transport,
+	) {
+		k := voucher.(*testutil.FakeDTType).Data
+		c, err := cid.Decode(k)
+		if err != nil {
+			panic("bad CID")
+		}
+		store, err := idx.GetStore(c)
+		if err != nil {
+			panic("no store for content")
+		}
+		tp.(StoreConfigurableTransport).UseStore(chID, store.Loader, store.Storer)
+	})
+	return &mockRetriever{
+		dt:      dt,
+		idx:     idx,
+		routing: make(map[cid.Cid]peer.ID),
+	}
+}
+
+func (mr *mockRetriever) SetRoute(k cid.Cid, p peer.ID) {
+	mr.mu.Lock()
+	mr.routing[k] = p
+	mr.mu.Unlock()
+}
+
+func (mr *mockRetriever) FindAndRetrieve(ctx context.Context, l cid.Cid) error {
+	done := make(chan error, 1)
+	unsub := mr.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+		switch chState.Status() {
+		case datatransfer.Completed:
+			done <- nil
+		case datatransfer.Failed, datatransfer.Cancelled:
+			done <- fmt.Errorf(chState.Message())
+		}
+	})
+	defer unsub()
+	mr.mu.Lock()
+	peer, ok := mr.routing[l]
+	mr.mu.Unlock()
+	if !ok {
+		panic("fail to find provider in mock routing")
+	}
+	mr.idx.SetRef(&DataRef{
+		PayloadCID:  l,
+		PayloadSize: int64(256000),
+		StoreID:     mr.idx.ms.Next(),
+	})
+	_, err := mr.dt.OpenPullDataChannel(ctx, peer, &testutil.FakeDTType{Data: l.String()}, l, sel.All())
+	if err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
 func TestReplication(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	mn := mocknet.New(ctx)
@@ -31,20 +107,23 @@ func TestReplication(t *testing.T) {
 		tn.Host = h
 	}
 	names := make(map[string]peer.ID)
-	setupNode := func(name string) (*testutil.TestNode, *Replication) {
+	setupNode := func(name string) (*testutil.TestNode, *Replication, *mockRetriever) {
 		n := testutil.NewTestNode(mn, t, withSwarmT)
 		names[name] = n.Host.ID()
 		n.SetupDataTransfer(ctx, t)
-		idx, err := NewIndex(n.Ds, n.Ms)
+		idx, err := NewIndex(n.Ds, n.Ms, WithBounds(2000000, 1800000))
 		require.NoError(t, err)
+		rtv := NewMockRetriever(n.Dt, idx)
 		repl := NewReplication(
 			n.Host,
 			idx,
 			n.Dt,
+			rtv,
 			[]Region{global},
 		)
+		repl.interval = 2 * time.Second
 		require.NoError(t, repl.Start(ctx))
-		return n, repl
+		return n, repl, rtv
 	}
 
 	// Topology:
@@ -55,26 +134,26 @@ func TestReplication(t *testing.T) {
 	   H -- G -- F -- E
 	*/
 
-	nA, _ := setupNode("A")
+	nA, _, _ := setupNode("A")
 
-	nB, rB := setupNode("B")
+	nB, rB, _ := setupNode("B")
 
 	testutil.Connect(nA, nB)
 
-	nC, _ := setupNode("C")
+	nC, _, _ := setupNode("C")
 
 	testutil.Connect(nB, nC)
 
-	nD, rD := setupNode("D")
+	nD, rD, _ := setupNode("D")
 
 	testutil.Connect(nC, nD)
 
-	nE, _ := setupNode("E")
+	nE, _, _ := setupNode("E")
 
 	testutil.Connect(nD, nE)
 	testutil.Connect(nC, nE)
 
-	nF, rF := setupNode("F")
+	nF, rF, _ := setupNode("F")
 
 	testutil.Connect(nD, nF)
 	testutil.Connect(nE, nF)
@@ -84,51 +163,51 @@ func TestReplication(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// 1) D write
-	{
-		fname := nD.CreateRandomFile(t, 256000)
-		link, storeID, _ := nD.LoadFileToNewStore(ctx, t, fname)
-		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rD.idx.SetRef(&DataRef{
-			PayloadCID: rootCid,
-			StoreID:    storeID,
-		}))
-		opts := DefaultDispatchOptions
-		opts.RF = 3
-		res := rD.Dispatch(rootCid, uint64(256000), opts)
-		for r := range res {
-			switch r.Provider {
-			case names["C"], names["E"], names["F"]:
-			default:
-				t.Fatal("sent to wrong peer")
-			}
+	fnameD := nD.CreateRandomFile(t, 256000)
+	linkD, storeIDD, _ := nD.LoadFileToNewStore(ctx, t, fnameD)
+	rootCidD := linkD.(cidlink.Link).Cid
+	require.NoError(t, rD.idx.SetRef(&DataRef{
+		PayloadCID: rootCidD,
+		StoreID:    storeIDD,
+	}))
+	optsD := DefaultDispatchOptions
+	optsD.RF = 3
+	resD := rD.Dispatch(rootCidD, uint64(256000), optsD)
+	for r := range resD {
+		switch r.Provider {
+		case names["C"], names["E"], names["F"]:
+		default:
+			t.Fatal("sent to wrong peer")
 		}
 	}
 
 	// 2) F write
-	{
-		fname := nF.CreateRandomFile(t, 256000)
-		link, storeID, _ := nF.LoadFileToNewStore(ctx, t, fname)
-		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rF.idx.SetRef(&DataRef{
-			PayloadCID: rootCid,
-			StoreID:    storeID,
-		}))
-		opts := DefaultDispatchOptions
-		opts.RF = 4
-		res := rF.Dispatch(rootCid, uint64(256000), opts)
-		for r := range res {
-			switch r.Provider {
-			case names["E"], names["D"], names["C"], names["B"]:
-			default:
-				t.Fatal("wrong peer")
-			}
+	fnameF := nF.CreateRandomFile(t, 256000)
+	linkF, storeIDF, _ := nF.LoadFileToNewStore(ctx, t, fnameF)
+	rootCidF := linkF.(cidlink.Link).Cid
+	require.NoError(t, rF.idx.SetRef(&DataRef{
+		PayloadCID: rootCidF,
+		StoreID:    storeIDF,
+	}))
+	optsF := DefaultDispatchOptions
+	optsF.RF = 4
+	resF := rF.Dispatch(rootCidF, uint64(256000), optsF)
+	for r := range resF {
+		switch r.Provider {
+		case names["E"], names["D"], names["C"], names["B"]:
+		default:
+			t.Fatal("wrong peer")
 		}
 	}
 
 	// New node G joins the network
-	nG, _ := setupNode("G")
+	nG, _, rtvG := setupNode("G")
 	isubG, err := nG.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
+
+	// Set the content routing
+	rtvG.SetRoute(rootCidD, nC.Host.ID())
+	rtvG.SetRoute(rootCidF, nF.Host.ID())
 
 	testutil.Connect(nC, nG)
 	testutil.Connect(nF, nG)
@@ -137,8 +216,8 @@ func TestReplication(t *testing.T) {
 
 	time.Sleep(time.Second)
 
-	// We should be receiving 3 indexes
-	for i := 0; i < 3; i++ {
+	// We should be loading 2 CIDs
+	for i := 0; i < 2; i++ {
 		select {
 		case <-isubG.Out():
 		case <-ctx.Done():
@@ -148,30 +227,33 @@ func TestReplication(t *testing.T) {
 	isubG.Close()
 
 	// 3) B write
-	{
-		fname := nB.CreateRandomFile(t, 256000)
-		link, storeID, _ := nB.LoadFileToNewStore(ctx, t, fname)
-		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rB.idx.SetRef(&DataRef{
-			PayloadCID: rootCid,
-			StoreID:    storeID,
-		}))
-		opts := DefaultDispatchOptions
-		opts.RF = 4
-		res := rB.Dispatch(rootCid, uint64(256000), opts)
-		for r := range res {
-			switch r.Provider {
-			case names["C"], names["F"], names["G"], names["A"]:
-			default:
-				t.Fatal("wrong peer")
-			}
+	fnameB := nB.CreateRandomFile(t, 256000)
+	linkB, storeIDB, _ := nB.LoadFileToNewStore(ctx, t, fnameB)
+	rootCidB := linkB.(cidlink.Link).Cid
+	require.NoError(t, rB.idx.SetRef(&DataRef{
+		PayloadCID: rootCidB,
+		StoreID:    storeIDB,
+	}))
+	optsB := DefaultDispatchOptions
+	optsB.RF = 4
+	resB := rB.Dispatch(rootCidB, uint64(256000), optsB)
+	for r := range resB {
+		switch r.Provider {
+		case names["C"], names["F"], names["G"], names["A"]:
+		default:
+			t.Fatal("wrong peer")
 		}
 	}
 
 	// New node H joins the network
-	nH, rH := setupNode("H")
+	nH, rH, rtvH := setupNode("H")
 	isubH, err := nH.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
+
+	// Set the content routing
+	rtvH.SetRoute(rootCidD, nG.Host.ID())
+	rtvH.SetRoute(rootCidF, nB.Host.ID())
+	rtvH.SetRoute(rootCidB, nA.Host.ID())
 
 	testutil.Connect(nB, nH)
 	testutil.Connect(nG, nH)
@@ -179,7 +261,7 @@ func TestReplication(t *testing.T) {
 
 	time.Sleep(time.Second)
 
-	// We should be receiving 3 indexes
+	// We should be receiving 3 CIDs
 	for i := 0; i < 3; i++ {
 		select {
 		case <-isubH.Out():
@@ -190,23 +272,21 @@ func TestReplication(t *testing.T) {
 	isubH.Close()
 
 	// 4) H write
-	{
-		fname := nH.CreateRandomFile(t, 256000)
-		link, storeID, _ := nH.LoadFileToNewStore(ctx, t, fname)
-		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, rH.idx.SetRef(&DataRef{
-			PayloadCID: rootCid,
-			StoreID:    storeID,
-		}))
-		opts := DefaultDispatchOptions
-		opts.RF = 3
-		res := rH.Dispatch(rootCid, uint64(256000), opts)
-		for r := range res {
-			switch r.Provider {
-			case names["A"], names["B"], names["G"]:
-			default:
-				t.Fatal("wrong peer")
-			}
+	fnameH := nH.CreateRandomFile(t, 256000)
+	linkH, storeIDH, _ := nH.LoadFileToNewStore(ctx, t, fnameH)
+	rootCidH := linkH.(cidlink.Link).Cid
+	require.NoError(t, rH.idx.SetRef(&DataRef{
+		PayloadCID: rootCidH,
+		StoreID:    storeIDH,
+	}))
+	optsH := DefaultDispatchOptions
+	optsH.RF = 3
+	resH := rH.Dispatch(rootCidH, uint64(256000), optsH)
+	for r := range resH {
+		switch r.Provider {
+		case names["A"], names["B"], names["G"]:
+		default:
+			t.Fatal("wrong peer")
 		}
 	}
 }
@@ -241,7 +321,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 
 			idx, err := NewIndex(n1.Ds, n1.Ms)
 			require.NoError(t, err)
-			hn := NewReplication(n1.Host, idx, n1.Dt, regions)
+			hn := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), regions)
 			require.NoError(t, idx.SetRef(&DataRef{
 				PayloadCID: rootCid,
 				StoreID:    storeID,
@@ -262,7 +342,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 				})
 				idx, err := NewIndex(tnode.Ds, tnode.Ms)
 				require.NoError(t, err)
-				hn1 := NewReplication(tnode.Host, idx, tnode.Dt, regions)
+				hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), regions)
 				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
 				tnds[tnode.Host.ID()] = tnode
@@ -326,7 +406,7 @@ func TestSendDispatchNoPeers(t *testing.T) {
 
 	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, idx, n1.Dt, regions)
+	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), regions)
 	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID: rootCid,
 		StoreID:    storeID,
@@ -371,7 +451,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 
 	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, idx, n1.Dt, asia)
+	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), asia)
 	sub, err := n1.Host.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
@@ -389,7 +469,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 
 		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
-		s := NewReplication(n.Host, idx, n.Dt, asia)
+		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n1.Dt, idx), asia)
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -414,7 +494,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
 
-		s := NewReplication(n.Host, idx, n.Dt, africa)
+		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n.Dt, idx), africa)
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n

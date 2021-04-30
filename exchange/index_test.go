@@ -408,22 +408,121 @@ func TestIndexInterest(t *testing.T) {
 	idx1 := newIndex(50)
 	require.NoError(t, idx.LoadInterest(idx1.Root(), idx1.store))
 
-	entry, err := idx.MostInteresting()
-	require.NoError(t, err)
-	require.Equal(t, int64(5), entry.Freq)
-
 	// Another index received
 	idx2 := newIndex(101)
 	require.NoError(t, idx.LoadInterest(idx2.Root(), idx2.store))
+}
 
-	entry2, err := idx.MostInteresting()
+func TestLoadInterest(t *testing.T) {
+	newIndex := func() *Index {
+		ds := dss.MutexWrap(datastore.NewMapDatastore())
+		ms, err := multistore.NewMultiDstore(ds)
+		require.NoError(t, err)
+
+		idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+		require.NoError(t, err)
+		return idx
+	}
+
+	idx1 := newIndex()
+	ref1 := &DataRef{
+		PayloadCID:  blockGen.Next().Cid(),
+		PayloadSize: 100,
+	}
+	require.NoError(t, idx1.SetRef(ref1))
+	_, err := idx1.GetRef(ref1.PayloadCID)
 	require.NoError(t, err)
-	require.Equal(t, int64(5), entry2.Freq)
 
-	l := idx.Len()
-	il := idx.InterestLen()
-	// promote the most interesting
-	require.NoError(t, idx.PromoteRef(entry2))
-	require.Equal(t, l+1, idx.Len())
-	require.Equal(t, il-1, idx.InterestLen())
+	idx2 := newIndex()
+	ref2 := &DataRef{
+		PayloadCID:  blockGen.Next().Cid(),
+		PayloadSize: 100,
+	}
+	require.NoError(t, idx2.SetRef(ref2))
+
+	ref1b := &DataRef{
+		PayloadCID:  ref1.PayloadCID,
+		PayloadSize: 100,
+	}
+	require.NoError(t, idx2.SetRef(ref1b))
+	_, err = idx2.GetRef(ref1.PayloadCID)
+	require.NoError(t, err)
+
+	idx := newIndex()
+	require.NoError(t, idx.LoadInterest(idx1.Root(), idx1.store))
+	require.NoError(t, idx.LoadInterest(idx2.Root(), idx2.store))
+
+	// We should have a 2 refs in the interest
+	require.Equal(t, 2, idx.InterestLen())
+
+	// It returns all of them since we have space
+	in, err := idx.Interesting()
+	require.NoError(t, err)
+	require.Equal(t, 2, len(in))
+
+	// Another index has 4 refs!
+	idx3 := newIndex()
+	var reflist []*DataRef
+	for i := 0; i < 4; i++ {
+		reflist = append(reflist, &DataRef{
+			PayloadCID:  blockGen.Next().Cid(),
+			PayloadSize: 200,
+		})
+	}
+	for _, ref := range reflist {
+		require.NoError(t, idx3.SetRef(ref))
+	}
+	// Load them up in the index
+	require.NoError(t, idx.LoadInterest(idx3.Root(), idx3.store))
+
+	// Should have 6 refs in there
+	in, err = idx.Interesting()
+	require.NoError(t, err)
+	require.Equal(t, 6, len(in))
+
+	// Let's load them all in there
+	allrefs := append([]*DataRef{ref1, ref2}, reflist...)
+	for i, ref := range allrefs {
+		// Def will mess up the idx3 list but we don't need it anymore
+		ref.bucketNode = nil
+		require.NoError(t, idx.SetRef(ref))
+		require.NoError(t, idx.DropInterest(ref.PayloadCID))
+		// randomly add a read after every write, err doesn't matter
+		_, _ = idx.GetRef(allrefs[rand.Intn(i+1)].PayloadCID)
+	}
+
+	// We should have 0 interest now
+	require.Equal(t, 0, idx.InterestLen())
+
+	// Create a new index
+	idx4 := newIndex()
+	var reflist2 []*DataRef
+	for i := 0; i < 10; i++ {
+		reflist2 = append(reflist2, &DataRef{
+			PayloadCID:  blockGen.Next().Cid(),
+			PayloadSize: 100,
+		})
+		require.NoError(t, idx4.SetRef(reflist2[i]))
+		// randomly add a read after every write, err doesn't matter
+		_, _ = idx4.GetRef(reflist2[rand.Intn(i+1)].PayloadCID)
+	}
+	// Make an outlier
+	for i := 0; i < 10; i++ {
+		_, _ = idx4.GetRef(reflist2[0].PayloadCID)
+	}
+
+	// Load it again in the interest
+	require.NoError(t, idx.LoadInterest(idx4.Root(), idx4.store))
+	// 10 interests
+	require.Equal(t, 10, idx.InterestLen())
+
+	// is the index suggesting some updates
+	in, err = idx.Interesting()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(in))
+
+	// the outlier should be the most interesting
+	for k := range in {
+		require.Equal(t, reflist2[0].PayloadCID, k.PayloadCID)
+	}
 }

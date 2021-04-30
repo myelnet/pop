@@ -19,6 +19,7 @@ import (
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/selectors"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
 )
 
@@ -64,10 +65,10 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds:    ds,
 		opts:  opts,
 		idx:   idx,
-		rpl:   NewReplication(h, idx, opts.DataTransfer, opts.Regions),
 		disco: NewGossipDisco(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
+	exch.rpl = NewReplication(h, idx, opts.DataTransfer, exch, opts.Regions)
 	// Make a new default key to be sure we have an address where to receive our payments
 	if exch.w.DefaultAddress() == address.Undef {
 		_, err = exch.w.NewKey(ctx, wallet.KTSecp256k1)
@@ -185,6 +186,23 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		opt(tx)
 	}
 	return tx
+}
+
+// FindAndRetrieve starts a new transaction for fetching an entire dag on the market.
+// It handles everything from content routing to offer selection and blocks until done.
+// It is used in the replication protocol for retrieving new content to serve.
+func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
+	tx := e.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
+	err := tx.Query(sel.All())
+	if err != nil {
+		return err
+	}
+	select {
+	case err := <-tx.Done():
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Wallet returns the wallet API

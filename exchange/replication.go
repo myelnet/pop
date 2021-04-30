@@ -88,6 +88,11 @@ func (rs *RequestStream) OtherPeer() peer.ID {
 	return rs.p
 }
 
+// RoutedRetriever is a generic interface providing a method to find and retrieve content on the exchange
+type RoutedRetriever interface {
+	FindAndRetrieve(context.Context, cid.Cid) error
+}
+
 // Replication manages the network replication scheme, it keeps track of read and write requests
 // and decides whether to join a replication scheme or not
 type Replication struct {
@@ -100,6 +105,8 @@ type Replication struct {
 	reqProtos []protocol.ID
 	emitter   event.Emitter
 	indexRcvd chan struct{}
+	interval  time.Duration
+	rtv       RoutedRetriever
 
 	pmu   sync.Mutex
 	pulls map[cid.Cid]*peer.Set
@@ -109,7 +116,7 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Region) *Replication {
+func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, rgs []Region) *Replication {
 	pm := NewPeerMgr(h, rgs)
 	r := &Replication{
 		h:         h,
@@ -117,6 +124,8 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rgs []Regi
 		dt:        dt,
 		rgs:       rgs,
 		idx:       idx,
+		rtv:       rtv,
+		interval:  60 * time.Second,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
 		pulls:     make(map[cid.Cid]*peer.Set),
 		indexRcvd: make(chan struct{}),
@@ -146,7 +155,7 @@ func (r *Replication) Start(ctx context.Context) error {
 		return err
 	}
 	// Any time we receive a new index, check if any refs should be added to our supply
-	go r.popInterest()
+	go r.refreshIndex(ctx)
 	go r.pumpIndexes(ctx, sub)
 	if err := r.hs.Run(ctx); err != nil {
 		return err
@@ -163,7 +172,6 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 	for {
 		select {
 		case <-ctx.Done():
-			close(r.indexRcvd)
 			return
 		case evt := <-sub.Out():
 			hevt := evt.(HeyEvt)
@@ -188,10 +196,6 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 						fmt.Println("failed to load interest", err)
 						return
 					}
-					r.emitter.Emit(IndexEvt{
-						Root: rt,
-					})
-					r.indexRcvd <- struct{}{}
 				}(res.root)
 			}
 			if len(q) > 0 {
@@ -206,11 +210,44 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 	}
 }
 
-// popInterest inspects received indexes and if usage is high enough retrieves the content
-// at market price
-func (r *Replication) popInterest() {
-	for range r.indexRcvd {
-
+// refreshIndex is a long running process that regularly inspects received indexes
+// and if usage is high enough retrieves the content at market price
+func (r *Replication) refreshIndex(ctx context.Context) {
+	ticker := time.NewTicker(r.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			// bucketize
+			refs, err := r.idx.Interesting()
+			if err != nil || len(refs) == 0 {
+				continue
+			}
+			fmt.Println("tick", r.h.ID(), len(refs))
+			// scatter
+			errChan := make(chan error, len(refs))
+			for ref := range refs {
+				fmt.Println("fetching", ref.PayloadCID, ref.Freq)
+				go func(ctx context.Context, root cid.Cid) {
+					// let's get it
+					errChan <- r.rtv.FindAndRetrieve(ctx, root)
+				}(ctx, ref.PayloadCID)
+			}
+			// gather
+			for rf := range refs {
+				if err := <-errChan; err != nil {
+					fmt.Println("failed to get content", err)
+					continue
+				}
+				err := r.idx.DropInterest(rf.PayloadCID)
+				fmt.Println("dropped", rf.PayloadCID, err)
+				r.emitter.Emit(IndexEvt{
+					Root: rf.PayloadCID,
+				})
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -251,7 +288,7 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	r.stores[rcid] = store
 	r.smu.Unlock()
 
-	_, err = r.dt.OpenPullDataChannel(context.TODO(), hvt.Peer, &req, rcid, sel.Hamt())
+	_, err = r.dt.OpenPullDataChannel(ctx, hvt.Peer, &req, rcid, sel.Hamt())
 	if err != nil {
 		return err
 	}

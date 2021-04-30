@@ -48,6 +48,9 @@ type Index struct {
 	// Lower bound is the size we target when evicting to make room for new content
 	// the interval between ub and lb is to try not evicting after every write once we reach ub
 	lb uint64
+	// updateFunc, if not nil, is called after every read transactions. The hook can be used
+	// to trigger request for new content and refreshing the index with new popular content
+	updateFunc func()
 
 	mu sync.Mutex
 	// current size of content committed to the store
@@ -88,6 +91,13 @@ func WithBounds(up, lo uint64) IndexOption {
 		}
 		idx.ub = up
 		idx.lb = lo
+	}
+}
+
+// WithUpdateFunc sets an UpdateFunc callback and a read interval after which to call it
+func WithUpdateFunc(fn func()) IndexOption {
+	return func(idx *Index) {
+		idx.updateFunc = fn
 	}
 }
 
@@ -212,6 +222,18 @@ func (idx *Index) Root() cid.Cid {
 	return idx.rootCID
 }
 
+// Available returns the storage capacity still available or 0 if full
+// a margin set by lower bound (lb) provides leeway for the eviction algorithm
+func (idx *Index) Available() uint64 {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	margin := idx.ub - idx.lb
+	if idx.ub-idx.size < margin {
+		return 0
+	}
+	return idx.ub - idx.size
+}
+
 // Flush persists the Refs to the store, callers must take care of the mutex
 // context is not actually used downstream so we use a TODO()
 func (idx *Index) Flush() error {
@@ -236,7 +258,7 @@ func (idx *Index) DropRef(k cid.Cid) error {
 		return ErrRefNotFound
 	}
 	ref := idx.Refs[k.String()]
-	idx.remEntry(ref.bucketNode, ref)
+	idx.remBlistEntry(ref.bucketNode, ref)
 
 	err := idx.ms.Delete(ref.StoreID)
 	if err != nil {
@@ -372,15 +394,23 @@ func (idx *Index) increment(ref *DataRef) {
 	nextPlace.Value.(*bucket).entries[ref] = 1
 	if currentPlace != nil {
 		// remove from current position
-		idx.remEntry(currentPlace, ref)
+		idx.remBlistEntry(currentPlace, ref)
 	}
 }
 
-func (idx *Index) remEntry(place *list.Element, entry *DataRef) {
+func (idx *Index) remBlistEntry(place *list.Element, entry *DataRef) {
 	b := place.Value.(*bucket)
 	delete(b.entries, entry)
 	if len(b.entries) == 0 {
 		idx.blist.Remove(place)
+	}
+}
+
+func (idx *Index) remFreqEntry(place *list.Element, entry *DataRef) {
+	b := place.Value.(*listEntry)
+	delete(b.entries, entry)
+	if len(b.entries) == 0 {
+		idx.freqs.Remove(place)
 	}
 }
 
@@ -397,7 +427,7 @@ func (idx *Index) evict(size uint64) uint64 {
 				continue
 			}
 
-			idx.remEntry(place, entry)
+			idx.remBlistEntry(place, entry)
 			evicted += uint64(entry.PayloadSize)
 			idx.size -= uint64(entry.PayloadSize)
 			if evicted >= size {
@@ -433,11 +463,50 @@ func (idx *Index) LoadInterest(r cid.Cid, store cbor.IpldStore) error {
 	idx.imu.Lock()
 	defer idx.imu.Unlock()
 	return root.ForEach(context.TODO(), func(k string, val *cbg.Deferred) error {
+		idx.mu.Lock()
+		if _, ok := idx.Refs[k]; ok {
+			// If we already have it skip it
+			return nil
+		}
+		idx.mu.Unlock()
+
 		v := new(DataRef)
 		if err := v.UnmarshalCBOR(bytes.NewReader(val.Raw)); err != nil {
 			return err
 		}
-		idx.interest[v.PayloadCID.String()] = v
+
+		// Check if this ref already is in the interest list
+		if ref, ok := idx.interest[k]; ok {
+			currentPlace := ref.bucketNode
+			// After we're done moving things around we can remove the previous entry
+			defer idx.remFreqEntry(currentPlace, ref)
+			// If it is, add the freqs
+			nextFreq := ref.Freq + v.Freq
+			ref.Freq = nextFreq
+			// starting from the current position iterate until either reaching the right bucket
+			// or a higher bucket
+			for np := ref.bucketNode; np != nil; np = np.Next() {
+				le := np.Value.(*listEntry)
+				if le.freq == nextFreq {
+					le.entries[v] = 1
+					ref.bucketNode = np
+					return nil
+				}
+				// create a new bucket and insert it before the higher one
+				if le.freq > nextFreq {
+					e := newListEntry(nextFreq)
+					e.entries[ref] = 1
+					ref.bucketNode = idx.freqs.InsertBefore(e, np)
+					return nil
+				}
+			}
+			le := newListEntry(nextFreq)
+			le.entries[ref] = 1
+			ref.bucketNode = idx.freqs.PushBack(le)
+			return nil
+		}
+
+		idx.interest[k] = v
 		if e := idx.freqs.Front(); e == nil {
 			// insert the first element in the list
 			li := newListEntry(v.Freq)
@@ -468,16 +537,42 @@ func (idx *Index) LoadInterest(r cid.Cid, store cbor.IpldStore) error {
 	})
 }
 
-// MostInteresting returns the most interesting ref in the index
-func (idx *Index) MostInteresting() (*DataRef, error) {
+// Interesting returns a bucket of most interesting refs in the index that could be retrieved to improve
+// the local index
+func (idx *Index) Interesting() (map[*DataRef]byte, error) {
 	idx.imu.Lock()
 	defer idx.imu.Unlock()
+	av := idx.Available()
+	added := uint64(0)
+	out := make(map[*DataRef]byte)
+	// If we have space fill the tank
+	if av > 0 {
+		for e := idx.freqs.Back(); e != nil; e = e.Prev() {
+			for k, v := range e.Value.(*listEntry).entries {
+				out[k] = v
+				added += uint64(k.PayloadSize)
+				if added >= av {
+					return out, nil
+				}
+			}
+		}
+		// might not have enough to fill all the space and that's fine
+		return out, nil
+	}
+	// get the front bucket which is the least frequently accessed
+	front := idx.blist.Front()
 	e := idx.freqs.Back()
 	entry := e.Value.(*listEntry)
-	for k := range entry.entries {
-		return k, nil
+	for ref := range front.Value.(*bucket).entries {
+		if entry.freq > ref.Freq {
+			// return the first entry for now
+			for k, v := range entry.entries {
+				out[k] = v
+				return out, nil
+			}
+		}
 	}
-	return nil, errors.New("no interest in index")
+	return nil, errors.New("nothing interesting")
 }
 
 // InterestLen returns the number of interesting refs in our index
@@ -487,17 +582,15 @@ func (idx *Index) InterestLen() int {
 	return len(idx.interest)
 }
 
-// PromoteRef transfers over a ref from the interest list to the supply list
-// it assumes refs in the interest list are not part of the supply yet
-// in addition, the frequency count is reset
-func (idx *Index) PromoteRef(ref *DataRef) error {
-	le := ref.bucketNode.Value.(*listEntry)
-	entries := le.entries
-	delete(entries, ref)
-	delete(idx.interest, ref.PayloadCID.String())
-	if len(entries) == 0 {
-		idx.freqs.Remove(ref.bucketNode)
+// DropInterest removes a ref from the interest list
+func (idx *Index) DropInterest(k cid.Cid) error {
+	idx.imu.Lock()
+	defer idx.imu.Unlock()
+	ref, ok := idx.interest[k.String()]
+	if !ok {
+		return errors.New("ref not found")
 	}
-	ref.bucketNode = nil
-	return idx.SetRef(ref)
+	idx.remFreqEntry(ref.bucketNode, ref)
+	delete(idx.interest, k.String())
+	return nil
 }
