@@ -468,14 +468,23 @@ func TestLoadInterest(t *testing.T) {
 			PayloadCID:  blockGen.Next().Cid(),
 			PayloadSize: 200,
 		})
+		require.NoError(t, idx3.SetRef(reflist[i]))
+		// randomly add a read after every write, err doesn't matter
+		_, _ = idx3.GetRef(reflist[rand.Intn(i+1)].PayloadCID)
 	}
-	for _, ref := range reflist {
-		require.NoError(t, idx3.SetRef(ref))
-	}
+	require.NoError(t, idx3.SetRef(&DataRef{
+		PayloadCID:  ref1.PayloadCID,
+		PayloadSize: 100,
+	}))
+	require.NoError(t, idx3.SetRef(&DataRef{
+		PayloadCID:  ref2.PayloadCID,
+		PayloadSize: 100,
+	}))
 	// Load them up in the index
 	require.NoError(t, idx.LoadInterest(idx3.Root(), idx3.store))
 
 	// Should have 6 refs in there
+	require.Equal(t, 6, idx.InterestLen())
 	in, err = idx.Interesting()
 	require.NoError(t, err)
 	require.Equal(t, 6, len(in))
@@ -487,12 +496,14 @@ func TestLoadInterest(t *testing.T) {
 		ref.bucketNode = nil
 		require.NoError(t, idx.SetRef(ref))
 		require.NoError(t, idx.DropInterest(ref.PayloadCID))
+
 		// randomly add a read after every write, err doesn't matter
 		_, _ = idx.GetRef(allrefs[rand.Intn(i+1)].PayloadCID)
 	}
-
 	// We should have 0 interest now
 	require.Equal(t, 0, idx.InterestLen())
+	_, err = idx.Interesting()
+	require.Error(t, err)
 
 	// Create a new index
 	idx4 := newIndex()

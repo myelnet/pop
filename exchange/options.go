@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
@@ -64,6 +65,10 @@ type Options struct {
 	// least frequently used content is evicted to make more room for new content.
 	// Default is 10GB.
 	Capacity uint64
+
+	// RepInterval is the replication interval after which a worker will try to retrieve fresh new content
+	// on the network
+	RepInterval time.Duration
 }
 
 // Everything isn't thoroughly validated so we trust users who provide options know what they're doing
@@ -118,6 +123,9 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 	if opts.Capacity == 0 {
 		// Default is 10GB
 		opts.Capacity = 10737418240
+	}
+	if opts.RepInterval == 0 {
+		opts.RepInterval = 60 * time.Second
 	}
 	return opts, nil
 }

@@ -509,6 +509,8 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	err = mn.ConnectAllButSelf()
 	require.NoError(t, err)
 
+	time.Sleep(time.Second)
+
 	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID: rootCid,
 		StoreID:    storeID,

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-cid"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/libp2p/go-eventbus"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
@@ -280,8 +282,8 @@ func TestExchangeE2E(t *testing.T) {
 			require.NotEqual(t, ref.ID, deal.ID(0))
 
 			select {
-			case err := <-tx.Done():
-				require.NoError(t, err)
+			case res := <-tx.Done():
+				require.NoError(t, res.Err)
 			case <-ctx.Done():
 				t.Fatal("failed to finish sync")
 			}
@@ -291,5 +293,82 @@ func TestExchangeE2E(t *testing.T) {
 			// And we verify we got the file back
 			cnode.VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
 		})
+	}
+}
+
+// The goal of this test is to simulate the process of a brand new node joining
+// 2 other existing nodes on the network. It demonstrates the ability of the new nodes
+// to automatically fill the index with existing content.
+func TestExchangeJoiningNetwork(t *testing.T) {
+	bgCtx := context.Background()
+
+	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+	defer cancel()
+
+	mn := mocknet.New(bgCtx)
+
+	newNode := func() (*Exchange, *testutil.TestNode) {
+		n := testutil.NewTestNode(mn, t)
+		opts := Options{
+			Blockstore:  n.Bs,
+			MultiStore:  n.Ms,
+			RepoPath:    n.DTTmpDir,
+			Keystore:    keystore.NewMemKeystore(),
+			RepInterval: time.Second,
+		}
+		exch, err := New(bgCtx, n.Host, n.Ds, opts)
+		require.NoError(t, err)
+		return exch, n
+	}
+
+	ex1, node1 := newNode()
+	_, _ = newNode()
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	content := make(map[string]cid.Cid, 5)
+	// Create 5 new transactions
+	for i := 0; i < 5; i++ {
+		// The peer manager has time to fill up while we load this file
+		fname := node1.CreateRandomFile(t, 128000)
+
+		ptx := ex1.Tx(ctx)
+		require.NoError(t, ptx.PutFile(fname))
+		ptx.SetCacheRF(1)
+		require.NoError(t, ptx.Commit())
+		ptx.WatchDispatch(func(rec PRecord) {
+			// No need to check
+		})
+		content[KeyFromPath(fname)] = ptx.Root()
+		ptx.Close()
+	}
+
+	// new node joins the network
+	ex3, node3 := newNode()
+	isub, err := node3.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	time.Sleep(time.Second)
+
+	for i := 0; i < 5; i++ {
+		select {
+		case <-isub.Out():
+		case <-ctx.Done():
+			t.Fatal("did not receive all the content from replication")
+		}
+	}
+
+	time.Sleep(time.Second)
+
+	for k, r := range content {
+		// Now we fetch it again from our providers
+		tx := ex3.Tx(ctx, WithRoot(r))
+		_, err := tx.GetFile(k)
+		require.NoError(t, err)
+		tx.Close()
 	}
 }

@@ -69,6 +69,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
 	exch.rpl = NewReplication(h, idx, opts.DataTransfer, exch, opts.Regions)
+	exch.rpl.interval = opts.RepInterval
 	// Make a new default key to be sure we have an address where to receive our payments
 	if exch.w.DefaultAddress() == address.Undef {
 		_, err = exch.w.NewKey(ctx, wallet.KTSecp256k1)
@@ -136,7 +137,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
 	// Track when the session is completed
-	done := make(chan error, 1)
+	done := make(chan TxResult, 1)
 	// Track any issues with the transfer
 	errs := make(chan deal.Status)
 	// Subscribe to client events to send to the channel
@@ -145,7 +146,10 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		switch state.Status {
 		case deal.StatusCompleted:
 			select {
-			case done <- nil:
+			case done <- TxResult{
+				Size:  state.TotalReceived,
+				Spent: state.FundsSpent,
+			}:
 			default:
 			}
 			return
@@ -191,6 +195,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 // FindAndRetrieve starts a new transaction for fetching an entire dag on the market.
 // It handles everything from content routing to offer selection and blocks until done.
 // It is used in the replication protocol for retrieving new content to serve.
+// It also sets the new received content in the index.
 func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 	tx := e.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
 	err := tx.Query(sel.All())
@@ -198,8 +203,15 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 		return err
 	}
 	select {
-	case err := <-tx.Done():
-		return err
+	case res := <-tx.Done():
+		if res.Err != nil {
+			return res.Err
+		}
+		return e.idx.SetRef(&DataRef{
+			PayloadCID:  root,
+			StoreID:     tx.StoreID(),
+			PayloadSize: int64(res.Size),
+		})
 	case <-ctx.Done():
 		return ctx.Err()
 	}

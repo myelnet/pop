@@ -49,6 +49,13 @@ type Entry struct {
 	Size int64
 }
 
+// TxResult returns metadata about the transaction including a potential error if something failed
+type TxResult struct {
+	Err   error
+	Size  uint64 // Size is the total amount of bytes exchanged during this transaction
+	Spent abi.TokenAmount
+}
+
 // Tx is an exchange transaction which may contain multiple DAGs to be exchanged with a set of connected peers
 type Tx struct {
 	ctx       context.Context
@@ -85,7 +92,7 @@ type Tx struct {
 	sel ipld.Node
 	// done is the final message telling us we have received all the blocks and all is well. if the error
 	// is not nil we've run out of options and nothing we can do at this time will get us the content.
-	done chan error
+	done chan TxResult
 	// errs receives any kind of error status from execution so we can try to fix it.
 	errs chan deal.Status
 	// unsubscribes is used to clear any subscriptions to our retrieval events when we have received
@@ -563,7 +570,7 @@ func (tx *Tx) Triage() (DealSelection, error) {
 }
 
 // Done returns a channel that receives any resulting error from the latest operation
-func (tx *Tx) Done() <-chan error {
+func (tx *Tx) Done() <-chan TxResult {
 	return tx.done
 }
 

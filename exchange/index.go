@@ -478,17 +478,24 @@ func (idx *Index) LoadInterest(r cid.Cid, store cbor.IpldStore) error {
 		// Check if this ref already is in the interest list
 		if ref, ok := idx.interest[k]; ok {
 			currentPlace := ref.bucketNode
-			// After we're done moving things around we can remove the previous entry
-			defer idx.remFreqEntry(currentPlace, ref)
 			// If it is, add the freqs
 			nextFreq := ref.Freq + v.Freq
+			// sometimes a node may have content with 0 reads in their index
+			if nextFreq == ref.Freq {
+				// no need to do anything
+				return nil
+			}
+			if nextFreq != ref.Freq {
+				// After we're done moving things around we can remove the previous entry
+				defer idx.remFreqEntry(currentPlace, ref)
+			}
 			ref.Freq = nextFreq
 			// starting from the current position iterate until either reaching the right bucket
 			// or a higher bucket
 			for np := ref.bucketNode; np != nil; np = np.Next() {
 				le := np.Value.(*listEntry)
 				if le.freq == nextFreq {
-					le.entries[v] = 1
+					le.entries[ref] = 1
 					ref.bucketNode = np
 					return nil
 				}
@@ -561,14 +568,16 @@ func (idx *Index) Interesting() (map[*DataRef]byte, error) {
 	}
 	// get the front bucket which is the least frequently accessed
 	front := idx.blist.Front()
-	e := idx.freqs.Back()
-	entry := e.Value.(*listEntry)
-	for ref := range front.Value.(*bucket).entries {
-		if entry.freq > ref.Freq {
-			// return the first entry for now
-			for k, v := range entry.entries {
-				out[k] = v
-				return out, nil
+	// start from the back which is the most frequently used
+	if e := idx.freqs.Back(); e != nil {
+		entry := e.Value.(*listEntry)
+		for ref := range front.Value.(*bucket).entries {
+			if entry.freq > ref.Freq {
+				// return the first entry for now
+				for k, v := range entry.entries {
+					out[k] = v
+					return out, nil
+				}
 			}
 		}
 	}
@@ -590,7 +599,7 @@ func (idx *Index) DropInterest(k cid.Cid) error {
 	if !ok {
 		return errors.New("ref not found")
 	}
-	idx.remFreqEntry(ref.bucketNode, ref)
 	delete(idx.interest, k.String())
+	idx.remFreqEntry(ref.bucketNode, ref)
 	return nil
 }
