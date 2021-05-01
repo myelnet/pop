@@ -198,6 +198,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 // It also sets the new received content in the index.
 func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 	tx := e.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
+	defer tx.Close()
 	err := tx.Query(sel.All())
 	if err != nil {
 		return err

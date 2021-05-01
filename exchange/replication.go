@@ -218,31 +218,21 @@ func (r *Replication) refreshIndex(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			// bucketize
 			refs, err := r.idx.Interesting()
 			if err != nil || len(refs) == 0 {
 				continue
 			}
 			fmt.Println("tick", r.h.ID(), len(refs))
-			// scatter
-			errChan := make(chan error, len(refs))
+
 			for ref := range refs {
-				fmt.Println("fetching", ref.PayloadCID, ref.Freq)
-				go func(ctx context.Context, root cid.Cid) {
-					// let's get it
-					errChan <- r.rtv.FindAndRetrieve(ctx, root)
-				}(ctx, ref.PayloadCID)
-			}
-			// gather
-			for rf := range refs {
-				if err := <-errChan; err != nil {
-					fmt.Println("failed to get content", err)
+				// let's get it
+				err := r.rtv.FindAndRetrieve(ctx, ref.PayloadCID)
+				if err != nil {
 					continue
 				}
-				err := r.idx.DropInterest(rf.PayloadCID)
-				fmt.Println("dropped", rf.PayloadCID, err)
+				err = r.idx.DropInterest(ref.PayloadCID)
 				r.emitter.Emit(IndexEvt{
-					Root: rf.PayloadCID,
+					Root: ref.PayloadCID,
 				})
 			}
 		case <-ctx.Done():

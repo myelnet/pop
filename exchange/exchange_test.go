@@ -362,8 +362,6 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second)
-
 	for k, r := range content {
 		// Now we fetch it again from our providers
 		tx := ex3.Tx(ctx, WithRoot(r))
