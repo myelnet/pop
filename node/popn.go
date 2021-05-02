@@ -716,9 +716,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	})
 
 	select {
-	case err := <-tx.Done():
-		if err != nil {
-			return err
+	case res := <-tx.Done():
+		if res.Err != nil {
+			return res.Err
 		}
 		tx.Close()
 		end := time.Now()
@@ -737,7 +737,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		err = nd.exch.Index().SetRef(&exchange.DataRef{
 			PayloadCID:  c,
 			StoreID:     tx.StoreID(),
-			PayloadSize: int64(resp.Size),
+			PayloadSize: int64(res.Size),
 		})
 		if err != nil {
 			return err
