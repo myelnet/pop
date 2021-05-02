@@ -3,6 +3,7 @@ package retrieval
 import (
 	"sync"
 
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 	"github.com/myelnet/pop/retrieval/deal"
 )
@@ -28,5 +29,16 @@ func (s *AskStore) GetAsk(k cid.Cid) deal.QueryResponse {
 	s.lk.RLock()
 	defer s.lk.RUnlock()
 
-	return s.asks[k]
+	a, ok := s.asks[k]
+	if !ok {
+		// we don't have a specific ask for this CID so let's returns a default
+		// response. TODO: need more context as to why this content is being retrieved,
+		// which region, peer etc.
+		return deal.QueryResponse{
+			MinPricePerByte:            big.Zero(),
+			MaxPaymentInterval:         deal.DefaultPaymentInterval,
+			MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+		}
+	}
+	return a
 }
