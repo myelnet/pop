@@ -352,7 +352,7 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
 
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	for i := 0; i < 5; i++ {
 		select {
