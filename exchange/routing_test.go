@@ -58,7 +58,7 @@ func calcResponse(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.
 	}, nil
 }
 
-func TestGossipDisco(t *testing.T) {
+func TestGossipRouting(t *testing.T) {
 	withSwarmT := func(tn *testutil.TestNode) {
 		netw := swarmt.GenSwarm(t, context.Background())
 		h := bhost.NewBlankHost(netw)
@@ -115,10 +115,10 @@ func TestGossipDisco(t *testing.T) {
 
 			mn := mocknet.New(bgCtx)
 
-			clients := make(map[peer.ID]*GossipDisco)
+			clients := make(map[peer.ID]*GossipRouting)
 			var cnodes []*testutil.TestNode
 
-			providers := make(map[peer.ID]*GossipDisco)
+			providers := make(map[peer.ID]*GossipRouting)
 			var pnodes []*testutil.TestNode
 
 			fnames := make([]string, testCase.files)
@@ -136,15 +136,15 @@ func TestGossipDisco(t *testing.T) {
 				tracer := NewGossipTracer()
 				ps, err := pubsub.NewGossipSub(ctx, n.Host, pubsub.WithEventTracer(tracer))
 				require.NoError(t, err)
-				disco := NewGossipDisco(n.Host, ps, tracer, []Region{global})
+				routing := NewGossipRouting(n.Host, ps, tracer, []Region{global})
 
-				require.NoError(t, disco.StartProviding(ctx, calcResponse))
+				require.NoError(t, routing.StartProviding(ctx, calcResponse))
 
 				if i < testCase.clients {
-					clients[n.Host.ID()] = disco
+					clients[n.Host.ID()] = routing
 					cnodes = append(cnodes, n)
 				} else {
-					providers[n.Host.ID()] = disco
+					providers[n.Host.ID()] = routing
 					pnodes = append(pnodes, n)
 
 					for i, name := range fnames {
@@ -209,14 +209,14 @@ func TestMessageForwarding(t *testing.T) {
 	ps, err := pubsub.NewGossipSub(ctx, cnode.Host)
 	require.NoError(t, err)
 	// We don't need store getters or address getters as we're manually sending responses in
-	cnet := NewGossipDisco(cnode.Host, ps, mtracker{true, ""}, []Region{global})
+	cnet := NewGossipRouting(cnode.Host, ps, mtracker{true, ""}, []Region{global})
 	responses := make(chan deal.QueryResponse)
 	cnet.receiveResp = func(i peer.AddrInfo, r deal.QueryResponse) {
 		responses <- r
 	}
 	require.NoError(t, cnet.StartProviding(ctx, calcResponse))
 	var pnodes []*testutil.TestNode
-	var pnets []*GossipDisco
+	var pnets []*GossipRouting
 
 	for i := 0; i < 11; i++ {
 		pnode := testutil.NewTestNode(mn, t)
@@ -227,7 +227,7 @@ func TestMessageForwarding(t *testing.T) {
 		}
 		ps, err := pubsub.NewGossipSub(ctx, pnode.Host)
 		require.NoError(t, err)
-		pnet := NewGossipDisco(pnode.Host, ps, mtracker{false, pp}, []Region{global})
+		pnet := NewGossipRouting(pnode.Host, ps, mtracker{false, pp}, []Region{global})
 		require.NoError(t, pnet.StartProviding(ctx, calcResponse))
 		pnodes = append(pnodes, pnode)
 		pnets = append(pnets, pnet)
@@ -288,7 +288,7 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 	cnode := testutil.NewTestNode(mn, b)
 	ps, err := pubsub.NewGossipSub(ctx, cnode.Host)
 	require.NoError(b, err)
-	cnet := NewGossipDisco(cnode.Host, ps, mtracker{true, ""}, []Region{global})
+	cnet := NewGossipRouting(cnode.Host, ps, mtracker{true, ""}, []Region{global})
 	responses := make(chan deal.QueryResponse)
 	cnet.receiveResp = func(i peer.AddrInfo, r deal.QueryResponse) {
 		responses <- r
@@ -296,7 +296,7 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 	require.NoError(b, cnet.StartProviding(ctx, calcResponse))
 
 	var pnodes []*testutil.TestNode
-	var pnets []*GossipDisco
+	var pnets []*GossipRouting
 
 	for i := 0; i < 1+b.N; i++ {
 		pnode := testutil.NewTestNode(mn, b)
@@ -308,7 +308,7 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 		ps, err := pubsub.NewGossipSub(ctx, pnode.Host)
 		require.NoError(b, err)
 
-		pnet := NewGossipDisco(pnode.Host, ps, mtracker{false, pp}, []Region{global})
+		pnet := NewGossipRouting(pnode.Host, ps, mtracker{false, pp}, []Region{global})
 		require.NoError(b, pnet.StartProviding(ctx, calcResponse))
 		pnodes = append(pnodes, pnode)
 		pnets = append(pnets, pnet)

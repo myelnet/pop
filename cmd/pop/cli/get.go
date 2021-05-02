@@ -87,7 +87,7 @@ func runGet(ctx context.Context, args []string) error {
 
 			fmt.Printf("==> Completed\n")
 			if gr.TotalPrice != "0" {
-				fmt.Printf("Discovery: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
+				fmt.Printf("Routing: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
 			}
 
 			if getArgs.output != "" {

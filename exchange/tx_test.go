@@ -282,7 +282,7 @@ func TestMapFieldSelector(t *testing.T) {
 	gtx.sel = sel.Key(key)
 
 	// We skip discovery and send an offer directly
-	qs, err := pn.disco.NewQueryStream(n2.Host.ID())
+	qs, err := pn.rou.NewQueryStream(n2.Host.ID())
 	require.NoError(t, err)
 	resp := deal.QueryResponse{
 		Status:                     deal.QueryResponseAvailable,
