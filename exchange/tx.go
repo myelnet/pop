@@ -70,7 +70,7 @@ type Tx struct {
 	// entries is the cached reference to values used during the session
 	entries map[string]Entry
 	// disco is the discovery mechanism for finding content offers
-	disco *GossipDisco
+	rou *GossipRouting
 	// retriever manages the state of the transfer once we have a good offer
 	retriever *retrieval.Client
 	// index is the exchange content index
@@ -119,7 +119,7 @@ func WithStrategy(strategy SelectionStrategy) TxOption {
 	return func(tx *Tx) {
 		tx.worker = strategy(tx)
 		tx.worker.Start()
-		tx.disco.SetReceiver(tx.worker.ReceiveResponse)
+		tx.rou.SetReceiver(tx.worker.ReceiveResponse)
 	}
 }
 
@@ -485,7 +485,7 @@ func (ds DealSelection) Decline() {
 func (tx *Tx) Query(sel ipld.Node) error {
 	tx.sel = sel
 	if tx.worker != nil {
-		return tx.disco.Query(tx.ctx, tx.root, sel)
+		return tx.rou.Query(tx.ctx, tx.root, sel)
 	}
 	return ErrNoStrategy
 }
@@ -493,7 +493,7 @@ func (tx *Tx) Query(sel ipld.Node) error {
 // QueryFrom allows querying directly from a given peer
 func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
 	if tx.worker != nil {
-		return tx.disco.QueryPeer(info, tx.root, tx.worker.ReceiveResponse)
+		return tx.rou.QueryPeer(info, tx.root, tx.worker.ReceiveResponse)
 	}
 	return ErrNoStrategy
 }
@@ -501,7 +501,7 @@ func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
 func (tx *Tx) Execute(of deal.Offer) error {
 	// Make sure our provider is in our peerstore
-	tx.disco.AddAddrs(of.Provider.ID, of.Provider.Addrs)
+	tx.rou.AddAddrs(of.Provider.ID, of.Provider.Addrs)
 	params, err := deal.NewParams(
 		of.Response.MinPricePerByte,
 		of.Response.MaxPaymentInterval,

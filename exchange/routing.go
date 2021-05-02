@@ -138,8 +138,8 @@ type ReceiveResponse func(peer.AddrInfo, deal.QueryResponse)
 // ResponseFunc takes a Query and returns a Response or an error if request is declined
 type ResponseFunc func(context.Context, peer.ID, Region, deal.Query) (deal.QueryResponse, error)
 
-// GossipDisco is a discovery service to find content providers using pubsub gossip routing
-type GossipDisco struct {
+// GossipRouting is a content routing service to find content providers using pubsub gossip routing
+type GossipRouting struct {
 	h              host.Host
 	ps             *pubsub.PubSub
 	tops           []*pubsub.Topic
@@ -150,9 +150,9 @@ type GossipDisco struct {
 	receiveResp    ReceiveResponse
 }
 
-// NewGossipDisco creates a new instance of a content discovery interface
-func NewGossipDisco(h host.Host, ps *pubsub.PubSub, meta MessageTracker, rgs []Region) *GossipDisco {
-	disco := &GossipDisco{
+// NewGossipRouting creates a new GossipRouting service
+func NewGossipRouting(h host.Host, ps *pubsub.PubSub, meta MessageTracker, rgs []Region) *GossipRouting {
+	routing := &GossipRouting{
 		h:       h,
 		ps:      ps,
 		meta:    meta,
@@ -163,38 +163,38 @@ func NewGossipDisco(h host.Host, ps *pubsub.PubSub, meta MessageTracker, rgs []R
 			PopQueryProtocolID,
 		},
 	}
-	return disco
+	return routing
 }
 
 // StartProviding opens up our gossip subscription and sets our stream handler
-func (gd *GossipDisco) StartProviding(ctx context.Context, fn ResponseFunc) error {
+func (gr *GossipRouting) StartProviding(ctx context.Context, fn ResponseFunc) error {
 	// We only need to handle the Pop query protocol since Fil is for querying storage miners
-	gd.h.SetStreamHandler(PopQueryProtocolID, gd.handleQueryResponse)
+	gr.h.SetStreamHandler(PopQueryProtocolID, gr.handleQueryResponse)
 
-	for i, r := range gd.regions {
-		top, err := gd.ps.Join(fmt.Sprintf("%s/%s", PopQueryProtocolID, r.Name))
+	for i, r := range gr.regions {
+		top, err := gr.ps.Join(fmt.Sprintf("%s/%s", PopQueryProtocolID, r.Name))
 		if err != nil {
 			return err
 		}
-		gd.tops[i] = top
+		gr.tops[i] = top
 		sub, err := top.Subscribe()
 		if err != nil {
 			return err
 		}
-		go gd.pump(ctx, sub, fn)
+		go gr.pump(ctx, sub, fn)
 	}
 
 	return nil
 }
 
-func (gd *GossipDisco) pump(ctx context.Context, sub *pubsub.Subscription, fn ResponseFunc) {
+func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn ResponseFunc) {
 	r := RegionFromTopic(sub.Topic())
 	for {
 		msg, err := sub.Next(ctx)
 		if err != nil {
 			return
 		}
-		if msg.ReceivedFrom == gd.h.ID() {
+		if msg.ReceivedFrom == gr.h.ID() {
 			continue
 		}
 		m := new(deal.Query)
@@ -207,12 +207,12 @@ func (gd *GossipDisco) pump(ctx context.Context, sub *pubsub.Subscription, fn Re
 			continue
 		}
 
-		qs, err := gd.NewQueryStream(msg.ReceivedFrom)
+		qs, err := gr.NewQueryStream(msg.ReceivedFrom)
 		if err != nil {
 			fmt.Println("failed to create response query stream", err)
 			continue
 		}
-		resp.Message, err = gd.ResponseMsg(msg.Message)
+		resp.Message, err = gr.ResponseMsg(msg.Message)
 		if err != nil {
 			continue
 		}
@@ -225,8 +225,8 @@ func (gd *GossipDisco) pump(ctx context.Context, sub *pubsub.Subscription, fn Re
 }
 
 // ResponseMsg prepares the QueryResponse Message payload
-func (gd *GossipDisco) ResponseMsg(msg *pb.Message) (string, error) {
-	addrs, err := gd.Addrs()
+func (gr *GossipRouting) ResponseMsg(msg *pb.Message) (string, error) {
+	addrs, err := gr.Addrs()
 	if err != nil {
 		return "", err
 	}
@@ -238,8 +238,8 @@ func (gd *GossipDisco) ResponseMsg(msg *pb.Message) (string, error) {
 }
 
 // QueryPeer asks another peer directly for retrieval conditions
-func (gd *GossipDisco) QueryPeer(p peer.AddrInfo, root cid.Cid, fn ReceiveResponse) error {
-	stream, err := gd.NewQueryStream(p.ID)
+func (gr *GossipRouting) QueryPeer(p peer.AddrInfo, root cid.Cid, fn ReceiveResponse) error {
+	stream, err := gr.NewQueryStream(p.ID)
 	if err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func (gd *GossipDisco) QueryPeer(p peer.AddrInfo, root cid.Cid, fn ReceiveRespon
 
 // Query asks the gossip network of providers if anyone can provide the blocks we're looking for
 // it blocks execution until our conditions are satisfied
-func (gd *GossipDisco) Query(ctx context.Context, root cid.Cid, sel ipld.Node) error {
+func (gr *GossipRouting) Query(ctx context.Context, root cid.Cid, sel ipld.Node) error {
 	params, err := deal.NewQueryParams(sel)
 	if err != nil {
 		return err
@@ -280,7 +280,7 @@ func (gd *GossipDisco) Query(ctx context.Context, root cid.Cid, sel ipld.Node) e
 
 	bytes := buf.Bytes()
 	// publish to all regions this exchange joined
-	for _, topic := range gd.tops {
+	for _, topic := range gr.tops {
 		if err := topic.Publish(ctx, bytes); err != nil {
 			return err
 		}
@@ -290,15 +290,15 @@ func (gd *GossipDisco) Query(ctx context.Context, root cid.Cid, sel ipld.Node) e
 }
 
 // SetReceiver sets a callback to receive discovery responses
-func (gd *GossipDisco) SetReceiver(fn ReceiveResponse) {
-	gd.rmu.Lock()
-	gd.receiveResp = fn
-	gd.rmu.Unlock()
+func (gr *GossipRouting) SetReceiver(fn ReceiveResponse) {
+	gr.rmu.Lock()
+	gr.receiveResp = fn
+	gr.rmu.Unlock()
 }
 
 // NewQueryStream creates a new query stream using the provided peer.ID to handle the Query protocols
-func (gd *GossipDisco) NewQueryStream(dest peer.ID) (*QueryStream, error) {
-	s, err := OpenStream(context.Background(), gd.h, dest, gd.queryProtocols)
+func (gr *GossipRouting) NewQueryStream(dest peer.ID) (*QueryStream, error) {
+	s, err := OpenStream(context.Background(), gr.h, dest, gr.queryProtocols)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (gd *GossipDisco) NewQueryStream(dest peer.ID) (*QueryStream, error) {
 // and send it to the receiver if not and we have a sender for the message reference we forward it back
 // if there is no message attached with the response it might be sent from a Filecoin storage miner so
 // we still try to send it to the receiver.
-func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
+func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 	buffered := bufio.NewReaderSize(s, 16)
 	defer s.Close()
 
@@ -324,9 +324,9 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 	}
 	// Here we handle messages from Filecoin miners
 	if len(msg) == 0 {
-		gd.rmu.Lock()
-		defer gd.rmu.Unlock()
-		if gd.receiveResp == nil {
+		gr.rmu.Lock()
+		defer gr.rmu.Unlock()
+		if gr.receiveResp == nil {
 			fmt.Println("received resp")
 			return
 		}
@@ -335,7 +335,7 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 			fmt.Println("failed to read query response", err)
 			return
 		}
-		gd.receiveResp(gd.h.Peerstore().PeerInfo(s.Conn().RemotePeer()), resp)
+		gr.receiveResp(gr.h.Peerstore().PeerInfo(s.Conn().RemotePeer()), resp)
 		return
 	}
 	// Get the index where to split
@@ -347,13 +347,13 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 	msgID := msg[2 : is+2]
 	// The receiver should know if we issued the query if it's not the case
 	// it means we must forward it to whichever peer sent us the query
-	if !gd.meta.Published(msgID) {
-		to, err := gd.meta.Sender(msgID)
+	if !gr.meta.Published(msgID) {
+		to, err := gr.meta.Sender(msgID)
 		if err != nil {
 			fmt.Println("failed to find message recipient", err)
 			return
 		}
-		w, err := OpenStream(context.Background(), gd.h, to, gd.queryProtocols)
+		w, err := OpenStream(context.Background(), gr.h, to, gr.queryProtocols)
 		if err != nil {
 			fmt.Println("failed to open stream", err)
 			return
@@ -363,10 +363,10 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 		}
 		return
 	}
-	gd.rmu.Lock()
-	defer gd.rmu.Unlock()
+	gr.rmu.Lock()
+	defer gr.rmu.Unlock()
 	// Stop if we don't have a receiver set
-	if gd.receiveResp == nil {
+	if gr.receiveResp == nil {
 		return
 	}
 
@@ -382,17 +382,17 @@ func (gd *GossipDisco) handleQueryResponse(s network.Stream) {
 		return
 	}
 
-	gd.receiveResp(*rec, resp)
+	gr.receiveResp(*rec, resp)
 }
 
 // Addrs returns the host's p2p addresses
-func (gd *GossipDisco) Addrs() ([]ma.Multiaddr, error) {
-	return peer.AddrInfoToP2pAddrs(host.InfoFromHost(gd.h))
+func (gr *GossipRouting) Addrs() ([]ma.Multiaddr, error) {
+	return peer.AddrInfoToP2pAddrs(host.InfoFromHost(gr.h))
 }
 
 // AddAddrs adds a new peer into the host peerstore
-func (gd *GossipDisco) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
-	gd.h.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
+func (gr *GossipRouting) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
+	gr.h.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
 }
 
 // PeekResponseMsg decodes the Message field only and returns the value while copying the bytes in a buffer

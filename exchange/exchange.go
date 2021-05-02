@@ -35,8 +35,8 @@ type Exchange struct {
 	w wallet.Driver
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
-	// Discovery service
-	disco *GossipDisco
+	// Routing service
+	rou *GossipRouting
 	// Replication scheme
 	rpl *Replication
 	// Index keeps track of all content stored under this exchange
@@ -61,12 +61,12 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	}
 	// register a pubsub topic for each region
 	exch := &Exchange{
-		h:     h,
-		ds:    ds,
-		opts:  opts,
-		idx:   idx,
-		disco: NewGossipDisco(h, opts.PubSub, opts.GossipTracer, opts.Regions),
-		w:     wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
+		h:    h,
+		ds:   ds,
+		opts: opts,
+		idx:  idx,
+		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+		w:    wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
 	exch.rpl = NewReplication(h, idx, opts.DataTransfer, exch, opts.Regions)
 	exch.rpl.interval = opts.RepInterval
@@ -92,7 +92,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err := exch.rpl.Start(ctx); err != nil {
 		return nil, err
 	}
-	if err := exch.disco.StartProviding(ctx, exch.handleQuery); err != nil {
+	if err := exch.rou.StartProviding(ctx, exch.handleQuery); err != nil {
 		return nil, err
 	}
 	return exch, nil
@@ -168,7 +168,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		ctx:        ctx,
 		cancelCtx:  cancel,
 		ms:         e.opts.MultiStore,
-		disco:      e.disco,
+		rou:        e.rou,
 		retriever:  cl,
 		index:      e.idx,
 		repl:       e.rpl,
