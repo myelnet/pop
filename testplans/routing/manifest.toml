@@ -1,4 +1,4 @@
-name = "discovery"
+name = "routing"
 [defaults]
 builder = "exec:go"
 runner = "local:exec"
@@ -6,13 +6,13 @@ runner = "local:exec"
 [builders."docker:go"]
 enabled = true
 go_version = "1.16"
-module_path = "github.com/myelnet/pop/testplans/discovery"
+module_path = "github.com/myelnet/pop/testplans/routing"
 exec_pkg = "."
 enable_go_build_cache = true
 
 [builders."exec:go"]
 enabled = true
-module_path = "github.com/myelnet/pop/testplans/discovery"
+module_path = "github.com/myelnet/pop/testplans/routing"
 
 [runners."local:docker"]
 enabled = true

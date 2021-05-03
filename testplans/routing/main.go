@@ -30,8 +30,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/myelnet/pop"
-	"github.com/myelnet/pop/supply"
+	ex "github.com/myelnet/pop/exchange"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/testground/sdk-go/run"
 	"github.com/testground/sdk-go/runtime"
 	"github.com/testground/sdk-go/sync"
@@ -70,16 +70,15 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	low := runenv.IntParam("min_conns")
 	hiw := runenv.IntParam("max_conns")
-	settings, err := defaultSettings(ctx, rpath, ip, low, hiw)
+	settings, h, ds, err := defaultSettings(ctx, rpath, ip, low, hiw)
 	if err != nil {
 		return err
 	}
-	h := settings.Host
 	ms := settings.MultiStore
 
-	settings.Regions = supply.ParseRegions(runenv.StringArrayParam("regions"))
+	settings.Regions = ex.ParseRegions(runenv.StringArrayParam("regions"))
 
-	exch, err := pop.NewExchange(ctx, settings)
+	exch, err := ex.New(ctx, h, ds, settings)
 	if err != nil {
 		return err
 	}
@@ -106,7 +105,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	runenv.RecordMessage("connected to %d peers", len(h.Network().Peers()))
 
 	// The content topic lets other peers know when content was imported
-	contentTopic := sync.NewTopic("content", new(supply.PRecord))
+	contentTopic := sync.NewTopic("content", new(ex.PRecord))
 
 	// Any node part of the provider to provide a random file
 	if group == "providers" {
@@ -127,13 +126,17 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err != nil {
 			return err
 		}
-		if err := exch.Supply().Register(fid, storeID); err != nil {
+		if err := exch.Index().SetRef(&ex.DataRef{
+			PayloadCID:  fid,
+			StoreID:     storeID,
+			PayloadSize: int64(len(data)),
+		}); err != nil {
 			return err
 		}
 
 		// Only the first one in the group needs to publish the CID as it's the same file
 		if int(initCtx.GroupSeq) == 1 {
-			initCtx.SyncClient.MustPublish(ctx, contentTopic, &supply.PRecord{
+			initCtx.SyncClient.MustPublish(ctx, contentTopic, &ex.PRecord{
 				PayloadCID: fid,
 				Provider:   h.ID(),
 			})
@@ -144,7 +147,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	if group == "clients" {
 		// We expect a CID published by only one of the providers
-		contentCh := make(chan *supply.PRecord, 1)
+		contentCh := make(chan *ex.PRecord, 1)
 		sctx, scancel := context.WithCancel(ctx)
 		defer scancel()
 		_ = initCtx.SyncClient.MustSubscribe(sctx, contentTopic, contentCh)
@@ -166,7 +169,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			}
 
 			goruntime.GC()
-			session, err := exch.NewSession(ctx, c.PayloadCID)
+			tx := exch.Tx(ctx, ex.WithRoot(c.PayloadCID), ex.WithStrategy(ex.SelectFirst), ex.WithTriage())
 			if err != nil {
 				return err
 			}
@@ -174,17 +177,18 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 			t := time.Now()
 
-			err = session.QueryGossip(ctx)
+			err = tx.Query(sel.All())
 			if err != nil {
 				return err
 			}
 
-			offer, err := session.OfferQueue().Peek(ctx)
+			selected, err := tx.Triage()
 			if err != nil {
 				return err
 			}
 
-			runenv.RecordMessage("got an offer from %s in %d ns", offer.PeerID, time.Since(t).Nanoseconds())
+			runenv.RecordMessage("got an offer from %s in %d ns", selected.Offer.Provider.ID, time.Since(t).Nanoseconds())
+			tx.Close()
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -198,14 +202,14 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	return nil
 }
 
-func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int) (pop.Settings, error) {
+func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int) (ex.Options, host.Host, datastore.Batching, error) {
 	ds := dssync.MutexWrap(datastore.NewMapDatastore())
 
 	bs := blockstore.NewBlockstore(ds)
 
 	ms, err := multistore.NewMultiDstore(ds)
 	if err != nil {
-		return pop.Settings{}, err
+		return ex.Options{}, nil, nil, err
 	}
 
 	ks := keystore.NewMemKeystore()
@@ -226,13 +230,13 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		}),
 	)
 	if err != nil {
-		return pop.Settings{}, err
+		return ex.Options{}, nil, nil, err
 	}
 
-	tracer := pop.NewGossipTracer()
+	tracer := ex.NewGossipTracer()
 	ps, err := pubsub.NewGossipSub(ctx, h, pubsub.WithEventTracer(tracer))
 	if err != nil {
-		return pop.Settings{}, err
+		return ex.Options{}, nil, nil, err
 	}
 
 	gs := gsimpl.New(ctx,
@@ -241,18 +245,16 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		storeutil.StorerForBlockstore(bs),
 	)
 
-	return pop.Settings{
-		Datastore:    ds,
+	return ex.Options{
 		Blockstore:   bs,
 		MultiStore:   ms,
-		Host:         h,
 		PubSub:       ps,
 		GraphSync:    gs,
 		RepoPath:     rpath,
 		Keystore:     ks,
 		GossipTracer: tracer,
-		Regions:      []supply.Region{supply.Regions["Global"]},
-	}, nil
+		Regions:      []ex.Region{ex.Regions["Global"]},
+	}, h, ds, nil
 
 }
 

@@ -1,6 +1,6 @@
-# Content Discovery
+# Content Routing
 
-This plan evaluates different strategies for content discovery.
+This plan evaluates different strategies for content drouting.
 For more information on how to run it please follow instructions on the testplans [readme](/testplans).
 
 The main solution is currently based on gossip messaging though we may add other
