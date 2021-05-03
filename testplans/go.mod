@@ -1,4 +1,4 @@
-module github.com/myelnet/pop/testplans/routing
+module github.com/myelnet/pop/testplans
 
 go 1.16
 

@@ -1,9 +1,9 @@
 [metadata]
-  name = "low_content_replication"
+  name = "high_content_replication"
 
 [global]
-  plan = "routing"
-  case = "gossip"
+  plan = "pop"
+  case = "routing_gossip"
   total_instances = 40
   builder = "docker:go"
   runner = "local:docker"
@@ -11,17 +11,17 @@
 [global.run.test_params]
   regions = '["Global"]'
   bootstrap = "10"
-  providers = "1"
+  providers = "8"
 
 [[groups]]
   id = "bystanders"
     [groups.instances]
-    count = 38
+    count = 31
 
 [[groups]]
   id = "providers"
    [groups.instances]
-    count = 1
+    count = 8
 
 [[groups]]
   id = "clients"

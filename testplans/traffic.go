@@ -17,7 +17,8 @@ func durationParam(runenv *runtime.RunEnv, name string) time.Duration {
 	return d
 }
 
-func shapeTraffic(ctx context.Context, runenv *runtime.RunEnv, netclient *network.Client) error {
+// ShapeTraffic applies part from the runtime environment the thenetwork config
+func ShapeTraffic(ctx context.Context, runenv *runtime.RunEnv, netclient *network.Client) error {
 	minl := durationParam(runenv, "min_latency")
 	maxl := durationParam(runenv, "max_latency")
 	l := minl + time.Duration(rand.Float64()*float64(maxl-minl))

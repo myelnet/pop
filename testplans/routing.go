@@ -37,14 +37,6 @@ import (
 	"github.com/testground/sdk-go/sync"
 )
 
-func main() {
-	run.InvokeMap(testcases)
-}
-
-var testcases = map[string]interface{}{
-	"gossip": run.InitializedTestCaseFn(runGossip),
-}
-
 func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	imported := sync.State("imported")
 
@@ -56,7 +48,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	// Wait until all instances in this test run have signalled.
 	initCtx.MustWaitAllInstancesInitialized(ctx)
 
-	if err := shapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
+	if err := ShapeTraffic(ctx, runenv, initCtx.NetClient); err != nil {
 		return err
 	}
 
@@ -87,16 +79,16 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	info := host.InfoFromHost(h)
 
-	initCtx.SyncClient.MustPublish(ctx, peersTopic, info)
+	initCtx.SyncClient.MustPublish(ctx, PeersTopic, info)
 
-	peers, err := waitForPeers(ctx, runenv, initCtx.SyncClient, h.ID())
+	peers, err := WaitForPeers(ctx, runenv, initCtx.SyncClient, h.ID())
 	if err != nil {
 		return err
 	}
 
-	peers = RandomTopology{runenv.IntParam("bootstrap")}.SelectPeers(peers)
+	peers = RandomTopology{Count: runenv.IntParam("bootstrap")}.SelectPeers(peers)
 
-	if err := connectTopology(ctx, runenv, peers, h); err != nil {
+	if err := ConnectTopology(ctx, runenv, peers, h); err != nil {
 		return err
 	}
 

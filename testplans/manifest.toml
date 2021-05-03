@@ -1,4 +1,4 @@
-name = "routing"
+name = "testplans"
 [defaults]
 builder = "exec:go"
 runner = "local:exec"
@@ -6,13 +6,13 @@ runner = "local:exec"
 [builders."docker:go"]
 enabled = true
 go_version = "1.16"
-module_path = "github.com/myelnet/pop/testplans/routing"
+module_path = "github.com/myelnet/pop/testplans"
 exec_pkg = "."
 enable_go_build_cache = true
 
 [builders."exec:go"]
 enabled = true
-module_path = "github.com/myelnet/pop/testplans/routing"
+module_path = "github.com/myelnet/pop/testplans"
 
 [runners."local:docker"]
 enabled = true
@@ -27,7 +27,7 @@ enabled = true
 enable_go_build_cache = true
 
 [[testcases]]
-name= "gossip"
+name= "routing_gossip"
 instances = { min = 3, max = 420, default = 3 }
 
   [testcases.params]
@@ -42,3 +42,15 @@ instances = { min = 3, max = 420, default = 3 }
   max_jitter = { type = "duration", default="50ms" }
   min_bandwidth = { type = "int", default="500000" }
   max_bandwidth = { type = "int", default="10000000" }
+
+[[testcases]]
+name= "replication_dispatch"
+instances = { min = 1, max = 100, default = 6 }
+
+  [testcases.params]
+  providers = { type = "int", default = 1 }
+  regions = { type = "array", default = ["Global"] }
+  bootstrap = { type = "int", default = 1 }
+  min_conns = { type = "int", default = 20 }
+  max_conns = { type = "int", default = 40 }
+
