@@ -2,7 +2,7 @@
   name = "high_content_replication"
 
 [global]
-  plan = "pop"
+  plan = "testplans"
   case = "routing_gossip"
   total_instances = 40
   builder = "docker:go"

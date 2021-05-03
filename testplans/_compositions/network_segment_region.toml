@@ -2,7 +2,7 @@
   name = "network_segment_region"
 
 [global]
-  plan = "pop"
+  plan = "testplans"
   case = "routing_gossip"
   total_instances = 40
   builder = "docker:go"
