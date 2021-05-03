@@ -2,8 +2,8 @@
   name = "network_segment_content"
 
 [global]
-  plan = "discovery"
-  case = "gossip"
+  plan = "testplans"
+  case = "routing_gossip"
   total_instances = 40
   builder = "docker:go"
   runner = "local:docker"

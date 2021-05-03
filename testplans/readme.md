@@ -1,6 +1,6 @@
 # Testground plans
 
-Hop Exchange development is made against testground plans to immediately test network behaviors at different scales.
+PoP development is made against testground plans to immediately test network behaviors at different scales.
 
 ## Getting started
 
@@ -18,7 +18,7 @@ Testground will use `~/testground` as directory to look for plans
 you can either import the plans in this repo:
 
 ```commandline
-testground plan import --from ~/pop/testplans/discovery
+testground plan import --from ~/pop/testplans/routing
 ```
 
 Make sure you have docker installed and running then in a different terminal run:

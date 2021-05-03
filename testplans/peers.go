@@ -24,6 +24,7 @@ type RandomTopology struct {
 	Count int
 }
 
+// SelectPeers takes a list of peers and selects of slice of it based on the topology
 func (t RandomTopology) SelectPeers(in []peer.AddrInfo) []peer.AddrInfo {
 	if len(in) == 0 || t.Count == 0 {
 		return []peer.AddrInfo{}
@@ -42,9 +43,11 @@ func (t RandomTopology) SelectPeers(in []peer.AddrInfo) []peer.AddrInfo {
 	return out
 }
 
-var peersTopic = tgsync.NewTopic("peers", new(peer.AddrInfo))
+// PeersTopic is used to publish and receive peer information in the testground network
+var PeersTopic = tgsync.NewTopic("peers", new(peer.AddrInfo))
 
-func waitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Client, local peer.ID) ([]peer.AddrInfo, error) {
+// WaitForPeers creates a topic and waits for all other peers on the network to publish their info and returns it
+func WaitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Client, local peer.ID) ([]peer.AddrInfo, error) {
 
 	peersCh := make(chan *peer.AddrInfo)
 
@@ -53,7 +56,7 @@ func waitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Cli
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
 
-	_ = client.MustSubscribe(sctx, peersTopic, peersCh)
+	_ = client.MustSubscribe(sctx, PeersTopic, peersCh)
 
 	for i := 0; i < runenv.TestInstanceCount; i++ {
 		select {
@@ -70,7 +73,8 @@ func waitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Cli
 	return peers, nil
 }
 
-func connectTopology(ctx context.Context, runenv *runtime.RunEnv, peers []peer.AddrInfo, h host.Host) error {
+// ConnectTopology tries connecting will a list of peers with a given amount of attemps
+func ConnectTopology(ctx context.Context, runenv *runtime.RunEnv, peers []peer.AddrInfo, h host.Host) error {
 	tryConnect := func(ctx context.Context, ai peer.AddrInfo, attempts int) error {
 		var err error
 		for i := 1; i <= attempts; i++ {
@@ -100,7 +104,7 @@ func connectTopology(ctx context.Context, runenv *runtime.RunEnv, peers []peer.A
 	for _, p := range peers {
 		p := p
 		errgrp.Go(func() error {
-		  // add a random delay to each connection attempt to spread the network load
+			// add a random delay to each connection attempt to spread the network load
 			connectDelay := time.Duration(rand.Intn(1000)) * time.Millisecond
 			<-time.After(connectDelay)
 

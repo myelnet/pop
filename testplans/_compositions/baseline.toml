@@ -2,20 +2,21 @@
   name = "baseline"
 
 [global]
-  plan = "supply"
-  case = "supply"
-  total_instances = 4
+  plan = "testplans"
+  case = "replication_dispatch"
+  total_instances = 10
   builder = "docker:go"
   runner = "local:docker"
 
 [global.run.test_params]
-  clients = "1"
-  providers = "3"
+  regions = '["Global"]'
+  bootstrap = "6"
+  providers = "10"
 
 [[groups]]
   id = "providers"
   [groups.instances]
-    count = 3
+    count = 9
 
 [[groups]]
   id = "clients"
