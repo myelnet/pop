@@ -228,6 +228,8 @@ func TestExchangeE2E(t *testing.T) {
 
 			require.NoError(t, mn.ConnectAllButSelf())
 
+			time.Sleep(time.Second)
+
 			// The peer manager has time to fill up while we load this file
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
