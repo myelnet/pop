@@ -374,8 +374,8 @@ func (tx *Tx) Commit() error {
 	opts := DefaultDispatchOptions
 	if tx.cacheRF > 0 {
 		opts.RF = tx.cacheRF
+		tx.dispatching = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
 	}
-	tx.dispatching = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
 	return nil
 }
 
