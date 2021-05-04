@@ -319,8 +319,8 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 		var v string
 		agent, _ := nd.host.Peerstore().Get(pi.ID, "AgentVersion")
 		vparts := strings.Split(agent.(string), "-")
-		if len(vparts) == 2 {
-			v = vparts[1]
+		if len(vparts) == 3 {
+			v = fmt.Sprintf("%s-%s", vparts[1], vparts[2])
 		}
 		nd.send(Notify{PingResult: &PingResult{
 			ID:             pi.ID.String(),
