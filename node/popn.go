@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/filecoin/storage"
@@ -179,6 +181,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
 			return dht.New(ctx, h)
 		}),
+		// user-agent is sent along the identify protocol
+		libp2p.UserAgent("pop-"+build.Version),
 	)
 	if err != nil {
 		return nil, err
@@ -264,9 +268,10 @@ func (nd *node) Ping(ctx context.Context, who string) {
 			addrs = append(addrs, a.String())
 		}
 		nd.send(Notify{PingResult: &PingResult{
-			ID:    nd.host.ID().String(),
-			Addrs: addrs,
-			Peers: pstr,
+			ID:      nd.host.ID().String(),
+			Addrs:   addrs,
+			Peers:   pstr,
+			Version: build.Version,
 		}})
 		return
 	}
@@ -311,10 +316,17 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 		if res.Error != nil {
 			return res.Error
 		}
+		var v string
+		agent, _ := nd.host.Peerstore().Get(pi.ID, "AgentVersion")
+		vparts := strings.Split(agent.(string), "-")
+		if len(vparts) == 3 {
+			v = fmt.Sprintf("%s-%s", vparts[1], vparts[2])
+		}
 		nd.send(Notify{PingResult: &PingResult{
 			ID:             pi.ID.String(),
 			Addrs:          strs,
 			LatencySeconds: res.RTT.Seconds(),
+			Version:        v,
 		}})
 		return nil
 	case <-ctx.Done():

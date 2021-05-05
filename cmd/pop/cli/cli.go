@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
 	"github.com/rs/zerolog"
@@ -17,8 +19,9 @@ import (
 
 // Run runs the CLI. The args do not include the binary name.
 func Run(args []string) error {
-	if len(args) == 1 && (args[0] == "-V" || args[0] == "--version") {
-		args = []string{"version"}
+	if len(args) == 1 && (args[0] == "-V" || args[0] == "--version" || args[0] == "version") {
+		fmt.Println(build.Version)
+		return nil
 	}
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
