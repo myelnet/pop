@@ -59,7 +59,8 @@ PeerID         %s
 Addresses      %s
 Peers          %s
 Latency (s)    %f
-		`, pr.ID, pr.Addrs, pr.Peers, pr.LatencySeconds)
+Version        %s
+		`, pr.ID, pr.Addrs, pr.Peers, pr.LatencySeconds, pr.Version)
 
 	case <-ctx.Done():
 		return ctx.Err()

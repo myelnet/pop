@@ -82,6 +82,7 @@ type PingResult struct {
 	Addrs          []string // Addresses the host is listening on
 	Peers          []string // Peers currently connected to the node (local daemon only)
 	LatencySeconds float64
+	Version        string // The Version the node is running
 	Err            string
 }
 
