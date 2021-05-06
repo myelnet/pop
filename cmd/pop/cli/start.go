@@ -83,24 +83,20 @@ func runStart(ctx context.Context, args []string) error {
   . ·   *  * ·  .  
  ·　　 ·  ✧     　　 ·
                                                           
-ppppp   ppppppppp      ooooooooooo   ppppp   ppppppppp   
-p::::ppp:::::::::p   oo:::::::::::oo p::::ppp:::::::::p  
-p:::::::::::::::::p o:::::::::::::::op:::::::::::::::::p 
-pp::::::ppppp::::::po:::::ooooo:::::opp::::::ppppp::::::p
- p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
- p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
- p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
- p:::::p    p::::::po::::o     o::::o p:::::p    p::::::p
- p:::::ppppp:::::::po:::::ooooo:::::o p:::::ppppp:::::::p
- p::::::::::::::::p o:::::::::::::::o p::::::::::::::::p 
- p::::::::::::::pp   oo:::::::::::oo  p::::::::::::::pp  
- p::::::pppppppp       ooooooooooo    p::::::pppppppp    
- p:::::p                              p:::::p            
- p:::::p                              p:::::p            
-p:::::::p                            p:::::::p           
-p:::::::p                            p:::::::p           
-p:::::::p                            p:::::::p           
-ppppppppp                            ppppppppp           
+pppp   pppppppp      ooooooooooo   pppp   pppppppp   
+p:::ppp::::::::p   oo:::::::::::oo p:::ppp::::::::p  
+pp:::::ppppp:::::po:::::ooooo:::::opp:::::ppppp:::::p
+ p::::p     p::::po::::o     o::::o p::::p     p::::p
+ p::::p     p::::po::::o     o::::o p::::p     p::::p
+ p::::p     p::::po::::o     o::::o p::::p     p::::p
+ p::::p    p:::::po::::o     o::::o p::::p    p:::::p
+ p::::ppppp::::::po:::::ooooo:::::o p::::ppppp::::::p
+ p::::::::::::pp   oo:::::::::::oo  p::::::::::::pp  
+ p:::::ppppppp       ooooooooooo    p:::::ppppppp    
+ p::::p                             p::::p            
+ p::::p                             p::::p            
+p::::::p                           p::::::p           
+pppppppp                           pppppppp           
 
 -----------------------------------------------------------
 Manage your Myel point of presence from the command line.
