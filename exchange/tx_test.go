@@ -33,7 +33,7 @@ func TestTx(t *testing.T) {
 		return exch, n
 	}
 	// Iterating a ton helps weed out false positives
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 11; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
 			bgCtx := context.Background()
 
@@ -71,7 +71,7 @@ func TestTx(t *testing.T) {
 			tx.WatchDispatch(func(rec PRecord) {
 				records = append(records, rec)
 			})
-			require.Equal(t, 7, len(records))
+			require.Equal(t, 6, len(records))
 			root := tx.Root()
 			tx.Close()
 

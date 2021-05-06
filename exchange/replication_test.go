@@ -371,7 +371,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 			for rec := range res {
 				recs = append(recs, rec)
 			}
-			require.Equal(t, len(recs), 7)
+			require.Equal(t, len(recs), 6)
 
 			time.Sleep(time.Second)
 			for _, r := range recs {

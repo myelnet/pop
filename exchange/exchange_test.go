@@ -248,7 +248,7 @@ func TestExchangeE2E(t *testing.T) {
 			for rec := range res {
 				records = append(records, rec)
 			}
-			require.Equal(t, 7, len(records))
+			require.Equal(t, 6, len(records))
 
 			// Must had a delay here because go-data-transfer is racy af
 			time.Sleep(time.Second)

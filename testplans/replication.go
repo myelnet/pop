@@ -127,7 +127,8 @@ func runBootstrapSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error 
 
 		for i := 0; i < txCount; i++ {
 			select {
-			case <-isub.Out():
+			case evt := <-isub.Out():
+				runenv.RecordMessage("received tx %s", evt.Root)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
