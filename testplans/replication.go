@@ -82,6 +82,7 @@ func runBootstrapSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error 
 			}
 
 			tx := exch.Tx(ctx)
+			tx.SetCacheRF(0)
 			err = tx.PutFile(fpath)
 			if err != nil {
 				return err
@@ -128,7 +129,7 @@ func runBootstrapSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error 
 		for i := 0; i < txCount; i++ {
 			select {
 			case evt := <-isub.Out():
-				runenv.RecordMessage("received tx %s", evt.Root)
+				runenv.RecordMessage("received tx (%d/%d) %s", i, txCount, evt.(IndexEvt).Root)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
