@@ -53,12 +53,12 @@ func NewProviderRequestValidator(env ValidationEnvironment) *ProviderRequestVali
 }
 
 // ValidatePush validates a push request received from the peer that will send data
-func (rv *ProviderRequestValidator) ValidatePush(sender peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
+func (rv *ProviderRequestValidator) ValidatePush(isRestart bool, sender peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
 	return nil, fmt.Errorf("No pushes accepted")
 }
 
 // ValidatePull validates a pull request received from the peer that will receive data
-func (rv *ProviderRequestValidator) ValidatePull(receiver peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
+func (rv *ProviderRequestValidator) ValidatePull(isRestart bool, receiver peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
 	proposal, ok := voucher.(*deal.Proposal)
 	if !ok {
 		return nil, fmt.Errorf("wrong voucher type")

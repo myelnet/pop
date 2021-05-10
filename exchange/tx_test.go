@@ -71,7 +71,7 @@ func TestTx(t *testing.T) {
 			tx.WatchDispatch(func(rec PRecord) {
 				records = append(records, rec)
 			})
-			require.Equal(t, 7, len(records))
+			require.Equal(t, 6, len(records))
 			root := tx.Root()
 			tx.Close()
 

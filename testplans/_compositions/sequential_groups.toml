@@ -1,0 +1,26 @@
+[metadata]
+  name = "sequential_groups"
+
+[global]
+  plan = "testplans"
+  case = "replication_bootstrap"
+  total_instances = 10
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.run.test_params]
+  regions = '["Global"]'
+  bootstrap = "4"
+  providers_1 = "5"
+  providers_2 = "5"
+  tx_per_provider = "5"
+
+[[groups]]
+  id = "providers_1"
+  [groups.instances]
+    count = 5
+
+[[groups]]
+  id = "providers_2"
+  [groups.instances]
+    count = 5
