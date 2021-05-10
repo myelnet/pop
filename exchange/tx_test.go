@@ -33,7 +33,7 @@ func TestTx(t *testing.T) {
 		return exch, n
 	}
 	// Iterating a ton helps weed out false positives
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 1; i++ {
 		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
 			bgCtx := context.Background()
 

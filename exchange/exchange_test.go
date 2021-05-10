@@ -363,7 +363,7 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 
 			for i := 0; i < tc.p1; i++ {
 
-				// Create 5 new transactions
+				// Create a given number of transactions
 				for j := 0; j < tc.tx; j++ {
 					// The peer manager has time to fill up while we load this file
 					fname := nodes[i].CreateRandomFile(t, 128000)
