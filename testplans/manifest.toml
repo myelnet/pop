@@ -54,3 +54,17 @@ instances = { min = 1, max = 100, default = 6 }
   min_conns = { type = "int", default = 20 }
   max_conns = { type = "int", default = 40 }
 
+# Replication bootstrap tests the process of new peers retrieving popular content
+# when joining the network
+[[testcases]]
+name = "replication_bootstrap"
+instances = { min = 3, max = 300, default = 3 }
+
+  [testcases.params]
+  regions = { type = "array", default = ["Global"] }
+  bootstrap = { type = "int", default = 1 }
+  providers_1 = { type = "int", default = 1 }
+  providers_2 = { type = "int", default = 1 }
+  min_conns = { type = "int", default = 20 }
+  max_conns = { type = "int", default = 40 }
+  tx_per_provider = { type = "int", default = 1 }

@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +57,12 @@ func NewMockRetriever(dt datatransfer.Manager, idx *Index) *mockRetriever {
 func (mr *mockRetriever) SetRoute(k cid.Cid, p peer.ID) {
 	mr.mu.Lock()
 	mr.routing[k] = p
+	mr.mu.Unlock()
+}
+
+func (mr *mockRetriever) SetTable(t map[cid.Cid]peer.ID) {
+	mr.mu.Lock()
+	mr.routing = t
 	mr.mu.Unlock()
 }
 
@@ -291,6 +298,132 @@ func TestReplication(t *testing.T) {
 	}
 }
 
+func TestConcurrentReplication(t *testing.T) {
+	testCases := []struct {
+		name string
+		tx   int
+		p1   int
+		p2   int
+	}{
+		{
+			name: "Single p2",
+			tx:   5,
+			p1:   2,
+			p2:   1,
+		},
+		{
+			name: "Many p2",
+			tx:   5,
+			p1:   2,
+			p2:   5,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			bgCtx := context.Background()
+
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+			defer cancel()
+
+			mn := mocknet.New(bgCtx)
+
+			newNode := func() (*testutil.TestNode, *Replication, *mockRetriever) {
+				n := testutil.NewTestNode(mn, t)
+				n.SetupDataTransfer(ctx, t)
+				idx, err := NewIndex(n.Ds, n.Ms, WithBounds(8000000, 7800000))
+				require.NoError(t, err)
+				rtv := NewMockRetriever(n.Dt, idx)
+				repl := NewReplication(
+					n.Host,
+					idx,
+					n.Dt,
+					rtv,
+					[]Region{global},
+				)
+				repl.interval = 3 * time.Second
+				require.NoError(t, repl.Start(ctx))
+				return n, repl, rtv
+			}
+
+			nodes := make([]*testutil.TestNode, tc.p1)
+			repls := make([]*Replication, tc.p1)
+			for i := 0; i < tc.p1; i++ {
+				nodes[i], repls[i], _ = newNode()
+			}
+
+			require.NoError(t, mn.LinkAll())
+			require.NoError(t, mn.ConnectAllButSelf())
+
+			content := make(map[cid.Cid][]byte)
+			// manual routing table
+			routing := make(map[cid.Cid]peer.ID)
+
+			for i := 0; i < tc.p1; i++ {
+				// Create 5 new transactions
+				for j := 0; j < tc.tx; j++ {
+					// The peer manager has time to fill up while we load this file
+					fname := nodes[i].CreateRandomFile(t, 128000)
+					link, storeID, bytes := nodes[i].LoadFileToNewStore(ctx, t, fname)
+					rootCid := link.(cidlink.Link).Cid
+					require.NoError(t, repls[i].idx.SetRef(&DataRef{
+						PayloadCID: rootCid,
+						StoreID:    storeID,
+					}))
+					opts := DefaultDispatchOptions
+					opts.RF = tc.p1 - 1
+					res := repls[i].Dispatch(rootCid, uint64(128000), opts)
+					for range res {
+					}
+					content[rootCid] = bytes
+					routing[rootCid] = nodes[i].Host.ID()
+				}
+			}
+
+			var wg sync.WaitGroup
+			for i := 0; i < tc.p2; i++ {
+				t := t
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					// new node joins the network
+					node, repl, rtv := newNode()
+					rtv.SetTable(routing)
+					isub, err := node.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
+					require.NoError(t, err)
+
+					// Randomize when peers connect
+					time.Sleep(time.Duration(float64(time.Second) * rand.Float64()))
+
+					require.NoError(t, mn.LinkAll())
+					require.NoError(t, mn.ConnectAllButSelf())
+
+					for i := 0; i < tc.tx*tc.p1; i++ {
+						select {
+						case <-isub.Out():
+						case <-ctx.Done():
+							t.Fatal("did not receive all the content from replication")
+						}
+					}
+
+					time.Sleep(time.Second)
+
+					for k, b := range content {
+						// Now we fetch it again from our providers
+						ref, err := repl.idx.GetRef(k)
+						require.NoError(t, err)
+						store, err := repl.idx.ms.Get(ref.StoreID)
+						require.NoError(t, err)
+						node.VerifyFileTransferred(ctx, t, store.DAG, k, b)
+					}
+				}()
+			}
+			wg.Wait()
+		})
+	}
+
+}
+
 func TestMultiDispatchStreams(t *testing.T) {
 	// Loop is useful for detecting any flakiness
 	for i := 0; i < 1; i++ {
@@ -371,7 +504,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 			for rec := range res {
 				recs = append(recs, rec)
 			}
-			require.Equal(t, len(recs), 7)
+			require.Equal(t, len(recs), 6)
 
 			time.Sleep(time.Second)
 			for _, r := range recs {

@@ -47,18 +47,18 @@ func (t RandomTopology) SelectPeers(in []peer.AddrInfo) []peer.AddrInfo {
 var PeersTopic = tgsync.NewTopic("peers", new(peer.AddrInfo))
 
 // WaitForPeers creates a topic and waits for all other peers on the network to publish their info and returns it
-func WaitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Client, local peer.ID) ([]peer.AddrInfo, error) {
+func WaitForPeers(ctx context.Context, runenv *runtime.RunEnv, client tgsync.Client, local peer.ID, n int) ([]peer.AddrInfo, error) {
 
 	peersCh := make(chan *peer.AddrInfo)
 
-	peers := make([]peer.AddrInfo, 0, runenv.TestInstanceCount)
+	peers := make([]peer.AddrInfo, 0, n)
 
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
 
 	_ = client.MustSubscribe(sctx, PeersTopic, peersCh)
 
-	for i := 0; i < runenv.TestInstanceCount; i++ {
+	for i := 0; i < n; i++ {
 		select {
 		case ai := <-peersCh:
 			if ai.ID == local {

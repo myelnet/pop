@@ -81,7 +81,7 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 
 	initCtx.SyncClient.MustPublish(ctx, PeersTopic, info)
 
-	peers, err := WaitForPeers(ctx, runenv, initCtx.SyncClient, h.ID())
+	peers, err := WaitForPeers(ctx, runenv, initCtx.SyncClient, h.ID(), runenv.TestInstanceCount)
 	if err != nil {
 		return err
 	}

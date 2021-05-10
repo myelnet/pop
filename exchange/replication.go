@@ -377,7 +377,7 @@ type DispatchOptions struct {
 var DefaultDispatchOptions = DispatchOptions{
 	BackoffMin:     2 * time.Second,
 	BackoffAttemps: 4,
-	RF:             7,
+	RF:             6,
 }
 
 // Dispatch to the network until we have propagated the content to enough peers
@@ -492,6 +492,7 @@ func (r *Replication) AuthorizePull(k cid.Cid, p peer.ID) {
 
 // ValidatePush returns a stubbed result for a push validation
 func (r *Replication) ValidatePush(
+	isRestart bool,
 	sender peer.ID,
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,
@@ -501,6 +502,7 @@ func (r *Replication) ValidatePush(
 
 // ValidatePull returns a stubbed result for a pull validation
 func (r *Replication) ValidatePull(
+	isRestart bool,
 	receiver peer.ID,
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,

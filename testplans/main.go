@@ -7,6 +7,7 @@ func main() {
 }
 
 var testcases = map[string]interface{}{
-	"routing_gossip":       run.InitializedTestCaseFn(runGossip),
-	"replication_dispatch": run.InitializedTestCaseFn(runDispatch),
+	"routing_gossip":        run.InitializedTestCaseFn(runGossip),
+	"replication_dispatch":  run.InitializedTestCaseFn(runDispatch),
+	"replication_bootstrap": run.InitializedTestCaseFn(runBootstrapSupply),
 }
