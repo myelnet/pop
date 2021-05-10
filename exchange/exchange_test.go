@@ -343,7 +343,7 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 					MultiStore:  n.Ms,
 					RepoPath:    n.DTTmpDir,
 					Keystore:    keystore.NewMemKeystore(),
-					RepInterval: time.Second,
+					RepInterval: 2 * time.Second,
 				}
 				exch, err := New(bgCtx, n.Host, n.Ds, opts)
 				require.NoError(t, err)
@@ -397,9 +397,7 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 					require.NoError(t, mn.LinkAll())
 					require.NoError(t, mn.ConnectAllButSelf())
 
-					time.Sleep(2 * time.Second)
-
-					for i := 0; i < 5; i++ {
+					for i := 0; i < tc.tx*tc.p1; i++ {
 						select {
 						case <-isub.Out():
 						case <-ctx.Done():

@@ -341,7 +341,7 @@ func TestConcurrentReplication(t *testing.T) {
 					rtv,
 					[]Region{global},
 				)
-				repl.interval = 2 * time.Second
+				repl.interval = 3 * time.Second
 				require.NoError(t, repl.Start(ctx))
 				return n, repl, rtv
 			}
@@ -397,8 +397,6 @@ func TestConcurrentReplication(t *testing.T) {
 
 					require.NoError(t, mn.LinkAll())
 					require.NoError(t, mn.ConnectAllButSelf())
-
-					time.Sleep(2 * time.Second)
 
 					for i := 0; i < tc.tx*tc.p1; i++ {
 						select {
