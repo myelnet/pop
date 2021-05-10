@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -302,73 +303,122 @@ func TestExchangeE2E(t *testing.T) {
 // 2 other existing nodes on the network. It demonstrates the ability of the new nodes
 // to automatically fill the index with existing content.
 func TestExchangeJoiningNetwork(t *testing.T) {
-	bgCtx := context.Background()
-
-	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
-	defer cancel()
-
-	mn := mocknet.New(bgCtx)
-
-	newNode := func() (*Exchange, *testutil.TestNode) {
-		n := testutil.NewTestNode(mn, t)
-		opts := Options{
-			Blockstore:  n.Bs,
-			MultiStore:  n.Ms,
-			RepoPath:    n.DTTmpDir,
-			Keystore:    keystore.NewMemKeystore(),
-			RepInterval: time.Second,
-		}
-		exch, err := New(bgCtx, n.Host, n.Ds, opts)
-		require.NoError(t, err)
-		return exch, n
+	testCases := []struct {
+		name string
+		tx   int
+		p1   int
+		p2   int
+	}{
+		{
+			name: "Single p2",
+			tx:   5,
+			p1:   2,
+			p2:   1,
+		},
+		{
+			name: "Many p2",
+			tx:   5,
+			p1:   2,
+			p2:   2,
+		},
 	}
 
-	ex1, node1 := newNode()
-	_, _ = newNode()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// FIXME: something is broken in concurrent deal handling
+			if tc.name == "Many p2" {
+				t.Skip()
+			}
+			bgCtx := context.Background()
 
-	require.NoError(t, mn.LinkAll())
-	require.NoError(t, mn.ConnectAllButSelf())
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+			defer cancel()
 
-	content := make(map[string]cid.Cid, 5)
-	// Create 5 new transactions
-	for i := 0; i < 5; i++ {
-		// The peer manager has time to fill up while we load this file
-		fname := node1.CreateRandomFile(t, 128000)
+			mn := mocknet.New(bgCtx)
 
-		ptx := ex1.Tx(ctx)
-		require.NoError(t, ptx.PutFile(fname))
-		ptx.SetCacheRF(1)
-		require.NoError(t, ptx.Commit())
-		ptx.WatchDispatch(func(rec PRecord) {
-			// No need to check
+			newNode := func() (*Exchange, *testutil.TestNode) {
+				n := testutil.NewTestNode(mn, t)
+				opts := Options{
+					Blockstore:  n.Bs,
+					MultiStore:  n.Ms,
+					RepoPath:    n.DTTmpDir,
+					Keystore:    keystore.NewMemKeystore(),
+					RepInterval: time.Second,
+				}
+				exch, err := New(bgCtx, n.Host, n.Ds, opts)
+				require.NoError(t, err)
+				return exch, n
+			}
+
+			nodes := make([]*testutil.TestNode, tc.p1)
+			exchs := make([]*Exchange, tc.p1)
+			for i := 0; i < tc.p1; i++ {
+				exchs[i], nodes[i] = newNode()
+			}
+
+			require.NoError(t, mn.LinkAll())
+			require.NoError(t, mn.ConnectAllButSelf())
+
+			content := make(map[string]cid.Cid)
+
+			for i := 0; i < tc.p1; i++ {
+
+				// Create 5 new transactions
+				for j := 0; j < tc.tx; j++ {
+					// The peer manager has time to fill up while we load this file
+					fname := nodes[i].CreateRandomFile(t, 128000)
+
+					ptx := exchs[i].Tx(ctx)
+					require.NoError(t, ptx.PutFile(fname))
+					ptx.SetCacheRF(1)
+					require.NoError(t, ptx.Commit())
+					ptx.WatchDispatch(func(rec PRecord) {
+						// No need to check
+					})
+					content[KeyFromPath(fname)] = ptx.Root()
+					ptx.Close()
+				}
+			}
+
+			var wg sync.WaitGroup
+			for i := 0; i < tc.p2; i++ {
+				t := t
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					// new node joins the network
+					ex, node := newNode()
+					isub, err := node.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
+					require.NoError(t, err)
+
+					// Randomize when peers connect
+					time.Sleep(time.Duration(float64(time.Second) * rand.Float64()))
+
+					require.NoError(t, mn.LinkAll())
+					require.NoError(t, mn.ConnectAllButSelf())
+
+					time.Sleep(2 * time.Second)
+
+					for i := 0; i < 5; i++ {
+						select {
+						case <-isub.Out():
+						case <-ctx.Done():
+							t.Fatal("did not receive all the content from replication")
+						}
+					}
+
+					time.Sleep(time.Second)
+
+					for k, r := range content {
+						// Now we fetch it again from our providers
+						tx := ex.Tx(ctx, WithRoot(r))
+						_, err := tx.GetFile(k)
+						require.NoError(t, err)
+						tx.Close()
+					}
+				}()
+			}
+			wg.Wait()
 		})
-		content[KeyFromPath(fname)] = ptx.Root()
-		ptx.Close()
-	}
-
-	// new node joins the network
-	ex3, node3 := newNode()
-	isub, err := node3.Host.EventBus().Subscribe(new(IndexEvt), eventbus.BufSize(16))
-	require.NoError(t, err)
-
-	require.NoError(t, mn.LinkAll())
-	require.NoError(t, mn.ConnectAllButSelf())
-
-	time.Sleep(2 * time.Second)
-
-	for i := 0; i < 5; i++ {
-		select {
-		case <-isub.Out():
-		case <-ctx.Done():
-			t.Fatal("did not receive all the content from replication")
-		}
-	}
-
-	for k, r := range content {
-		// Now we fetch it again from our providers
-		tx := ex3.Tx(ctx, WithRoot(r))
-		_, err := tx.GetFile(k)
-		require.NoError(t, err)
-		tx.Close()
 	}
 }
