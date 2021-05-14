@@ -192,8 +192,8 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	dt.SubscribeToEvents(provider.DataTransferSubscriber(p.stateMachines))
-	dt.SubscribeToEvents(client.DataTransferSubscriber(c.stateMachines))
+	dt.SubscribeToEvents(provider.DataTransferSubscriber(p.stateMachines, self))
+	dt.SubscribeToEvents(client.DataTransferSubscriber(c.stateMachines, self))
 
 	// TODO: might want to use the cleanup function returned
 	SettlePaymentChannels(ctx, pay, p)

@@ -6,6 +6,7 @@ import (
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-statemachine/fsm"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/pop/retrieval/deal"
 )
 
@@ -37,7 +38,7 @@ func eventFromDataTransfer(event datatransfer.Event, channelState datatransfer.C
 // in a storage market deal, then, based on the data transfer event that occurred, it generates
 // and update message for the deal -- either moving to staged for a completion
 // event or moving to error if a data transfer error occurs
-func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
+func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subscriber {
 	return func(event datatransfer.Event, channelState datatransfer.ChannelState) {
 		dealProposal, ok := deal.ProposalFromVoucher(channelState.Voucher())
 		// if this event is for a transfer not related to storage, ignore
@@ -45,7 +46,8 @@ func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
 			return
 		}
 
-		if has, _ := deals.Has(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}); !has {
+		// If this host is not the Sender this event is about a deal it's receiving
+		if channelState.Sender() != host {
 			return
 		}
 

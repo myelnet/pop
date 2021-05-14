@@ -58,6 +58,7 @@ func (p *mockPayments) GetChannelInfo(addr address.Address) (*payments.ChannelIn
 
 func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, amt filecoin.BigInt, lane uint64) (*payments.VoucherCreateResult, error) {
 	if amt.GreaterThan(p.chFunds.ConfirmedAmt) {
+		fmt.Println("CreateVoucher", amt, p.chFunds.ConfirmedAmt)
 		return &payments.VoucherCreateResult{
 			Shortfall: big.Sub(amt, p.chFunds.ConfirmedAmt),
 		}, nil
@@ -84,7 +85,7 @@ func (p *mockPayments) AllocateLane(ctx context.Context, add address.Address) (u
 }
 
 func (p *mockPayments) AddVoucherInbound(ctx context.Context, addr address.Address, vouch *paych.SignedVoucher, prrof []byte, expectedAmount filecoin.BigInt) (filecoin.BigInt, error) {
-	return expectedAmount, nil
+	return vouch.Amount, nil
 }
 
 func (p *mockPayments) ChannelAvailableFunds(chAddr address.Address) (*payments.AvailableFunds, error) {
@@ -118,20 +119,63 @@ func (m *mockStoreIDGetter) GetStoreID(c cid.Cid) (multistore.StoreID, error) {
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
-		name           string
-		addFunds       bool
-		chFunds        payments.AvailableFunds
-		free           bool
-		failValidation bool
+		name            string
+		addFunds        bool
+		chFunds         payments.AvailableFunds
+		filesize        int
+		paymentInterval uint64
+		free            bool
+		failValidation  bool
 	}{
-		// BUG: Need to fix a graphsync issue for these tests to pass again
-		// {name: "Basic transfer"},
-		// {name: "Existing channel", addFunds: true},
-		// {name: "Shortfall", chFunds: payments.AvailableFunds{
-		// 	ConfirmedAmt: abi.NewTokenAmount(-40100000),
-		// }},
-		{name: "Free transfer", free: true},
-		// {name: "Validation error", failValidation: true},
+		{
+			name:            "Single block",
+			filesize:        512,
+			paymentInterval: uint64(1000),
+		},
+		{
+			name:            "Multi blocks",
+			filesize:        2048,
+			paymentInterval: uint64(1000),
+		},
+		{
+			name:            "Basic transfer",
+			filesize:        256000,
+			paymentInterval: uint64(10000),
+		},
+		{
+			name:            "Existing channel",
+			addFunds:        true,
+			filesize:        125000,
+			paymentInterval: uint64(10000),
+		},
+		{
+			name: "Shortfall single block",
+			chFunds: payments.AvailableFunds{
+				ConfirmedAmt: abi.NewTokenAmount(-1851200),
+			},
+			filesize:        512,
+			paymentInterval: uint64(1000),
+		},
+		{
+			name: "Shortfall multi blocks",
+			chFunds: payments.AvailableFunds{
+				ConfirmedAmt: abi.NewTokenAmount(-7400000),
+			},
+			filesize:        2048,
+			paymentInterval: uint64(1000),
+		},
+		{
+			name:            "Free transfer",
+			free:            true,
+			filesize:        256000,
+			paymentInterval: uint64(10000),
+		},
+		{
+			name:            "Validation error",
+			failValidation:  true,
+			filesize:        256000,
+			paymentInterval: uint64(10000),
+		},
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -170,7 +214,7 @@ func TestRetrieval(t *testing.T) {
 			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, sidg1, n1.Host.ID())
 			require.NoError(t, err)
 
-			fname := n2.CreateRandomFile(t, 256000)
+			fname := n2.CreateRandomFile(t, testCase.filesize)
 			// n1 is our client and is retrieving a file n2 has so we add it first
 			link, storeID, origBytes := n2.LoadFileToNewStore(bgCtx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
@@ -190,12 +234,25 @@ func TestRetrieval(t *testing.T) {
 			defer cancel()
 
 			r2.Provider().SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
-				fmt.Println("PROVIDER:", deal.Statuses[state.Status])
+				fmt.Printf(`
+PROVIDER:
+event: %s
+status: %s
+totalSent: %d
+fundsReceived: %s
+`, provider.Events[event], deal.Statuses[state.Status], state.TotalSent, state.FundsReceived)
 			})
 
 			clientDealStateChan := make(chan deal.ClientState)
 			r1.Client().SubscribeToEvents(func(event client.Event, state deal.ClientState) {
-				fmt.Println("CLIENT:", deal.Statuses[state.Status])
+				fmt.Printf(`
+CLIENT:
+event: %s
+status: %s
+totalReceived: %d
+bytesPaidFor: %d
+TotalFunds: %s
+`, client.Events[event], deal.Statuses[state.Status], state.TotalReceived, state.BytesPaidFor, state.TotalFunds.String())
 				switch state.Status {
 				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored, deal.StatusRejected:
 					clientDealStateChan <- state
@@ -203,7 +260,7 @@ func TestRetrieval(t *testing.T) {
 				case deal.StatusInsufficientFunds:
 					// Simulate reaprovisioning the payment channel
 					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
-						ConfirmedAmt: state.VoucherShortfall,
+						ConfirmedAmt: state.PaymentRequested,
 					})
 					// Need to wait a bit for status to update in state machine
 					time.Sleep(10 * time.Millisecond)
@@ -214,18 +271,17 @@ func TestRetrieval(t *testing.T) {
 			})
 
 			clientStoreID := n1.Ms.Next()
-			pricePerByte := abi.NewTokenAmount(1000)
+			pricePerByte := abi.NewTokenAmount(100)
 			if testCase.free {
 				pricePerByte = big.Zero()
 			}
-			paymentInterval := uint64(10000)
 			paymentIntervalIncrease := uint64(1000)
 			unsealPrice := big.Zero()
-			params, err := deal.NewParams(pricePerByte, paymentInterval, paymentIntervalIncrease, selectors.All(), nil, unsealPrice)
+			params, err := deal.NewParams(pricePerByte, testCase.paymentInterval, paymentIntervalIncrease, selectors.All(), nil, unsealPrice)
 			require.NoError(t, err)
 			ask := deal.QueryResponse{
 				MinPricePerByte:            pricePerByte,
-				MaxPaymentInterval:         paymentInterval,
+				MaxPaymentInterval:         testCase.paymentInterval,
 				MaxPaymentIntervalIncrease: paymentIntervalIncrease,
 			}
 			// The client is trying to retrieve at lower price than agreed upon in the query/response agreement
@@ -236,7 +292,7 @@ func TestRetrieval(t *testing.T) {
 			r2.Provider().SetAsk(rootCid, ask)
 
 			// We offset it a bit since it's usually higher with ipld encoding
-			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+200)))
+			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+18000)))
 			if testCase.free {
 				expectedTotal = big.Zero()
 			}

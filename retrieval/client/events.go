@@ -65,6 +65,10 @@ const (
 	// EventPaymentRequested indicates the provider requested a payment
 	EventPaymentRequested
 
+	// EventPaymentNotSent indicates that payment was requested, but no
+	// payment was actually due, so a voucher was not sent to the provider
+	EventPaymentNotSent
+
 	// EventUnsealPaymentRequested indicates the provider requested a payment for unsealing the sector
 	EventUnsealPaymentRequested
 
@@ -158,6 +162,7 @@ var Events = map[Event]string{
 	EventCreateVoucherFailed:           "ClientEventCreateVoucherFailed",
 	EventWriteDealPaymentErrored:       "ClientEventWriteDealPaymentErrored",
 	EventPaymentSent:                   "ClientEventPaymentSent",
+	EventPaymentNotSent:                "ClientEventPaymentNotSent",
 	EventDataTransferError:             "ClientEventDataTransferError",
 	EventComplete:                      "ClientEventComplete",
 	EventCancelComplete:                "ClientEventCancelComplete",

@@ -80,6 +80,7 @@ var FSMEvents = fsm.Events{
 	// request payment
 	fsm.Event(EventPaymentRequested).
 		From(deal.StatusOngoing).To(deal.StatusFundsNeeded).
+		From(deal.StatusFundsNeeded).ToJustRecord().
 		From(deal.StatusBlocksComplete).To(deal.StatusFundsNeededLastPayment).
 		Action(func(ds *deal.ProviderState, totalSent uint64) error {
 			ds.TotalSent = totalSent
@@ -100,9 +101,10 @@ var FSMEvents = fsm.Events{
 	fsm.Event(EventPaymentReceived).
 		From(deal.StatusFundsNeeded).To(deal.StatusOngoing).
 		From(deal.StatusFundsNeededLastPayment).To(deal.StatusFinalizing).
+		FromMany(deal.StatusBlocksComplete, deal.StatusOngoing, deal.StatusFinalizing).ToJustRecord().
 		Action(func(ds *deal.ProviderState, fundsReceived abi.TokenAmount, ch address.Address) error {
 			ds.FundsReceived = big.Add(ds.FundsReceived, fundsReceived)
-			ds.CurrentInterval += ds.PaymentIntervalIncrease
+			ds.CurrentInterval = ds.NextInterval()
 			ds.PayCh = &ch
 			return nil
 		}),
