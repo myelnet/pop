@@ -1,4 +1,4 @@
-all: install
+all: build install
 
 FFI_PATH:=./extern/filecoin-ffi/
 FFI_DEPS:=.install-filcrypto
