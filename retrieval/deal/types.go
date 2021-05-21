@@ -137,7 +137,7 @@ var ProposalUndefined = Proposal{}
 
 // Params are the parameters requested for a retrieval deal proposal
 type Params struct {
-	Selector                *cbg.Deferred // V1
+	Selector                *cbg.Deferred
 	PieceCID                *cid.Cid
 	PricePerByte            abi.TokenAmount
 	PaymentInterval         uint64 // when to request payment

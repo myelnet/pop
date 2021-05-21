@@ -21,6 +21,7 @@ import (
 
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
@@ -58,7 +59,6 @@ func (p *mockPayments) GetChannelInfo(addr address.Address) (*payments.ChannelIn
 
 func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, amt filecoin.BigInt, lane uint64) (*payments.VoucherCreateResult, error) {
 	if amt.GreaterThan(p.chFunds.ConfirmedAmt) {
-		fmt.Println("CreateVoucher", amt, p.chFunds.ConfirmedAmt)
 		return &payments.VoucherCreateResult{
 			Shortfall: big.Sub(amt, p.chFunds.ConfirmedAmt),
 		}, nil
@@ -70,9 +70,10 @@ func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, 
 		TimeLockMax: abi.ChainEpoch(0),
 		Lane:        lane,
 		Nonce:       0,
-		Amount:      amt,
+		Amount:      big.Sub(amt, p.chFunds.VoucherReedeemedAmt),
 		// Signature:      sig,
 	}
+	p.chFunds.VoucherReedeemedAmt = big.Add(p.chFunds.VoucherReedeemedAmt, vouch.Amount)
 	vouchRes := &payments.VoucherCreateResult{
 		Voucher:   vouch,
 		Shortfall: filecoin.NewInt(0),
@@ -165,6 +166,14 @@ func TestRetrieval(t *testing.T) {
 			paymentInterval: uint64(1000),
 		},
 		{
+			name: "Shortfall many blocks",
+			chFunds: payments.AvailableFunds{
+				ConfirmedAmt: abi.NewTokenAmount(-5864900),
+			},
+			filesize:        56000,
+			paymentInterval: uint64(10000),
+		},
+		{
 			name:            "Free transfer",
 			free:            true,
 			filesize:        256000,
@@ -218,6 +227,8 @@ func TestRetrieval(t *testing.T) {
 			// n1 is our client and is retrieving a file n2 has so we add it first
 			link, storeID, origBytes := n2.LoadFileToNewStore(bgCtx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
+			providerStore, err := n2.Ms.Get(storeID)
+			require.NoError(t, err)
 
 			n2.SetupDataTransfer(bgCtx, t)
 			pay2 := &mockPayments{}
@@ -230,7 +241,7 @@ func TestRetrieval(t *testing.T) {
 			providerAddr, err := address.NewIDAddress(uint64(99))
 			require.NoError(t, err)
 
-			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+			ctx, cancel := context.WithTimeout(bgCtx, 1000*time.Second)
 			defer cancel()
 
 			r2.Provider().SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
@@ -251,7 +262,7 @@ event: %s
 status: %s
 totalReceived: %d
 bytesPaidFor: %d
-TotalFunds: %s
+totalFunds: %s
 `, client.Events[event], deal.Statuses[state.Status], state.TotalReceived, state.BytesPaidFor, state.TotalFunds.String())
 				switch state.Status {
 				case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored, deal.StatusRejected:
@@ -260,7 +271,8 @@ TotalFunds: %s
 				case deal.StatusInsufficientFunds:
 					// Simulate reaprovisioning the payment channel
 					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
-						ConfirmedAmt: state.PaymentRequested,
+						ConfirmedAmt:        big.Add(pay1.chFunds.ConfirmedAmt, state.VoucherShortfall),
+						VoucherReedeemedAmt: pay1.chFunds.VoucherReedeemedAmt,
 					})
 					// Need to wait a bit for status to update in state machine
 					time.Sleep(10 * time.Millisecond)
@@ -270,6 +282,8 @@ TotalFunds: %s
 				}
 			})
 
+			stat, err := utils.Stat(ctx, providerStore, rootCid, selectors.All())
+			require.NoError(t, err)
 			clientStoreID := n1.Ms.Next()
 			pricePerByte := abi.NewTokenAmount(100)
 			if testCase.free {
@@ -292,7 +306,7 @@ TotalFunds: %s
 			r2.Provider().SetAsk(rootCid, ask)
 
 			// We offset it a bit since it's usually higher with ipld encoding
-			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(len(origBytes)+18000)))
+			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(stat.Size)))
 			if testCase.free {
 				expectedTotal = big.Zero()
 			}

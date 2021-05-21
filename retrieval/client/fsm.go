@@ -517,16 +517,14 @@ func ProcessPaymentRequested(ctx fsm.Context, environment DealEnvironment, ds de
 	return nil
 }
 
-// SendFunds sends the next amount requested by the provider
-func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error {
+func calcAmountToSend(ds deal.ClientState) abi.TokenAmount {
 	totalBytesToPayFor := ds.TotalReceived
-
 	// If unsealing has been paid for, and not all blocks have been received
 	if ds.UnsealFundsPaid.GreaterThanEqual(ds.UnsealPrice) && !ds.AllBlocksReceived {
 		// If the number of bytes received is less than the number required
 		// for the current payment interval, no need to send a payment
 		if totalBytesToPayFor < ds.CurrentInterval {
-			return ctx.Trigger(EventPaymentNotSent)
+			return big.Zero()
 		}
 
 		// Otherwise round the number of bytes to pay for down to the current interval
@@ -536,7 +534,12 @@ func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error 
 	// Calculate the payment amount due for data received
 	transferPrice := big.Mul(abi.NewTokenAmount(int64(totalBytesToPayFor)), ds.PricePerByte)
 	// Calculate the total amount including the unsealing cost
-	totalPrice := big.Add(transferPrice, ds.UnsealPrice)
+	return big.Add(transferPrice, ds.UnsealPrice)
+}
+
+// SendFunds sends the next amount requested by the provider
+func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error {
+	totalPrice := calcAmountToSend(ds)
 
 	// If we've already sent at or above the amount due, no need to send funds
 	if totalPrice.LessThanEqual(ds.FundsSpent) {
@@ -574,20 +577,30 @@ func CheckFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error
 	if ds.WaitMsgCID != nil {
 		return ctx.Trigger(EventPaymentChannelAddingFunds, *ds.WaitMsgCID, ds.PaymentInfo.PayCh)
 	}
+	// Check the state of the channel on chain
 	availableFunds, err := env.Payments().ChannelAvailableFunds(ds.PaymentInfo.PayCh)
 	if err != nil {
 		return ctx.Trigger(EventPaymentChannelErrored, err)
 	}
+
+	total := calcAmountToSend(ds)
 	unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
-	shortfall := big.Sub(ds.PaymentRequested, unredeemedFunds)
+	shortfall := big.Sub(total, unredeemedFunds)
+
+	// The shortfall is negative when there is more funds in the channel than the requested payment amount
 	if shortfall.LessThanEqual(big.Zero()) {
 		return ctx.Trigger(EventPaymentChannelReady, ds.PaymentInfo.PayCh)
 	}
+
+	// pending amount is in a message already submitted but not confirmed on chain yet
+	// queued amount is ready to submit in the next message but not sent yet
 	totalInFlight := big.Add(availableFunds.PendingAmt, availableFunds.QueuedAmt)
+	// The amount in flight is still not enough and we need to expend it further
 	if totalInFlight.LessThan(shortfall) || availableFunds.PendingWaitSentinel == nil {
 		finalShortfall := big.Sub(shortfall, totalInFlight)
 		return ctx.Trigger(EventFundsExpended, finalShortfall)
 	}
+	// There are enough funds waiting to be confirmed so just wait until then
 	return ctx.Trigger(EventPaymentChannelAddingFunds, *availableFunds.PendingWaitSentinel, ds.PaymentInfo.PayCh)
 }
 
