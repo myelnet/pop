@@ -6,6 +6,7 @@ import (
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-statemachine/fsm"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/pop/retrieval/deal"
 )
 
@@ -33,7 +34,7 @@ func eventFromDealStatus(response *deal.Response) (Event, []interface{}) {
 		return EventLastPaymentRequested, []interface{}{response.PaymentOwed}
 	case deal.StatusCompleted:
 		return EventComplete, nil
-	case deal.StatusFundsNeeded:
+	case deal.StatusFundsNeeded, deal.StatusOngoing:
 		return EventPaymentRequested, []interface{}{response.PaymentOwed}
 	default:
 		return EventUnknownResponseReceived, nil
@@ -44,7 +45,7 @@ const noEvent = Event(math.MaxUint64)
 
 func eventFromDataTransfer(event datatransfer.Event, channelState datatransfer.ChannelState) (Event, []interface{}) {
 	switch event.Code {
-	case datatransfer.DataReceived:
+	case datatransfer.DataReceivedProgress:
 		return EventBlocksReceived, []interface{}{channelState.Received()}
 	case datatransfer.FinishTransfer:
 		return EventAllBlocksReceived, nil
@@ -75,7 +76,7 @@ func eventFromDataTransfer(event datatransfer.Event, channelState datatransfer.C
 // transfer initiated on the client -- it reads the voucher to verify this even occurred
 // in a storage market deal, then, based on the data transfer event that occurred, it dispatches
 // an event to the appropriate state machine
-func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
+func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subscriber {
 	return func(event datatransfer.Event, channelState datatransfer.ChannelState) {
 		dealProposal, ok := deal.ProposalFromVoucher(channelState.Voucher())
 
@@ -84,7 +85,8 @@ func DataTransferSubscriber(deals EventReceiver) datatransfer.Subscriber {
 			return
 		}
 
-		if has, _ := deals.Has(dealProposal.ID); !has {
+		// If this host is not the recipient this event is about a deal it's providing for
+		if channelState.Recipient() != host {
 			return
 		}
 

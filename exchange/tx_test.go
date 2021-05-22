@@ -16,6 +16,7 @@ import (
 	"github.com/ipfs/go-path"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/deal"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
@@ -272,7 +273,7 @@ func TestMapFieldSelector(t *testing.T) {
 	}
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
-	stat, err := Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
+	stat, err := utils.Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
 	require.NoError(t, err)
 	require.Equal(t, 2, stat.NumBlocks)
 	require.Equal(t, 627, stat.Size)

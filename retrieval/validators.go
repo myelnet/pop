@@ -81,9 +81,16 @@ func (rv *ProviderRequestValidator) ValidatePull(isRestart bool, receiver peer.I
 		return nil, fmt.Errorf("incorrect selector for this proposal")
 	}
 
+	// If the validation is for a restart request, return nil, which means
+	// the data-transfer should not be explicitly paused or resumed
+	if isRestart {
+		return nil, nil
+	}
+
 	pds := deal.ProviderState{
-		Proposal: *proposal,
-		Receiver: receiver,
+		Proposal:        *proposal,
+		Receiver:        receiver,
+		CurrentInterval: proposal.PaymentInterval,
 	}
 
 	status, err := rv.acceptDeal(&pds)
@@ -224,48 +231,40 @@ func (pr *ProviderRevalidator) Revalidate(channelID datatransfer.ChannelID, vouc
 	}
 
 	response, err := pr.processPayment(channel.dealID, payment)
-	if err == nil {
+	if err == nil || err == datatransfer.ErrResume {
 		channel.reload = true
+	}
+	if response == nil {
+		return nil, err
 	}
 	return response, err
 }
 
 func (pr *ProviderRevalidator) processPayment(dealID deal.ProviderDealIdentifier, payment *deal.Payment) (*deal.Response, error) {
 
-	// tok, _, err := pr.env.Node().GetChainHead(context.TODO())
-	// if err != nil {
-	// 	_ = pr.env.SendEvent(dealID, rm.ProviderEventSaveVoucherFailed, err)
-	// 	return errorDealResponse(dealID, err), err
-	// }
-
 	d, err := pr.env.Get(dealID)
 	if err != nil {
 		return errorDealResponse(dealID, err), err
 	}
 
-	// attempt to redeem voucher
-	// (totalSent * pricePerByte + unsealPrice) - fundsReceived
-	paymentOwed := big.Sub(big.Add(big.Mul(abi.NewTokenAmount(int64(d.TotalSent)), d.PricePerByte), d.UnsealPrice), d.FundsReceived)
-	received, err := pr.env.Payments().AddVoucherInbound(context.TODO(), payment.PaymentChannel, payment.PaymentVoucher, nil, paymentOwed)
+	// Save voucher
+	received, err := pr.env.Payments().AddVoucherInbound(context.TODO(), payment.PaymentChannel, payment.PaymentVoucher, nil, big.Zero())
 	if err != nil {
 		_ = pr.env.SendEvent(dealID, provider.EventSaveVoucherFailed, err)
 		return errorDealResponse(dealID, err), err
 	}
 
-	// received = 0 / err = nil indicates that the voucher was already saved, but this may be ok
-	// if we are making a deal with ourself - in this case, we'll instead calculate received
-	// but subtracting from fund sent
-	if big.Cmp(received, big.Zero()) == 0 {
-		received = big.Sub(payment.PaymentVoucher.Amount, d.FundsReceived)
-	}
+	totalPaid := big.Add(d.FundsReceived, received)
 
 	// check if all payments are received to continue the deal, or send updated required payment
-	if received.LessThan(paymentOwed) {
+	owed := paymentOwed(d, totalPaid)
+
+	if owed.GreaterThan(big.Zero()) {
 		_ = pr.env.SendEvent(dealID, provider.EventPartialPaymentReceived, received, payment.PaymentChannel)
 		return &deal.Response{
 			ID:          d.ID,
 			Status:      d.Status,
-			PaymentOwed: big.Sub(paymentOwed, received),
+			PaymentOwed: owed,
 		}, datatransfer.ErrPause
 	}
 
@@ -275,9 +274,33 @@ func (pr *ProviderRevalidator) processPayment(dealID deal.ProviderDealIdentifier
 		return &deal.Response{
 			ID:     d.ID,
 			Status: deal.StatusCompleted,
-		}, nil
+		}, datatransfer.ErrResume
 	}
-	return nil, nil
+	return nil, datatransfer.ErrResume
+}
+
+func paymentOwed(d deal.ProviderState, totalPaid big.Int) big.Int {
+	// Check if the payment covers unsealing
+	if totalPaid.LessThan(d.UnsealPrice) {
+		return big.Sub(d.UnsealPrice, totalPaid)
+	}
+
+	// Calculate how much payment has been made for transferred data
+	transferPayment := big.Sub(totalPaid, d.UnsealPrice)
+
+	// The provider sends data and the client sends payment for the data.
+	// The provider will send a limited amount of extra data before receiving
+	// payment. Given the current limit, check if the client has paid enough
+	// to unlock the next interval.
+	currentLimitLower := d.IntervalLowerBound()
+
+	// Calculate the minimum required payment
+	totalPaymentRequired := big.Mul(big.NewInt(int64(currentLimitLower)), d.PricePerByte)
+
+	// Calculate payment owed
+	owed := big.Sub(totalPaymentRequired, transferPayment)
+
+	return owed
 }
 
 func errorDealResponse(dealID deal.ProviderDealIdentifier, err error) *deal.Response {
@@ -306,7 +329,7 @@ func (pr *ProviderRevalidator) OnPullDataSent(chid datatransfer.ChannelID, addit
 	}
 
 	channel.totalSent += additionalBytesSent
-	if channel.pricePerByte.IsZero() || channel.totalSent-channel.totalPaidFor < channel.interval {
+	if channel.pricePerByte.IsZero() || channel.totalSent < channel.interval {
 		return true, nil, pr.env.SendEvent(channel.dealID, provider.EventBlockSent, channel.totalSent)
 	}
 

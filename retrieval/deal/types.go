@@ -137,7 +137,7 @@ var ProposalUndefined = Proposal{}
 
 // Params are the parameters requested for a retrieval deal proposal
 type Params struct {
-	Selector                *cbg.Deferred // V1
+	Selector                *cbg.Deferred
 	PieceCID                *cid.Cid
 	PricePerByte            abi.TokenAmount
 	PaymentInterval         uint64 // when to request payment
@@ -148,6 +148,29 @@ type Params struct {
 // SelectorSpecified returns whether we decoded any serialized selector
 func (p Params) SelectorSpecified() bool {
 	return p.Selector != nil && !bytes.Equal(p.Selector.Raw, cbg.CborNull)
+}
+
+func (p Params) IntervalLowerBound(currentInterval uint64) uint64 {
+	intervalSize := p.PaymentInterval
+	var lowerBound uint64
+	var target uint64
+	for target < currentInterval {
+		lowerBound = target
+		target += intervalSize
+		intervalSize += p.PaymentIntervalIncrease
+	}
+	return lowerBound
+}
+
+// NextInterval calculates the next interval increasing the current interval with the given parameters
+func (p Params) NextInterval(currentInterval uint64) uint64 {
+	intervalSize := p.PaymentInterval
+	var nextInterval uint64
+	for nextInterval <= currentInterval {
+		nextInterval += intervalSize
+		intervalSize += p.PaymentIntervalIncrease
+	}
+	return nextInterval
 }
 
 // NewParams generates parameters for a retrieval deal, including a selector
@@ -217,6 +240,11 @@ type ClientState struct {
 	VoucherShortfall     abi.TokenAmount
 }
 
+// NextInterval calculates the next payment interval for the current params
+func (cs *ClientState) NextInterval() uint64 {
+	return cs.Params.NextInterval(cs.CurrentInterval)
+}
+
 // ProviderState is the current state of a deal from the point of view
 // of a retrieval provider
 type ProviderState struct {
@@ -236,8 +264,16 @@ type ProviderState struct {
 }
 
 // Identifier provides a unique id for this provider deal
-func (pds ProviderState) Identifier() ProviderDealIdentifier {
-	return ProviderDealIdentifier{Receiver: pds.Receiver, DealID: pds.ID}
+func (ps ProviderState) Identifier() ProviderDealIdentifier {
+	return ProviderDealIdentifier{Receiver: ps.Receiver, DealID: ps.ID}
+}
+
+func (ps *ProviderState) IntervalLowerBound() uint64 {
+	return ps.Params.IntervalLowerBound(ps.CurrentInterval)
+}
+
+func (ps *ProviderState) NextInterval() uint64 {
+	return ps.Params.NextInterval(ps.CurrentInterval)
 }
 
 // ProviderDealIdentifier is a value that uniquely identifies a deal
