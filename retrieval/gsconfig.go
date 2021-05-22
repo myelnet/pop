@@ -1,7 +1,6 @@
 package retrieval
 
 import (
-	"context"
 	"fmt"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -58,7 +57,7 @@ type dualStoreGetter struct {
 // TODO: figure out how to improve so we don't cause unnecessary reads on the client side
 func (dsg *dualStoreGetter) Get(pid peer.ID, did deal.ID) (*multistore.Store, error) {
 	var pstate deal.ProviderState
-	err := dsg.p.stateMachines.GetSync(context.TODO(), deal.ProviderDealIdentifier{Receiver: pid, DealID: did}, &pstate)
+	err := dsg.p.stateMachines.Get(deal.ProviderDealIdentifier{Receiver: pid, DealID: did}).Get(&pstate)
 	if err == nil {
 		return dsg.p.multiStore.Get(pstate.StoreID)
 	}
