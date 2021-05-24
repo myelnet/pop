@@ -126,9 +126,8 @@ func TestReplication(t *testing.T) {
 			idx,
 			n.Dt,
 			rtv,
-			[]Region{global},
+			Options{Regions: []Region{global}, ReplInterval: 2 * time.Second},
 		)
-		repl.interval = 2 * time.Second
 		require.NoError(t, repl.Start(ctx))
 		return n, repl, rtv
 	}
@@ -339,9 +338,8 @@ func TestConcurrentReplication(t *testing.T) {
 					idx,
 					n.Dt,
 					rtv,
-					[]Region{global},
+					Options{Regions: []Region{global}, ReplInterval: 3 * time.Second},
 				)
-				repl.interval = 3 * time.Second
 				require.NoError(t, repl.Start(ctx))
 				return n, repl, rtv
 			}
@@ -451,10 +449,11 @@ func TestMultiDispatchStreams(t *testing.T) {
 					Code: CustomRegion,
 				},
 			}
+			opts := Options{Regions: regions}
 
 			idx, err := NewIndex(n1.Ds, n1.Ms)
 			require.NoError(t, err)
-			hn := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), regions)
+			hn := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 			require.NoError(t, idx.SetRef(&DataRef{
 				PayloadCID: rootCid,
 				StoreID:    storeID,
@@ -475,7 +474,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 				})
 				idx, err := NewIndex(tnode.Ds, tnode.Ms)
 				require.NoError(t, err)
-				hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), regions)
+				hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
 				require.NoError(t, hn1.Start(ctx))
 				receivers[tnode.Host.ID()] = hn1
 				tnds[tnode.Host.ID()] = tnode
@@ -538,10 +537,11 @@ func TestSendDispatchNoPeers(t *testing.T) {
 			Code: CustomRegion,
 		},
 	}
+	opts := Options{Regions: regions}
 
 	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), regions)
+	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID: rootCid,
 		StoreID:    storeID,
@@ -586,7 +586,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 
 	idx, err := NewIndex(n1.Ds, n1.Ms)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), asia)
+	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), Options{Regions: asia})
 	sub, err := n1.Host.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
@@ -604,7 +604,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 
 		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
-		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n1.Dt, idx), asia)
+		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n1.Dt, idx), Options{Regions: asia})
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -629,7 +629,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		idx, err := NewIndex(n.Ds, n.Ms)
 		require.NoError(t, err)
 
-		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n.Dt, idx), africa)
+		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n.Dt, idx), Options{Regions: africa})
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
