@@ -339,11 +339,11 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 			newNode := func() (*Exchange, *testutil.TestNode) {
 				n := testutil.NewTestNode(mn, t)
 				opts := Options{
-					Blockstore:  n.Bs,
-					MultiStore:  n.Ms,
-					RepoPath:    n.DTTmpDir,
-					Keystore:    keystore.NewMemKeystore(),
-					RepInterval: 2 * time.Second,
+					Blockstore:   n.Bs,
+					MultiStore:   n.Ms,
+					RepoPath:     n.DTTmpDir,
+					Keystore:     keystore.NewMemKeystore(),
+					ReplInterval: 2 * time.Second,
 				}
 				exch, err := New(bgCtx, n.Host, n.Ds, opts)
 				require.NoError(t, err)
