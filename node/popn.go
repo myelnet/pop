@@ -96,6 +96,8 @@ type Options struct {
 	Regions []string
 	// Capacity is the maxium storage capacity dedicated to the exchange
 	Capacity uint64
+	// ReplInterval defines how often the node attempts to find new content from connected peers
+	ReplInterval time.Duration
 }
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
@@ -200,8 +202,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{opts.FilToken},
 		},
-		Regions:  regions,
-		Capacity: opts.Capacity,
+		Regions:      regions,
+		Capacity:     opts.Capacity,
+		ReplInterval: opts.ReplInterval,
 	}
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)

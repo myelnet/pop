@@ -116,16 +116,16 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, rgs []Region) *Replication {
-	pm := NewPeerMgr(h, rgs)
+func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) *Replication {
+	pm := NewPeerMgr(h, opts.Regions)
 	r := &Replication{
 		h:         h,
 		pm:        pm,
 		dt:        dt,
-		rgs:       rgs,
+		rgs:       opts.Regions,
 		idx:       idx,
 		rtv:       rtv,
-		interval:  60 * time.Second,
+		interval:  opts.ReplInterval,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
 		pulls:     make(map[cid.Cid]*peer.Set),
 		indexRcvd: make(chan struct{}),
@@ -155,8 +155,11 @@ func (r *Replication) Start(ctx context.Context) error {
 		return err
 	}
 	// Any time we receive a new index, check if any refs should be added to our supply
-	go r.refreshIndex(ctx)
-	go r.pumpIndexes(ctx, sub)
+	// if interval is 0 the feature is deactivated
+	if r.interval > 0 {
+		go r.refreshIndex(ctx)
+		go r.pumpIndexes(ctx, sub)
+	}
 	if err := r.hs.Run(ctx); err != nil {
 		return err
 	}

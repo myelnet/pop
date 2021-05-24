@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/docker/go-units"
@@ -23,10 +24,11 @@ import (
 
 // PopConfig is the json config object we generate with the init command
 type PopConfig struct {
-	temp        bool
-	privKeyPath string
-	regions     string
-	capacity    string
+	temp         bool
+	privKeyPath  string
+	regions      string
+	capacity     string
+	replInterval time.Duration
 	// Exported fields can be set by survey.Ask
 	Bootstrap    string `json:"bootstrap"`
 	FilEndpoint  string `json:"fil-endpoint"`
@@ -55,6 +57,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.capacity, "capacity", "10GB", "storage space allocated for the node")
+		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
 
 		return fs
 	})(),
@@ -154,6 +157,7 @@ Manage your Myel point of presence from the command line.
 		PrivKey:        privKey,
 		Regions:        regions,
 		Capacity:       capacity,
+		ReplInterval:   startArgs.replInterval,
 	}
 
 	err = node.Run(ctx, opts)
