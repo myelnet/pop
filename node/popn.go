@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -23,12 +24,15 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	badgerds "github.com/ipfs/go-ds-badger"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-path"
+	"github.com/ipfs/go-unixfs/importer/balanced"
+	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-car"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p"
@@ -50,8 +54,6 @@ import (
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
 )
-
-const unixfsLinksPerLevel = 1024
 
 // KLibp2pHost is the keystore key used for storing the host private key
 const KLibp2pHost = "libp2p-host"
@@ -798,6 +800,41 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 			},
 		})
 	}
+}
+
+// Add a buffer into the node global DAG. These DAGs can eventually be put into transactions.
+func (nd *node) Add(ctx context.Context, buf io.Reader) (cid.Cid, error) {
+	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
+
+	prefix, err := merkledag.PrefixForCidVersion(1)
+	if err != nil {
+		return cid.Undef, err
+	}
+	prefix.MhType = exchange.DefaultHashFunction
+
+	params := helpers.DagBuilderParams{
+		Maxlinks:   1024,
+		RawLeaves:  true,
+		CidBuilder: prefix,
+		Dagserv:    bufferedDS,
+	}
+
+	db, err := params.New(chunk.NewSizeSplitter(buf, int64(128000)))
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	n, err := balanced.Layout(db)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	err = bufferedDS.Commit()
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	return n.Cid(), nil
 }
 
 // connPeers returns a list of connected peer IDs

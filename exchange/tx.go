@@ -152,6 +152,7 @@ func (tx *Tx) SetCacheRF(rf int) {
 
 // PutFile adds or replaces a file into the transaction
 // it is _not_ thread safe
+// @NOTE: we probably want a generic Put(CID) method instead to add a link to any store of DAG
 func (tx *Tx) PutFile(path string) error {
 	if tx.Err != nil {
 		return tx.Err

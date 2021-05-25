@@ -102,7 +102,7 @@ func (s *server) writeToClients(b []byte) {
 
 func (s *server) localhostHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
+		if r.URL.Path == "/" && r.Method != http.MethodPost {
 			io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is your Myel pop.")
 			return
 		}
@@ -116,6 +116,9 @@ func (s *server) localhostHandler() http.Handler {
 			return
 		case http.MethodOptions:
 			s.optionsHandler(w, r)
+			return
+		case http.MethodPost:
+			s.postHandler(w, r)
 			return
 		}
 
@@ -192,6 +195,17 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, name, modtime, content)
 	}
 
+}
+
+func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
+	c, err := s.node.Add(r.Context(), files.NewReaderFile(r.Body))
+	if err != nil {
+		http.Error(w, "failed to add file to blockstore", http.StatusInternalServerError)
+		return
+	}
+	s.addUserHeaders(w)
+	w.Header().Set("IPFS-Hash", c.String())
+	http.Redirect(w, r, c.String(), http.StatusCreated)
 }
 
 // Run runs a pop IPFS node
