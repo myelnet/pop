@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"runtime"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
@@ -260,6 +261,7 @@ func (pr *ProviderRevalidator) processPayment(dealID deal.ProviderDealIdentifier
 	owed := paymentOwed(d, totalPaid)
 
 	if owed.GreaterThan(big.Zero()) {
+		runtime.Breakpoint()
 		_ = pr.env.SendEvent(dealID, provider.EventPartialPaymentReceived, received, payment.PaymentChannel)
 		return &deal.Response{
 			ID:          d.ID,
@@ -270,6 +272,7 @@ func (pr *ProviderRevalidator) processPayment(dealID deal.ProviderDealIdentifier
 
 	// resume deal
 	_ = pr.env.SendEvent(dealID, provider.EventPaymentReceived, received, payment.PaymentChannel)
+	runtime.Breakpoint()
 	if d.Status == deal.StatusFundsNeededLastPayment {
 		return &deal.Response{
 			ID:     d.ID,
@@ -300,6 +303,7 @@ func paymentOwed(d deal.ProviderState, totalPaid big.Int) big.Int {
 	// Calculate payment owed
 	owed := big.Sub(totalPaymentRequired, transferPayment)
 
+	runtime.Breakpoint()
 	return owed
 }
 
@@ -330,6 +334,7 @@ func (pr *ProviderRevalidator) OnPullDataSent(chid datatransfer.ChannelID, addit
 
 	channel.totalSent += additionalBytesSent
 	if channel.pricePerByte.IsZero() || channel.totalSent < channel.interval {
+		runtime.Breakpoint()
 		return true, nil, pr.env.SendEvent(channel.dealID, provider.EventBlockSent, channel.totalSent)
 	}
 
@@ -338,6 +343,7 @@ func (pr *ProviderRevalidator) OnPullDataSent(chid datatransfer.ChannelID, addit
 	if err != nil {
 		return true, nil, err
 	}
+	runtime.Breakpoint()
 	return true, &deal.Response{
 		ID:          channel.dealID.DealID,
 		Status:      deal.StatusFundsNeeded,

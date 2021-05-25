@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"runtime"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -337,6 +338,7 @@ var FSMEvents = fsm.Events{
 				state.CurrentInterval = state.NextInterval()
 			}
 
+			runtime.Breakpoint()
 			return nil
 		}),
 
@@ -481,11 +483,13 @@ func AllocateLane(ctx fsm.Context, environment DealEnvironment, ds deal.ClientSt
 // Ongoing just double checks that we may need to move out of the ongoing state cause a payment was previously requested
 func Ongoing(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
 	if ds.PaymentRequested.GreaterThan(big.Zero()) {
+		runtime.Breakpoint()
 		if ds.LastPaymentRequested {
 			return ctx.Trigger(EventLastPaymentRequested, big.Zero())
 		}
 		return ctx.Trigger(EventPaymentRequested, big.Zero())
 	}
+	runtime.Breakpoint()
 	return nil
 }
 
@@ -493,11 +497,13 @@ func Ongoing(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) 
 func ProcessPaymentRequested(ctx fsm.Context, environment DealEnvironment, ds deal.ClientState) error {
 	// If the unseal payment hasn't been made, we need to send funds
 	if ds.UnsealPrice.GreaterThan(ds.UnsealFundsPaid) {
+		runtime.Breakpoint()
 		return ctx.Trigger(EventSendFunds)
 	}
 
 	// If all bytes received have been paid for, we don't need to send funds
 	if ds.BytesPaidFor >= ds.TotalReceived {
+		runtime.Breakpoint()
 		return nil
 	}
 
@@ -505,6 +511,7 @@ func ProcessPaymentRequested(ctx fsm.Context, environment DealEnvironment, ds de
 
 	// If all blocks have been received we need to send a final payment
 	if ds.AllBlocksReceived {
+		runtime.Breakpoint()
 		return ctx.Trigger(EventSendFunds)
 	}
 
@@ -512,8 +519,10 @@ func ProcessPaymentRequested(ctx fsm.Context, environment DealEnvironment, ds de
 	// If the number of bytes received is at or above the size of the current
 	// interval, we need to send a payment.
 	if ds.TotalReceived >= ds.CurrentInterval {
+		runtime.Breakpoint()
 		return ctx.Trigger(EventSendFunds)
 	}
+	runtime.Breakpoint()
 	return nil
 }
 
@@ -566,6 +575,7 @@ func SendFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error 
 		return ctx.Trigger(EventWriteDealPaymentErrored, err)
 	}
 
+	runtime.Breakpoint()
 	return ctx.Trigger(EventPaymentSent, totalPrice)
 }
 
@@ -587,6 +597,7 @@ func CheckFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error
 	unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
 	shortfall := big.Sub(total, unredeemedFunds)
 
+	runtime.Breakpoint()
 	// The shortfall is negative when there is more funds in the channel than the requested payment amount
 	if shortfall.LessThanEqual(big.Zero()) {
 		return ctx.Trigger(EventPaymentChannelReady, ds.PaymentInfo.PayCh)
