@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -8,12 +9,19 @@ import (
 	"github.com/filecoin-project/go-statemachine/fsm"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/pop/retrieval/deal"
+	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
 // EventReceiver is any thing that can receive FSM events
 type EventReceiver interface {
 	Has(id interface{}) (bool, error)
 	Send(id interface{}, name fsm.EventName, args ...interface{}) (err error)
+	GetSync(ctx context.Context, id interface{}, value cbg.CBORUnmarshaler) error
+}
+
+// ChannelTracker is an interface that sets a new channel to be tracked
+type ChannelTracker interface {
+	TrackChannel(deal.ProviderState)
 }
 
 const noProviderEvent = Event(math.MaxUint64)
@@ -38,7 +46,7 @@ func eventFromDataTransfer(event datatransfer.Event, channelState datatransfer.C
 // in a storage market deal, then, based on the data transfer event that occurred, it generates
 // and update message for the deal -- either moving to staged for a completion
 // event or moving to error if a data transfer error occurs
-func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subscriber {
+func DataTransferSubscriber(deals EventReceiver, host peer.ID, t ChannelTracker) datatransfer.Subscriber {
 	return func(event datatransfer.Event, channelState datatransfer.ChannelState) {
 		dealProposal, ok := deal.ProposalFromVoucher(channelState.Voucher())
 		// if this event is for a transfer not related to storage, ignore
@@ -50,9 +58,10 @@ func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subs
 		if channelState.Sender() != host {
 			return
 		}
+		dealID := deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}
 
 		if channelState.Status() == datatransfer.Completed {
-			err := deals.Send(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}, EventComplete)
+			err := deals.Send(dealID, EventComplete)
 			if err != nil {
 				fmt.Println("processing provider dt event:", err)
 			}
@@ -63,7 +72,17 @@ func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subs
 			return
 		}
 
-		err := deals.Send(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}, retrievalEvent, params...)
+		if retrievalEvent == EventDealAccepted {
+			var state deal.ProviderState
+			err := deals.GetSync(context.TODO(), dealID, &state)
+			if err != nil {
+				return // TODO: handle
+			}
+			state.ChannelID = channelState.ChannelID()
+			t.TrackChannel(state)
+		}
+
+		err := deals.Send(dealID, retrievalEvent, params...)
 		if err != nil {
 			fmt.Printf("processing provider dt event %s: %v\n", datatransfer.Events[event.Code], err)
 		}

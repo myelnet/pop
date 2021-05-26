@@ -187,7 +187,7 @@ func TestRetrieval(t *testing.T) {
 		},
 	}
 	for i, testCase := range testCases {
-		if i != 2 {
+		if i != 0 {
 			continue
 		}
 		t.Run(testCase.name, func(t *testing.T) {

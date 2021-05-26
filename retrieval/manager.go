@@ -192,7 +192,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	dt.SubscribeToEvents(provider.DataTransferSubscriber(p.stateMachines, self))
+	dt.SubscribeToEvents(provider.DataTransferSubscriber(p.stateMachines, self, p.revalidator))
 	dt.SubscribeToEvents(client.DataTransferSubscriber(c.stateMachines, self))
 
 	// TODO: might want to use the cleanup function returned

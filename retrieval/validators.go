@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sync"
 	"runtime"
+	"sync"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
@@ -92,6 +92,7 @@ func (rv *ProviderRequestValidator) ValidatePull(isRestart bool, receiver peer.I
 		Proposal:        *proposal,
 		Receiver:        receiver,
 		CurrentInterval: proposal.PaymentInterval,
+		FundsReceived:   abi.NewTokenAmount(0),
 	}
 
 	status, err := rv.acceptDeal(&pds)
@@ -183,6 +184,7 @@ func (pr *ProviderRevalidator) TrackChannel(d deal.ProviderState) {
 		dealID: d.Identifier(),
 	}
 	pr.writeDealState(d)
+	runtime.Breakpoint()
 }
 
 // UntrackChannel indicates a retrieval deal is finish and no longer is tracked
@@ -324,6 +326,7 @@ func (pr *ProviderRevalidator) OnPullDataSent(chid datatransfer.ChannelID, addit
 	defer pr.trackedChannelsLk.RUnlock()
 	channel, ok := pr.trackedChannels[chid]
 	if !ok {
+		runtime.Breakpoint()
 		return false, nil, nil
 	}
 
