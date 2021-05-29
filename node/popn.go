@@ -803,8 +803,8 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 }
 
 // Add a buffer into the node global DAG. These DAGs can eventually be put into transactions.
-func (nd *node) Add(ctx context.Context, buf io.Reader) (cid.Cid, error) {
-	bufferedDS := ipldformat.NewBufferedDAG(ctx, nd.dag)
+func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.Reader) (cid.Cid, error) {
+	bufferedDS := ipldformat.NewBufferedDAG(ctx, dag)
 
 	prefix, err := merkledag.PrefixForCidVersion(1)
 	if err != nil {

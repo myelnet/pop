@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	gopath "path"
@@ -13,9 +15,12 @@ import (
 	"time"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	ipath "github.com/ipfs/go-path"
 	"github.com/myelnet/pop/exchange"
+	"github.com/myelnet/pop/internal/utils"
+	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
 )
 
@@ -35,7 +40,7 @@ func (s *server) serveConn(ctx context.Context, c net.Conn) {
 	c.SetReadDeadline(time.Now().Add(time.Second))
 	peek, _ := br.Peek(4)
 	c.SetReadDeadline(time.Time{})
-	isHTTPReq := string(peek) == "GET "
+	isHTTPReq := string(peek) == "GET " || string(peek) == "OPTI" || string(peek) == "POST"
 
 	if isHTTPReq {
 		httpServer := http.Server{
@@ -102,7 +107,7 @@ func (s *server) writeToClients(b []byte) {
 
 func (s *server) localhostHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" && r.Method != http.MethodPost {
+		if r.URL.Path == "/" && r.Method == http.MethodGet {
 			io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is your Myel pop.")
 			return
 		}
@@ -135,7 +140,9 @@ func (s *server) optionsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) addUserHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", http.MethodGet)
+	w.Header()["Access-Control-Allow-Methods"] = []string{http.MethodPost, http.MethodGet}
+	w.Header()["Access-Control-Allow-Headers"] = []string{"Content-Type", "User-Agent", "Range"}
+	w.Header()["Access-Control-Expose-Headers"] = []string{"IPFS-Hash"}
 }
 
 func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
@@ -198,14 +205,56 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
-	c, err := s.node.Add(r.Context(), files.NewReaderFile(r.Body))
+
+	mediatype, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
-		http.Error(w, "failed to add file to blockstore", http.StatusInternalServerError)
+		http.Error(w, "unable to parse content type", http.StatusInternalServerError)
 		return
 	}
+
+	var root cid.Cid
+	if mediatype == "multipart/form-data" {
+		mr := multipart.NewReader(r.Body, params["boundary"])
+		tx := s.node.exch.Tx(r.Context())
+		defer tx.Close()
+		// Set 0 replication for now. TODO: set cache strategy in HTTP header
+		tx.SetCacheRF(0)
+
+		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
+			c, err := s.node.Add(r.Context(), tx.Store().DAG, part)
+			if err != nil {
+				http.Error(w, "failed to add file", http.StatusInternalServerError)
+				return
+			}
+			stats, err := utils.Stat(r.Context(), tx.Store(), c, sel.All())
+			if err != nil {
+				http.Error(w, "failed to get file stat", http.StatusInternalServerError)
+				return
+			}
+			err = tx.Put(part.FileName(), c, int64(stats.Size))
+			if err != nil {
+				http.Error(w, "failed to put file in tx", http.StatusInternalServerError)
+				return
+			}
+		}
+		err := tx.Commit()
+		if err != nil {
+			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
+			return
+		}
+		root = tx.Root()
+	} else {
+		c, err := s.node.Add(r.Context(), s.node.dag, files.NewReaderFile(r.Body))
+		if err != nil {
+			http.Error(w, "failed to add file to blockstore", http.StatusInternalServerError)
+			return
+		}
+		root = c
+	}
+
 	s.addUserHeaders(w)
-	w.Header().Set("IPFS-Hash", c.String())
-	http.Redirect(w, r, c.String(), http.StatusCreated)
+	w.Header().Set("IPFS-Hash", root.String())
+	http.Redirect(w, r, root.String(), http.StatusCreated)
 }
 
 // Run runs a pop IPFS node

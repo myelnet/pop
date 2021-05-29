@@ -152,7 +152,7 @@ func (tx *Tx) SetCacheRF(rf int) {
 
 // PutFile adds or replaces a file into the transaction
 // it is _not_ thread safe
-// @NOTE: we probably want a generic Put(CID) method instead to add a link to any store of DAG
+// @TODO: deprecate this in favor of Put
 func (tx *Tx) PutFile(path string) error {
 	if tx.Err != nil {
 		return tx.Err
@@ -160,6 +160,16 @@ func (tx *Tx) PutFile(path string) error {
 	err := tx.add(path)
 	if err != nil {
 		return err
+	}
+	return tx.buildRoot()
+}
+
+// Put a DAG for a given key in the transaction
+func (tx *Tx) Put(key string, value cid.Cid, size int64) error {
+	tx.entries[key] = Entry{
+		Key:   key,
+		Value: value,
+		Size:  size,
 	}
 	return tx.buildRoot()
 }
@@ -581,6 +591,7 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 }
 
 // Close removes any listeners and stream handlers related to a session
+// TODO: cleanup further in case we close before committing
 func (tx *Tx) Close() {
 	tx.unsub()
 	tx.cancelCtx()
