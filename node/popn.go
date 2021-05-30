@@ -640,8 +640,10 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 // get is a synchronous content retrieval operation which can be called by a CLI request or HTTP
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// Check our supply if we may already have it
-	f, err := nd.exch.Tx(ctx, exchange.WithRoot(c)).GetFile(args.Key)
-	if err == nil && args.Out != "" {
+	tx := nd.exch.Tx(ctx, exchange.WithRoot(c))
+	local := tx.IsLocal()
+	if local && args.Out != "" {
+		f, err := tx.GetFile(args.Key)
 		if err != nil {
 			return err
 		}
@@ -650,7 +652,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			return err
 		}
 	}
-	if err == nil {
+	if local {
 		nd.send(Notify{
 			GetResult: &GetResult{
 				Local: true,
@@ -672,7 +674,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 
 	start := time.Now()
 
-	tx := nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
+	tx = nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
 	defer tx.Close()
 	var sl ipld.Node
 	if args.Key != "" {

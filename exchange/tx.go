@@ -417,6 +417,64 @@ func (tx *Tx) GetFile(k string) (files.Node, error) {
 	return tx.loadFileEntry(k, tx.store)
 }
 
+// IsLocal tells us if this node is storing the content of this transaction or if it needs to retrieve it
+func (tx *Tx) IsLocal() bool {
+	// We have entries this means the content from this root is stored locally
+	if len(tx.entries) > 0 {
+		return true
+	}
+	if _, err := tx.index.GetRef(tx.root); err != nil {
+		return false
+	}
+	return true
+}
+
+// GetEntries retrieves all the entries associated with the root of this transaction
+func (tx *Tx) GetEntries() ([]string, error) {
+	// If this transaction has entries we just return them otherwise
+	// we're looking at a different transaction
+	if len(tx.entries) > 0 {
+		entries := make([]string, len(tx.entries))
+		i := 0
+		for k := range tx.entries {
+			entries[i] = k
+			i++
+		}
+		return entries, nil
+	}
+	if ref, err := tx.index.GetRef(tx.root); err == nil {
+		store, err := tx.ms.Get(ref.StoreID)
+		if err != nil {
+			return nil, err
+		}
+		lk := cidlink.Link{Cid: tx.root}
+		nb := basicnode.Prototype.Map.NewBuilder()
+		err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, store.Loader)
+		if err != nil {
+			return nil, err
+		}
+		nd := nb.Build()
+		entries := make([]string, nd.Length())
+		it := nd.MapIterator()
+		i := 0
+		for !it.Done() {
+			k, _, err := it.Next()
+			// all succeed of fail
+			if err != nil {
+				return nil, err
+			}
+			key, err := k.AsString()
+			if err != nil {
+				return nil, err
+			}
+			entries[i] = key
+			i++
+		}
+		return entries, nil
+	}
+	return nil, fmt.Errorf("failed to get entried")
+}
+
 func (tx *Tx) loadFileEntry(k string, store *multistore.Store) (files.Node, error) {
 	lk := cidlink.Link{Cid: tx.root}
 	nb := basicnode.Prototype.Map.NewBuilder()

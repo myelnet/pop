@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -156,21 +157,39 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
+	var key string
+	if len(segs) > 0 {
+		key = segs[0]
+	}
 	// try to retrieve the blocks
-	err = s.node.get(r.Context(), root, &GetArgs{Key: segs[0], Strategy: "SelectFirst"})
+	err = s.node.get(r.Context(), root, &GetArgs{Key: key, Strategy: "SelectFirst"})
 	if err != nil {
 		fmt.Printf("ERR %s\n", err)
 		// TODO: give better feedback into what went wrong
 		http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
 		return
 	}
-	fnd, err := s.node.exch.Tx(r.Context(), exchange.WithRoot(root)).GetFile(segs[0])
+
+	s.addUserHeaders(w)
+
+	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
+
+	if key == "" {
+		// If there is no key we return all the keys
+		keys, err := tx.GetEntries()
+		if err != nil {
+			http.Error(w, "Failed to get entries", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(keys)
+		return
+	}
+	fnd, err := tx.GetFile(segs[0])
 	if err != nil {
 		http.Error(w, "Failed to read file from store", http.StatusInternalServerError)
 		return
 	}
-
-	s.addUserHeaders(w)
 
 	modtime := time.Now()
 	if f, ok := fnd.(files.File); ok {
