@@ -250,7 +250,12 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to get file stat", http.StatusInternalServerError)
 				return
 			}
-			err = tx.Put(part.FileName(), c, int64(stats.Size))
+			key := part.FileName()
+			if key == "" {
+				// If it's not a file the key should be the form name
+				key = part.FormName()
+			}
+			err = tx.Put(key, c, int64(stats.Size))
 			if err != nil {
 				http.Error(w, "failed to put file in tx", http.StatusInternalServerError)
 				return
