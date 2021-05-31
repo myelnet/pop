@@ -49,6 +49,9 @@ func (te testExecutor) Confirm(o deal.Offer) bool {
 	return true
 }
 
+func (te testExecutor) Finish(err error) {
+}
+
 func TestSelectionStrategies(t *testing.T) {
 
 	testCases := []struct {
