@@ -638,6 +638,13 @@ func (tx *Tx) Triage() (DealSelection, error) {
 	}
 }
 
+// Finish tells the tx all operations have been completed
+func (tx *Tx) Finish(err error) {
+	tx.done <- TxResult{
+		Err: err,
+	}
+}
+
 // Done returns a channel that receives any resulting error from the latest operation
 func (tx *Tx) Done() <-chan TxResult {
 	return tx.done
@@ -651,6 +658,9 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 // Close removes any listeners and stream handlers related to a session
 // TODO: cleanup further in case we close before committing
 func (tx *Tx) Close() {
+	if tx.worker != nil {
+		_ = tx.worker.Close()
+	}
 	tx.unsub()
 	tx.cancelCtx()
 }
@@ -674,6 +684,7 @@ type OfferWorker interface {
 type OfferExecutor interface {
 	Execute(deal.Offer) error
 	Confirm(deal.Offer) bool
+	Finish(error)
 }
 
 // SelectionStrategy is a function that returns an OfferWorker with a defined strategy
@@ -816,6 +827,9 @@ func (s sessionWorker) Start() {
 					go s.exec(q[0], execDone)
 					q = q[1:]
 				}
+				if err != nil && len(q) == 0 {
+					s.executor.Finish(err)
+				}
 			}
 		}
 	}()
@@ -825,7 +839,12 @@ func (s sessionWorker) Start() {
 func (s sessionWorker) Close() []deal.Offer {
 	resc := make(chan []deal.Offer)
 	s.closing <- resc
-	return <-resc
+	select {
+	case res := <-resc:
+		return res
+	default:
+		return nil
+	}
 }
 
 // ReceiveResponse sends a new offer to the queue
