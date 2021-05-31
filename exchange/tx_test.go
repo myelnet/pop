@@ -378,3 +378,33 @@ func TestMultiTx(t *testing.T) {
 	case <-gtx2.Done():
 	}
 }
+
+func TestTxGetEntries(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+
+	n1 := testutil.NewTestNode(mn, t)
+	opts := Options{
+		RepoPath: n1.DTTmpDir,
+		Keystore: keystore.NewMemKeystore(),
+	}
+	pn, err := New(ctx, n1.Host, n1.Ds, opts)
+	require.NoError(t, err)
+
+	_, filepaths := genTestFiles(t)
+
+	tx := pn.Tx(ctx)
+	tx.SetCacheRF(0)
+	for _, p := range filepaths {
+		require.NoError(t, tx.PutFile(p))
+	}
+
+	require.NoError(t, tx.Commit())
+
+	// Fresh new tx based on the root of the previous one
+	ntx := pn.Tx(ctx, WithRoot(tx.Root()))
+	entries, err := ntx.GetEntries()
+	require.NoError(t, err)
+	require.Equal(t, len(filepaths), len(entries))
+}
