@@ -510,7 +510,6 @@ func TestMultipleGet(t *testing.T) {
 	<-added2
 
 	ref, err := pn.getRef("")
-	fmt.Println("ref", ref.StoreID)
 	require.NoError(t, err)
 	require.NoError(t, pn.exch.Index().SetRef(ref))
 
