@@ -183,6 +183,86 @@ func TestGossipRouting(t *testing.T) {
 
 }
 
+func TestGossipDuplicateRequests(t *testing.T) {
+	bgCtx := context.Background()
+	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+	defer cancel()
+
+	// make a mock network
+	mn := mocknet.New(ctx)
+
+	// Generate a random file and keep reference to its location on disk
+	fileName := (&testutil.TestNode{}).CreateRandomFile(t, 256000)
+
+	// Keep a reference to the root CID of the file
+	var rootCID cid.Cid
+
+	// We can keep reference to our providers here
+	providers := make(map[peer.ID]*GossipRouting)
+	var pnodes []*testutil.TestNode
+
+	// Generate providers
+	for i := 0; i < 11; i++ {
+		n := testutil.NewTestNode(mn, t)
+
+		// Create all our service instances
+		tracer := NewGossipTracer()
+		ps, err := pubsub.NewGossipSub(ctx, n.Host, pubsub.WithEventTracer(tracer))
+		require.NoError(t, err)
+		routing := NewGossipRouting(n.Host, ps, tracer, []Region{global})
+		// This will start listening for gossip messages (calcResponse is mocked at routing_test.go:50)
+		require.NoError(t, routing.StartProviding(ctx, calcResponse))
+
+		// each provider is loading the same file in their blockstore
+		link, _, _ := n.LoadFileToNewStore(ctx, t, fileName)
+		// The Link interface must be cast to access the Cid field
+		rootCID = link.(cidlink.Link).Cid
+
+		providers[n.Host.ID()] = routing
+		pnodes = append(pnodes, n)
+
+	}
+
+	// Make a single client
+	n := testutil.NewTestNode(mn, t)
+
+	tracer := NewGossipTracer()
+	ps, err := pubsub.NewGossipSub(ctx, n.Host, pubsub.WithEventTracer(tracer))
+	require.NoError(t, err)
+	client := NewGossipRouting(n.Host, ps, tracer, []Region{global})
+
+	// calcResponse is mocked at routing_test.go:50
+	require.NoError(t, client.StartProviding(ctx, calcResponse))
+
+	// Connect all our nodes
+	require.NoError(t, mn.LinkAll())
+	// ConnectAllButSelf means all the nodes will dial each other except themselves
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Wait for the responses the client will get here
+	resps := make(chan deal.QueryResponse)
+	// This will be called each time the client receives a response from a provider
+	client.SetReceiver(func(i peer.AddrInfo, r deal.QueryResponse) {
+		resps <- r
+	})
+
+	for duplicateQueryCpt := 0; duplicateQueryCpt < 3; duplicateQueryCpt++ {
+		// publish a gossip message containing the CID and the selector to all the subscribed providers
+		err = client.Query(ctx, rootCID, sel.All())
+		require.NoError(t, err)
+
+		// iterate over all the responses to verify they're all here
+		for i := 0; i < 11; i++ {
+			select {
+			case r := <-resps:
+				require.Equal(t, r.Size, uint64(268009))
+			case <-ctx.Done():
+				t.Fatal("couldn't get all the responses")
+			}
+		}
+	}
+}
+
 type mtracker struct {
 	isRecipient bool
 	recipient   peer.ID
