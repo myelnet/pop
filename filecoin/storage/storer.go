@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"time"
 
@@ -40,16 +41,43 @@ type StoreIDGetter interface {
 	GetStoreID(cid.Cid) (multistore.StoreID, error)
 }
 
-// MinerLister allows the storage module to get a list of Filecoin miners to store with
-type MinerLister interface {
-	ListMiners(ctx context.Context) ([]address.Address, error)
+// MinerDetails represents a miner from the json encoded result
+type MinerDetails struct {
+	Address string `json:"address"`
+	Region  string `json:"region"`
 }
 
-// Supplier is a generic interface for supplying the storage module with dynamic information about content
-// and network agents
-type Supplier interface {
-	StoreIDGetter
-	MinerLister
+// MinersResult is a list of miners returned as the result of the miners query
+type MinersResult struct {
+	Miners []MinerDetails `json:"miners"`
+}
+
+// MinerParams are used to filter the miners returned in the FindMiners query
+type MinerParams struct {
+	Limit  int
+	Region string
+}
+
+// URLEncode returns the params as url encoded params
+func (mp MinerParams) URLEncode() string {
+	params := url.Values{}
+
+	limit := defaultLimit
+	if mp.Limit > 0 {
+		limit = mp.Limit
+	}
+
+	params.Add("limit", fmt.Sprintf("%d", limit))
+
+	if mp.Region != "" {
+		params.Add("region", mp.Region)
+	}
+	return params.Encode()
+}
+
+// MinerFinder allows the storage module to get a list of Filecoin miners to store with
+type MinerFinder interface {
+	FindMiners(context.Context, MinerParams) (MinersResult, error)
 }
 
 // Storage is a minimal system for creating basic storage deals on Filecoin
@@ -59,8 +87,9 @@ type Storage struct {
 	adapter *Adapter
 	fundmgr *FundManager
 	fAPI    fil.API
-	sp      Supplier
 	disc    *discoveryimpl.Local
+	sg      StoreIDGetter
+	mf      MinerFinder
 }
 
 // New creates a new storage client instance
@@ -72,7 +101,7 @@ func New(
 	dt datatransfer.Manager,
 	w wallet.Driver,
 	api fil.API,
-	sp Supplier,
+	sg StoreIDGetter,
 ) (*Storage, error) {
 	fundmgr := NewFundManager(ds, api, w)
 	ad := &Adapter{
@@ -99,7 +128,8 @@ func New(
 		client:  c,
 		adapter: ad,
 		fundmgr: fundmgr,
-		sp:      sp,
+		sg:      sg,
+		mf:      NewFilRep(),
 		fAPI:    api,
 		disc:    disc,
 	}, nil
@@ -162,9 +192,21 @@ type MinerSelectionParams struct {
 
 // LoadMiners selects a set of miners to queue storage deals with
 func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]Miner, error) {
-	addrs, err := s.sp.ListMiners(ctx)
+	result, err := s.mf.FindMiners(ctx, MinerParams{
+		Limit: msp.RF,
+		// Region: TODO
+	})
 	if err != nil {
 		return nil, err
+	}
+
+	var addrs []address.Address
+	for _, m := range result.Miners {
+		addr, err := address.NewFromString(m.Address)
+		if err != nil {
+			continue
+		}
+		addrs = append(addrs, addr)
 	}
 
 	var sel []Miner
@@ -228,12 +270,6 @@ func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]M
 	sort.Slice(sel, func(i, j int) bool {
 		return lats[sel[i].Info.Address] < lats[sel[j].Info.Address]
 	})
-	// Only keep the lowest latencies
-	// We add 2 on top of the replication factor in case some deals fails
-	l := msp.RF + 2
-	if len(sel) > l {
-		return sel[:l], nil
-	}
 	return sel, nil
 }
 
@@ -252,7 +288,7 @@ type StartDealParams struct {
 
 // StartDeal starts a new storage deal with a Filecoin storage miner
 func (s *Storage) StartDeal(ctx context.Context, params StartDealParams) (*cid.Cid, error) {
-	storeID, err := s.sp.GetStoreID(params.Data.Root)
+	storeID, err := s.sg.GetStoreID(params.Data.Root)
 	if err != nil {
 		return nil, err
 	}
