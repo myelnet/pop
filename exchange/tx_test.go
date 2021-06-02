@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"io"
 	"io/ioutil"
 	"path/filepath"
@@ -57,7 +58,9 @@ func TestTx(t *testing.T) {
 			// The peer manager has time to fill up while we load this file
 			fname := pnodes[0].CreateRandomFile(t, 56000)
 			tx := providers[0].Tx(ctx)
-			require.NoError(t, tx.PutFile(fname))
+			link, bytes := pnodes[0].LoadFileToStore(ctx, t, tx.Store(), fname)
+			rootCid := link.(cidlink.Link).Cid
+			require.NoError(t, tx.Put(KeyFromPath(fname), rootCid, int64(len(bytes))))
 
 			file, err := tx.GetFile(KeyFromPath(fname))
 			require.NoError(t, err)
@@ -142,7 +145,9 @@ func TestTxPutGet(t *testing.T) {
 	tx := exch.Tx(ctx)
 	sID := tx.StoreID()
 	for _, p := range filepaths {
-		require.NoError(t, tx.PutFile(p))
+		link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), p)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
 
 	status, err := tx.Status()
@@ -153,7 +158,10 @@ func TestTxPutGet(t *testing.T) {
 	r := tx.Root()
 
 	tx = exch.Tx(ctx)
-	require.NoError(t, tx.PutFile(filepaths[0]))
+
+	link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), filepaths[0])
+	rootCid := link.(cidlink.Link).Cid
+	require.NoError(t, tx.Put(KeyFromPath(filepaths[0]), rootCid, int64(len(bytes))))
 
 	// We should have a new store with a single entry
 	status, err = tx.Status()
@@ -205,7 +213,9 @@ func BenchmarkAdd(b *testing.B) {
 
 	tx := exch.Tx(ctx)
 	for i := 0; i < b.N; i++ {
-		require.NoError(b, tx.PutFile(filepaths[i]))
+		link, bytes := n.LoadFileToStore(ctx, b, tx.Store(), filepaths[i])
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(b, tx.Put(KeyFromPath(filepaths[i]), rootCid, int64(len(bytes))))
 	}
 }
 
@@ -229,10 +239,14 @@ func TestTxRace(t *testing.T) {
 			harness := &testutil.TestNode{}
 			tx := exch.Tx(ctx)
 			fname1 := harness.CreateRandomFile(t, 100000)
-			require.NoError(t, tx.PutFile(fname1))
+			link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), fname1)
+			rootCid := link.(cidlink.Link).Cid
+			require.NoError(t, tx.Put(KeyFromPath(fname1), rootCid, int64(len(bytes))))
 
 			fname2 := harness.CreateRandomFile(t, 156000)
-			require.NoError(t, tx.PutFile(fname2))
+			link, bytes = n.LoadFileToStore(ctx, t, tx.Store(), fname2)
+			rootCid = link.(cidlink.Link).Cid
+			require.NoError(t, tx.Put(KeyFromPath(fname2), rootCid, int64(len(bytes))))
 
 			require.NoError(t, tx.Commit())
 		}()
@@ -269,7 +283,9 @@ func TestMapFieldSelector(t *testing.T) {
 
 	tx := pn.Tx(ctx)
 	for _, p := range filepaths {
-		require.NoError(t, tx.PutFile(p))
+		link, bytes := n1.LoadFileToStore(ctx, t, tx.Store(), p)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
@@ -349,7 +365,9 @@ func TestMultiTx(t *testing.T) {
 
 	tx := pn.Tx(ctx)
 	for _, p := range filepaths {
-		require.NoError(t, tx.PutFile(p))
+		link, bytes := n1.LoadFileToStore(ctx, t, tx.Store(), p)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
@@ -397,7 +415,9 @@ func TestTxGetEntries(t *testing.T) {
 	tx := pn.Tx(ctx)
 	tx.SetCacheRF(0)
 	for _, p := range filepaths {
-		require.NoError(t, tx.PutFile(p))
+		link, bytes := n1.LoadFileToStore(ctx, t, tx.Store(), p)
+		rootCid := link.(cidlink.Link).Cid
+		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
 
 	require.NoError(t, tx.Commit())
