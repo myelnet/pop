@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	mh "github.com/multiformats/go-multihash"
 	"io"
 	"math/rand"
 	"os"
@@ -196,13 +197,19 @@ func (tn *TestNode) LoadFileToStore(ctx context.Context, t testing.TB, store *mu
 	tr := io.TeeReader(f, &buf)
 	file := files.NewReaderFile(tr)
 
+	prefix, err := merkledag.PrefixForCidVersion(1)
+	if err != nil {
+		require.NoError(t, err)
+	}
+	prefix.MhType = uint64(mh.BLAKE2B_MIN + 31)
+
 	// import to UnixFS
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, store.DAG)
 
 	params := helpers.DagBuilderParams{
 		Maxlinks:   unixfsLinksPerLevel,
 		RawLeaves:  true,
-		CidBuilder: nil,
+		CidBuilder: prefix,
 		Dagserv:    bufferedDS,
 	}
 

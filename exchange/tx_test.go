@@ -191,7 +191,6 @@ func TestTxPutGet(t *testing.T) {
 }
 
 func BenchmarkAdd(b *testing.B) {
-
 	ctx := context.Background()
 	mn := mocknet.New(ctx)
 	n := testutil.NewTestNode(mn, b)
