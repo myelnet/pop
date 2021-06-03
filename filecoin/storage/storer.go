@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -24,7 +23,6 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
@@ -47,14 +45,23 @@ type MinerDetails struct {
 	Region  string `json:"region"`
 }
 
+// MinerPagination is data about Filrep API pagination
+type MinerPagination struct {
+	Total  int `json:"total"`
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
+}
+
 // MinersResult is a list of miners returned as the result of the miners query
 type MinersResult struct {
-	Miners []MinerDetails `json:"miners"`
+	Miners     []MinerDetails  `json:"miners"`
+	Pagination MinerPagination `json:"pagination,omitempty"`
 }
 
 // MinerParams are used to filter the miners returned in the FindMiners query
 type MinerParams struct {
 	Limit  int
+	Offset int
 	Region string
 }
 
@@ -71,6 +78,9 @@ func (mp MinerParams) URLEncode() string {
 
 	if mp.Region != "" {
 		params.Add("region", mp.Region)
+	}
+	if mp.Offset > 0 {
+		params.Add("offset", fmt.Sprintf("%d", mp.Offset))
 	}
 	return params.Encode()
 }
@@ -185,91 +195,81 @@ type Miner struct {
 
 // MinerSelectionParams defines the criterias for selecting a list of miners
 type MinerSelectionParams struct {
-	MaxPrice  uint64
-	PieceSize uint64
-	RF        int
+	MaxPrice uint64
+	RF       int
+	Region   string
 }
 
 // LoadMiners selects a set of miners to queue storage deals with
 func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]Miner, error) {
-	result, err := s.mf.FindMiners(ctx, MinerParams{
-		Limit: msp.RF,
-		// Region: TODO
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var addrs []address.Address
-	for _, m := range result.Miners {
-		addr, err := address.NewFromString(m.Address)
-		if err != nil {
-			continue
-		}
-		addrs = append(addrs, addr)
-	}
-
 	var sel []Miner
-	lats := make(map[address.Address]time.Duration)
-	for _, a := range addrs {
-		mi, err := s.fAPI.StateMinerInfo(ctx, a, fil.EmptyTSK)
+
+	limit := msp.RF
+	offset := 0
+
+	// Iterate across miner pages
+	for len(sel) < msp.RF {
+		result, err := s.mf.FindMiners(ctx, MinerParams{
+			Limit:  limit,
+			Region: msp.Region,
+			Offset: offset,
+		})
 		if err != nil {
 			return nil, err
 		}
-		// PeerId is often nil which causes panics down the road
-		if mi.PeerId == nil {
-			return nil, fmt.Errorf("no peer id for miner %v", a)
-		}
-		info := NewStorageProviderInfo(a, mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
 
-		ai := peer.AddrInfo{
-			ID:    info.PeerID,
-			Addrs: info.Addrs,
-		}
-		// We need to connect directly with the peer to ping them
-		err = s.host.Connect(ctx, ai)
-		if err != nil {
-			continue
-		}
-		pings := ping.Ping(ctx, s.host, *mi.PeerId)
-
-		select {
-		case p := <-pings:
-			if p.Error != nil {
-				// If any error we know they're probably not reachable
+		for _, m := range result.Miners {
+			a, err := address.NewFromString(m.Address)
+			if err != nil {
 				continue
 			}
-			lats[a] = p.RTT
-		case <-ctx.Done():
-			return sel, ctx.Err()
-		}
 
-		ask, err := s.client.GetAsk(ctx, info)
-		if err != nil {
-			fmt.Println("error", err)
-			continue
-		}
+			mi, err := s.fAPI.StateMinerInfo(ctx, a, fil.EmptyTSK)
+			if err != nil {
+				continue
+			}
+			// PeerId is often nil which causes panics down the road
+			if mi.PeerId == nil {
+				continue
+			}
+			info := NewStorageProviderInfo(a, mi.Worker, mi.SectorSize, *mi.PeerId, mi.Multiaddrs)
 
-		if fil.NewInt(msp.MaxPrice).LessThan(ask.Price) {
-			continue
-		}
+			ai := peer.AddrInfo{
+				ID:    info.PeerID,
+				Addrs: info.Addrs,
+			}
+			// We need to connect directly with the peer to ping them
+			err = s.host.Connect(ctx, ai)
+			if err != nil {
+				continue
+			}
 
-		// Check miners can fit our piece
-		if msp.PieceSize > uint64(ask.MaxPieceSize) ||
-			msp.PieceSize < uint64(ask.MinPieceSize) {
-			continue
-		}
+			ask, err := s.client.GetAsk(ctx, info)
+			if err != nil {
+				continue
+			}
 
-		sel = append(sel, Miner{
-			Ask:                 ask,
-			Info:                &info,
-			WindowPoStProofType: mi.WindowPoStProofType,
-		})
+			// Any miner requesting more than our price ceiling is ignored
+			if fil.NewInt(msp.MaxPrice).LessThan(ask.Price) {
+				continue
+			}
+
+			sel = append(sel, Miner{
+				Ask:                 ask,
+				Info:                &info,
+				WindowPoStProofType: mi.WindowPoStProofType,
+			})
+			if len(sel) == msp.RF {
+				return sel, nil
+			}
+		}
+		// total - (offset + result)
+		// This is all the results we can find
+		if result.Pagination.Total-(result.Pagination.Offset+result.Pagination.Limit) == 0 {
+			return sel, nil
+		}
+		offset += limit
 	}
-	// Sort by latency
-	sort.Slice(sel, func(i, j int) bool {
-		return lats[sel[i].Info.Address] < lats[sel[j].Info.Address]
-	})
 	return sel, nil
 }
 
@@ -313,6 +313,7 @@ func (s *Storage) StartDeal(ctx context.Context, params StartDealParams) (*cid.C
 		return nil, fmt.Errorf("failed to get seal proof type: %w", err)
 	}
 
+	fmt.Println("ProposeStorageDeal")
 	result, err := s.client.ProposeStorageDeal(ctx, storagemarket.ProposeStorageDealParams{
 		Addr:          params.Wallet,
 		Info:          params.Miner.Info,
@@ -340,20 +341,24 @@ type QuoteParams struct {
 	Duration  time.Duration
 	RF        int
 	MaxPrice  uint64
+	Region    string
+	Verified  bool
 }
 
 // Quote is an estimate of who can store given content and for how much
+// It also returns the minimum size of the piece all those miners can store
 type Quote struct {
-	Miners []Miner
-	Prices map[address.Address]fil.FIL
+	Miners       []Miner
+	Prices       map[address.Address]fil.FIL
+	MinPieceSize uint64
 }
 
 // GetMarketQuote returns the costs of storing for a given CID and duration
 func (s *Storage) GetMarketQuote(ctx context.Context, params QuoteParams) (*Quote, error) {
 	miners, err := s.LoadMiners(ctx, MinerSelectionParams{
-		PieceSize: params.PieceSize,
-		RF:        params.RF,
-		MaxPrice:  params.MaxPrice,
+		RF:       params.RF,
+		MaxPrice: params.MaxPrice,
+		Region:   params.Region,
 	})
 	if err != nil {
 		return nil, err
@@ -368,15 +373,24 @@ func (s *Storage) GetMarketQuote(ctx context.Context, params QuoteParams) (*Quot
 
 	prices := make(map[address.Address]fil.FIL)
 
+	// The highest min piece size
+	var minPieceSize uint64
 	for _, m := range miners {
 		p := m.Ask.Price
+		if params.Verified {
+			p = m.Ask.VerifiedPrice
+		}
+		if uint64(m.Ask.MinPieceSize) > minPieceSize {
+			minPieceSize = uint64(m.Ask.MinPieceSize)
+		}
 		epochPrice := fil.BigDiv(fil.BigMul(p, fil.NewInt(params.PieceSize)), gib)
 		prices[m.Info.Address] = fil.FIL(fil.BigMul(epochPrice, fil.NewInt(uint64(epochs))))
 	}
 
 	return &Quote{
-		Miners: miners,
-		Prices: prices,
+		Miners:       miners,
+		Prices:       prices,
+		MinPieceSize: minPieceSize,
 	}, nil
 }
 
@@ -386,10 +400,11 @@ type Params struct {
 	Duration time.Duration
 	Address  address.Address
 	Miners   []Miner
+	Verified bool
 }
 
 // NewParams creates a new Params struct for storage
-func NewParams(root cid.Cid, dur time.Duration, w address.Address, mnrs []Miner) Params {
+func NewParams(root cid.Cid, dur time.Duration, w address.Address, mnrs []Miner, verified bool) Params {
 	return Params{
 		Payload: &storagemarket.DataRef{
 			TransferType: storagemarket.TTGraphsync,
@@ -398,6 +413,7 @@ func NewParams(root cid.Cid, dur time.Duration, w address.Address, mnrs []Miner)
 		Duration: dur,
 		Address:  w,
 		Miners:   mnrs,
+		Verified: verified,
 	}
 }
 
@@ -425,7 +441,7 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 			MinBlocksDuration: uint64(epochs),
 			DealStartEpoch:    -1,
 			FastRetrieval:     false,
-			VerifiedDeal:      false,
+			VerifiedDeal:      p.Verified,
 		})
 		if err != nil {
 			return nil, err

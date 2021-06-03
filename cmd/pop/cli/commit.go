@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v2/ffcli"
@@ -21,6 +22,7 @@ var commArgs struct {
 	storageRF int
 	duration  time.Duration
 	maxPrice  uint64
+	verified  bool
 }
 
 var commCmd = &ffcli.Command{
@@ -42,6 +44,7 @@ with a given level of cashing. By default it will attempt multiple storage deals
 		fs.BoolVar(&commArgs.cacheOnly, "cache-only", false, "only dispatch content for caching")
 		// MaxStoragePrice is our price ceiling to filter out bad storage miners who charge too much
 		fs.Uint64Var(&commArgs.maxPrice, "max-storage-price", uint64(20_000_000_000), "maximum price per byte our node is willing to pay for storage")
+		fs.BoolVar(&commArgs.verified, "verified", false, "verified deals should be cheaper but require a data cap associated with the client address used")
 		return fs
 	})(),
 }
@@ -63,24 +66,14 @@ func runCommit(ctx context.Context, args []string) error {
 	})
 	go receive(ctx, cc, c)
 
-	var miners map[string]bool
-	var err error
-
-	// When only pushing content to caches we don't ask for a quote
-	if !commArgs.cacheOnly {
-		miners, err = runQuote(ctx, c, cc, ref)
-		if err != nil {
-			return err
-		}
-	}
-
 	cc.Commit(&node.CommArgs{
 		Ref:       ref,
 		CacheOnly: commArgs.cacheOnly,
 		CacheRF:   commArgs.cacheRF,
 		StorageRF: commArgs.storageRF,
 		Duration:  commArgs.duration,
-		Miners:    miners,
+		MaxPrice:  commArgs.maxPrice,
+		Verified:  commArgs.verified,
 	})
 	received := 0
 	for {
@@ -88,6 +81,10 @@ func runCommit(ctx context.Context, args []string) error {
 		case cr := <-crc:
 			if cr.Err != "" {
 				return errors.New(cr.Err)
+			}
+			if cr.Capacity > 0 {
+				fmt.Printf("%s left before batch can be stored\n", filecoin.SizeStr(filecoin.NewInt(cr.Capacity)))
+				return nil
 			}
 			if len(cr.Miners) > 0 {
 				fmt.Printf("Started storage deals with %s\n", cr.Miners)
@@ -110,6 +107,7 @@ func runCommit(ctx context.Context, args []string) error {
 	}
 }
 
+// TODO: use a separate quote command if getting a quote is useful
 func runQuote(ctx context.Context, c net.Conn, cc *node.CommandClient, ref string) (map[string]bool, error) {
 	qrc := make(chan *node.QuoteResult, 1)
 	cc.SetNotifyCallback(func(n node.Notify) {

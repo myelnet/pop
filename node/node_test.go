@@ -236,6 +236,8 @@ func TestQuote(t *testing.T) {
 	mn := mocknet.New(ctx)
 
 	cn := newTestNode(ctx, mn, t)
+	require.NoError(t, cn.loadPieceHAMT())
+
 	m1 := getAddr()
 	p1, _ := filecoin.ParseFIL("0.001")
 	m2 := getAddr()
@@ -264,9 +266,6 @@ func TestQuote(t *testing.T) {
 	}
 	cn.rs = rs
 
-	require.NoError(t, mn.LinkAll())
-	require.NoError(t, mn.ConnectAllButSelf())
-
 	dir := t.TempDir()
 
 	data := make([]byte, 256000)
@@ -275,7 +274,7 @@ func TestQuote(t *testing.T) {
 	err := os.WriteFile(p, data, 0666)
 	require.NoError(t, err)
 
-	added := make(chan string, 1)
+	added := make(chan string, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
 
@@ -287,19 +286,32 @@ func TestQuote(t *testing.T) {
 	})
 	<-added
 
-	quoted := make(chan struct{}, 1)
+	data = make([]byte, 256000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
+	p = filepath.Join(dir, "data2")
+	err = os.WriteFile(p, data, 0666)
+	require.NoError(t, err)
+
+	cn.Put(ctx, &PutArgs{
+		Path:      p,
+		ChunkSize: 1024,
+	})
+	<-added
+
+	quoted := make(chan QuoteResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, "", n.QuoteResult.Err)
 		require.Equal(t, 2, len(n.QuoteResult.Quotes))
-		quoted <- struct{}{}
+		quoted <- *n.QuoteResult
 	}
 	cn.Quote(ctx, &QuoteArgs{
 		Duration:  24 * time.Hour * time.Duration(180),
 		StorageRF: 6,
 		MaxPrice:  uint64(20000000000),
 	})
-	<-quoted
-	require.Equal(t, rs.quote, cn.sQuote)
+	quote := <-quoted
+	// Piece size should be deterministic
+	require.Equal(t, uint64(1048576), quote.PieceSize)
 }
 
 func TestCommit(t *testing.T) {
