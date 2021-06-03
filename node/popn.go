@@ -641,7 +641,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	// Check our supply if we may already have it
 	tx := nd.exch.Tx(ctx, exchange.WithRoot(c))
-	local := tx.IsLocal()
+	local := tx.IsLocal(args.Key)
 	if local && args.Out != "" {
 		f, err := tx.GetFile(args.Key)
 		if err != nil {

@@ -418,13 +418,13 @@ func (tx *Tx) GetFile(k string) (files.Node, error) {
 }
 
 // IsLocal tells us if this node is storing the content of this transaction or if it needs to retrieve it
-func (tx *Tx) IsLocal() bool {
+func (tx *Tx) IsLocal(key string) bool {
 	// We have entries this means the content from this root is stored locally
 	if len(tx.entries) > 0 {
 		return true
 	}
-	if _, err := tx.index.GetRef(tx.root); err != nil {
-		return false
+	if ref, err := tx.index.GetRef(tx.root); err != nil && ref != nil {
+		return ref.Has(key)
 	}
 	return true
 }

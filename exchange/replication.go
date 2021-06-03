@@ -347,11 +347,19 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// Create a new store to receive our new blocks
 		// It will be automatically picked up in the TransportConfigurer
 		storeID := r.idx.ms.Next()
-		err = r.idx.SetRef(&DataRef{
+
+		ref := &DataRef{
 			PayloadCID:  req.PayloadCID,
 			PayloadSize: int64(req.Size),
 			StoreID:     storeID,
-		})
+			Keys:        make(map[string]bool),
+		}
+
+		//for key := range tx.entries {
+		//	ref.Keys[key] = true
+		//}
+
+		err = r.idx.SetRef(ref)
 		if err != nil {
 			return
 		}
