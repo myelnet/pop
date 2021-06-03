@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -354,24 +355,31 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 	if nd.tx == nil {
 		nd.tx = nd.exch.Tx(ctx)
 	}
-	nd.tx.SetChunkSize(int64(args.ChunkSize))
-	err := nd.tx.PutFile(args.Path)
+
+	file, err := os.Open(args.Path)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	status, err := nd.tx.Status()
+
+	froot, err := nd.Add(ctx, nd.tx.Store().DAG, file)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	froot := status[exchange.KeyFromPath(args.Path)].Value
-	// We could get the size from the index entry but DAGStat gives more feedback into
-	// how the file actually got chunked
+
 	stats, err := utils.Stat(ctx, nd.tx.Store(), froot, sel.All())
 	if err != nil {
 		log.Error().Err(err).Msg("record not found")
 	}
+
+	fname := exchange.KeyFromPath(args.Path)
+	err = nd.tx.Put(fname, froot, int64(stats.Size))
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
 	nd.send(Notify{
 		PutResult: &PutResult{
 			Cid:       froot.String(),

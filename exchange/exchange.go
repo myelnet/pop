@@ -172,7 +172,6 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		retriever:  cl,
 		index:      e.idx,
 		repl:       e.rpl,
-		chunkSize:  256000,
 		cacheRF:    6,
 		clientAddr: e.w.DefaultAddress(),
 		sel:        selectors.All(),
