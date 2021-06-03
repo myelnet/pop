@@ -3,7 +3,6 @@ package exchange
 import (
 	"context"
 	"fmt"
-	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"io"
 	"io/ioutil"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/ipfs/go-path"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/internal/utils"

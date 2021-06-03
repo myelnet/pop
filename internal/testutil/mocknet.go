@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	mh "github.com/multiformats/go-multihash"
 	"io"
 	"math/rand"
 	"os"
@@ -43,6 +42,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/stretchr/testify/require"
 )
 
