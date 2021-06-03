@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
@@ -15,13 +14,9 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	cid "github.com/ipfs/go-cid"
-	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
-	"github.com/ipfs/go-merkledag"
 	unixfile "github.com/ipfs/go-unixfs/file"
-	"github.com/ipfs/go-unixfs/importer/balanced"
-	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
@@ -138,30 +133,10 @@ func WithTriage() TxOption {
 	}
 }
 
-// SetChunkSize allows changing the chunk size between put operation so different chunk sizes
-// can be applied for different types of content in the same transaction
-func (tx *Tx) SetChunkSize(size int64) {
-	tx.chunkSize = size
-}
-
 // SetCacheRF sets the cache replication factor before committing
 // we don't set it as an option as the value may only be known when committing
 func (tx *Tx) SetCacheRF(rf int) {
 	tx.cacheRF = rf
-}
-
-// PutFile adds or replaces a file into the transaction
-// it is _not_ thread safe
-// @TODO: deprecate this in favor of Put
-func (tx *Tx) PutFile(path string) error {
-	if tx.Err != nil {
-		return tx.Err
-	}
-	err := tx.add(path)
-	if err != nil {
-		return err
-	}
-	return tx.buildRoot()
 }
 
 // Put a DAG for a given key in the transaction
@@ -172,74 +147,6 @@ func (tx *Tx) Put(key string, value cid.Cid, size int64) error {
 		Size:  size,
 	}
 	return tx.buildRoot()
-}
-
-func (tx *Tx) add(path string) error {
-	st, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	file, err := files.NewSerialFile(path, false, st)
-	if err != nil {
-		return err
-	}
-	key := KeyFromPath(path)
-
-	switch f := file.(type) {
-	case files.Directory:
-		return tx.addDir(key, f)
-	case files.File:
-		return tx.addFile(key, f)
-	default:
-		return fmt.Errorf("unknown file type")
-	}
-}
-
-func (tx *Tx) addFile(key string, f files.File) error {
-	bufferedDS := ipldformat.NewBufferedDAG(tx.ctx, tx.store.DAG)
-
-	prefix, err := merkledag.PrefixForCidVersion(1)
-	if err != nil {
-		return err
-	}
-	prefix.MhType = DefaultHashFunction
-
-	params := helpers.DagBuilderParams{
-		Maxlinks:   1024,
-		RawLeaves:  true,
-		CidBuilder: prefix,
-		Dagserv:    bufferedDS,
-	}
-
-	db, err := params.New(chunk.NewSizeSplitter(f, tx.chunkSize))
-	if err != nil {
-		return err
-	}
-
-	n, err := balanced.Layout(db)
-	if err != nil {
-		return err
-	}
-
-	err = bufferedDS.Commit()
-	if err != nil {
-		return err
-	}
-
-	e := Entry{}
-	e.Key = key
-	e.Value = n.Cid()
-	e.Size, err = f.Size()
-	if err != nil {
-		return err
-	}
-	tx.entries[key] = e
-
-	return nil
-}
-
-func (tx *Tx) addDir(key string, dir files.Directory) error {
-	return fmt.Errorf("TODO")
 }
 
 // Status represents our staged values

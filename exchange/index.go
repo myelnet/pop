@@ -43,7 +43,7 @@ type Index struct {
 	root   *hamt.Node
 	bstore blockstore.Blockstore
 	store  cbor.IpldStore
-	// Upper bound is the store usage amount afyer which we start evicting refs from the store
+	// Upper bound is the store usage amount after which we start evicting refs from the store
 	ub uint64
 	// Lower bound is the size we target when evicting to make room for new content
 	// the interval between ub and lb is to try not evicting after every write once we reach ub
@@ -122,7 +122,7 @@ func NewIndex(ds datastore.Batching, ms *multistore.MultiStore, opts ...IndexOpt
 		return nil, err
 	}
 
-	// // Loads the ref frequencies in a doubly linked list for faster access
+	// Loads the ref frequencies in a doubly linked list for faster access
 	err := idx.root.ForEach(context.TODO(), func(k string, val *cbg.Deferred) error {
 		v := new(DataRef)
 		if err := v.UnmarshalCBOR(bytes.NewReader(val.Raw)); err != nil {
@@ -191,7 +191,7 @@ func (idx *Index) loadFromStore() error {
 	return nil
 }
 
-// LoadRoot loads a new HAMT root not from a given CID, it can be used to load a node
+// LoadRoot loads a new HAMT root node from a given CID, it can be used to load a node
 // from a different root than the current one for example
 func (idx *Index) LoadRoot(r cid.Cid, store cbor.IpldStore) (*hamt.Node, error) {
 	return hamt.LoadNode(context.TODO(), store, r, hamt.UseTreeBitWidth(5), hashOption)

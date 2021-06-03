@@ -42,6 +42,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/stretchr/testify/require"
 )
 
@@ -188,17 +189,19 @@ func (tn *TestNode) ThisDir(t testing.TB, p string) string {
 	return fpath
 }
 
-func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t testing.TB, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
-	stID := tn.Ms.Next()
-	store, err := tn.Ms.Get(stID)
-	require.NoError(t, err)
-
-	f, err := os.Open(dirPath)
+func (tn *TestNode) LoadFileToStore(ctx context.Context, t testing.TB, store *multistore.Store, path string) (ipld.Link, []byte) {
+	f, err := os.Open(path)
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
 	tr := io.TeeReader(f, &buf)
 	file := files.NewReaderFile(tr)
+
+	prefix, err := merkledag.PrefixForCidVersion(1)
+	if err != nil {
+		require.NoError(t, err)
+	}
+	prefix.MhType = uint64(mh.BLAKE2B_MIN + 31)
 
 	// import to UnixFS
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, store.DAG)
@@ -206,7 +209,7 @@ func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t testing.TB, dirPat
 	params := helpers.DagBuilderParams{
 		Maxlinks:   unixfsLinksPerLevel,
 		RawLeaves:  true,
-		CidBuilder: nil,
+		CidBuilder: prefix,
 		Dagserv:    bufferedDS,
 	}
 
@@ -220,11 +223,19 @@ func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t testing.TB, dirPat
 	require.NoError(t, err)
 
 	// save the original files bytes
-	return cidlink.Link{Cid: nd.Cid()}, stID, buf.Bytes()
+	return cidlink.Link{Cid: nd.Cid()}, buf.Bytes()
+}
+
+func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t testing.TB, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
+	storeID := tn.Ms.Next()
+	store, err := tn.Ms.Get(storeID)
+	require.NoError(t, err)
+
+	link, b := tn.LoadFileToStore(ctx, t, store, dirPath)
+	return link, storeID, b
 }
 
 func (tn *TestNode) VerifyFileTransferred(ctx context.Context, t testing.TB, dag ipldformat.DAGService, link cid.Cid, origBytes []byte) {
-
 	n, err := dag.Get(ctx, link)
 	require.NoError(t, err)
 
