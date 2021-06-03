@@ -370,7 +370,11 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 					fname := nodes[i].CreateRandomFile(t, 128000)
 
 					ptx := exchs[i].Tx(ctx)
-					require.NoError(t, ptx.PutFile(fname))
+
+					link, bytes := nodes[i].LoadFileToStore(ctx, t, ptx.Store(), fname)
+					rootCid := link.(cidlink.Link).Cid
+					require.NoError(t, ptx.Put(KeyFromPath(fname), rootCid, int64(len(bytes))))
+
 					ptx.SetCacheRF(1)
 					require.NoError(t, ptx.Commit())
 					ptx.WatchDispatch(func(rec PRecord) {
