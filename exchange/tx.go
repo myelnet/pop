@@ -269,11 +269,17 @@ func (tx *Tx) buildRoot() error {
 
 // Ref returns the DataRef associated with this transaction
 func (tx *Tx) Ref() *DataRef {
-	return &DataRef{
+	ref := &DataRef{
 		PayloadCID:  tx.root,
 		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
 	}
+
+	for key := range tx.entries {
+		ref.Keys = append(ref.Keys, []byte(key))
+	}
+
+	return ref
 }
 
 // Commit sends the transaction on the exchange
@@ -281,14 +287,27 @@ func (tx *Tx) Commit() error {
 	if tx.Err != nil {
 		return tx.Err
 	}
-	err := tx.index.SetRef(&DataRef{
+
+	ref := &DataRef{
 		PayloadCID:  tx.root,
 		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
-	})
+	}
+
+	entries, err := tx.GetEntries()
 	if err != nil {
 		return err
 	}
+
+	for _, key := range entries {
+		ref.Keys = append(ref.Keys, []byte(key))
+	}
+
+	err = tx.index.SetRef(ref)
+	if err != nil {
+		return err
+	}
+
 	opts := DefaultDispatchOptions
 	if tx.cacheRF > 0 {
 		opts.RF = tx.cacheRF
@@ -355,7 +374,9 @@ func (tx *Tx) GetEntries() ([]string, error) {
 		}
 		return entries, nil
 	}
-	if ref, err := tx.index.GetRef(tx.root); err == nil {
+
+	ref, err := tx.index.GetRef(tx.root)
+	if err == nil {
 		store, err := tx.ms.Get(ref.StoreID)
 		if err != nil {
 			return nil, err

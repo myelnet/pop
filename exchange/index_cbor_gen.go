@@ -22,7 +22,7 @@ func (t *DataRef) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{165}); err != nil {
+	if _, err := w.Write([]byte{166}); err != nil {
 		return err
 	}
 
@@ -80,6 +80,39 @@ func (t *DataRef) MarshalCBOR(w io.Writer) error {
 
 	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.StoreID)); err != nil {
 		return err
+	}
+
+	// t.Keys ([][]uint8) (slice)
+	if len("Keys") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"Keys\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("Keys"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("Keys")); err != nil {
+		return err
+	}
+
+	if len(t.Keys) > cbg.MaxLength {
+		return xerrors.Errorf("Slice value in field t.Keys was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(t.Keys))); err != nil {
+		return err
+	}
+	for _, v := range t.Keys {
+		if len(v) > cbg.ByteArrayMaxLen {
+			return xerrors.Errorf("Byte array in field v was too long")
+		}
+
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(v))); err != nil {
+			return err
+		}
+
+		if _, err := w.Write(v[:]); err != nil {
+			return err
+		}
 	}
 
 	// t.Freq (int64) (int64)
@@ -215,6 +248,54 @@ func (t *DataRef) UnmarshalCBOR(r io.Reader) error {
 				t.StoreID = multistore.StoreID(extra)
 
 			}
+			// t.Keys ([][]uint8) (slice)
+		case "Keys":
+
+			maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+			if err != nil {
+				return err
+			}
+
+			if extra > cbg.MaxLength {
+				return fmt.Errorf("t.Keys: array too large (%d)", extra)
+			}
+
+			if maj != cbg.MajArray {
+				return fmt.Errorf("expected cbor array")
+			}
+
+			if extra > 0 {
+				t.Keys = make([][]uint8, extra)
+			}
+
+			for i := 0; i < int(extra); i++ {
+				{
+					var maj byte
+					var extra uint64
+					var err error
+
+					maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+					if err != nil {
+						return err
+					}
+
+					if extra > cbg.ByteArrayMaxLen {
+						return fmt.Errorf("t.Keys[i]: byte array too large (%d)", extra)
+					}
+					if maj != cbg.MajByteString {
+						return fmt.Errorf("expected byte array")
+					}
+
+					if extra > 0 {
+						t.Keys[i] = make([]uint8, extra)
+					}
+
+					if _, err := io.ReadFull(br, t.Keys[i][:]); err != nil {
+						return err
+					}
+				}
+			}
+
 			// t.Freq (int64) (int64)
 		case "Freq":
 			{

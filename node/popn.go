@@ -760,12 +760,19 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 				return err
 			}
 		}
+
 		// Register new blocks in our supply by default
-		err = nd.exch.Index().SetRef(&exchange.DataRef{
+		ref := &exchange.DataRef{
 			PayloadCID:  c,
 			StoreID:     tx.StoreID(),
 			PayloadSize: int64(res.Size),
-		})
+			Keys:        [][]byte{},
+		}
+		if args.Key != "" {
+			ref.Keys = append(ref.Keys, []byte(args.Key))
+		}
+
+		err = nd.exch.Index().SetRef(ref)
 		if err != nil {
 			return err
 		}

@@ -213,11 +213,11 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			PayloadCID:  root,
 			StoreID:     tx.StoreID(),
 			PayloadSize: int64(res.Size),
-			Keys:        make(map[string]bool),
+			Keys:        [][]byte{},
 		}
 
 		for key := range tx.entries {
-			ref.Keys[key] = true
+			ref.Keys = append(ref.Keys, []byte(key))
 		}
 
 		return e.idx.SetRef(ref)

@@ -352,7 +352,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 			PayloadCID:  req.PayloadCID,
 			PayloadSize: int64(req.Size),
 			StoreID:     storeID,
-			Keys:        make(map[string]bool),
+			Keys:        [][]byte{},
 		}
 
 		//for key := range tx.entries {
