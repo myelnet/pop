@@ -311,7 +311,7 @@ func TestQuote(t *testing.T) {
 	})
 	quote := <-quoted
 	// Piece size should be deterministic
-	require.Equal(t, uint64(1048576), quote.PieceSize)
+	require.Equal(t, uint64(524288), quote.PieceSize)
 }
 
 func TestCommit(t *testing.T) {
