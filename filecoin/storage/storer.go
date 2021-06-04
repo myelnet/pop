@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
+	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-fil-markets/shared"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	"github.com/filecoin-project/go-fil-markets/storagemarket/impl/requestvalidation"
 	"github.com/filecoin-project/go-fil-markets/storagemarket/network"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -25,6 +27,7 @@ import (
 	"github.com/multiformats/go-multibase"
 	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
 )
 
@@ -93,6 +96,7 @@ type MinerFinder interface {
 type Storage struct {
 	host    host.Host
 	net     network.StorageMarketNetwork
+	dt      datatransfer.Manager
 	adapter *Adapter
 	fAPI    fil.API
 	mf      MinerFinder
@@ -119,6 +123,7 @@ func New(
 		adapter: ad,
 		mf:      NewFilRep(),
 		fAPI:    api,
+		dt:      dt,
 	}, nil
 }
 
@@ -284,17 +289,17 @@ type StartDealParams struct {
 }
 
 // ProposeDeal starts a new storage deal with a Filecoin storage miner
-func (s *Storage) ProposeDeal(ctx context.Context, params StartDealParams) (*network.SignedResponse, error) {
+func (s *Storage) ProposeDeal(ctx context.Context, params StartDealParams) (*market.DealProposal, *network.SignedResponse, error) {
 	md, err := s.fAPI.StateMinerProvingDeadline(ctx, params.Miner.Info.Address, fil.EmptyTSK)
 	if err != nil {
-		return nil, fmt.Errorf("failed getting miner's deadline info: %w", err)
+		return nil, nil, fmt.Errorf("failed getting miner's deadline info: %w", err)
 	}
 
 	dealStart := params.DealStartEpoch
 	if dealStart <= 0 { // unset, or explicitly 'epoch undefine'
 		ts, err := s.fAPI.ChainHead(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed getting chain height: %w", err)
+			return nil, nil, fmt.Errorf("failed getting chain height: %w", err)
 		}
 
 		blocksPerHour := 60 * 60 / BlockDelaySecs
@@ -303,12 +308,12 @@ func (s *Storage) ProposeDeal(ctx context.Context, params StartDealParams) (*net
 
 	pcMin, _, err := s.adapter.DealProviderCollateralBounds(ctx, params.Data.PieceSize.Padded(), params.VerifiedDeal)
 	if err != nil {
-		return nil, fmt.Errorf("computing deal provider collateral bound failed: %w", err)
+		return nil, nil, fmt.Errorf("computing deal provider collateral bound failed: %w", err)
 	}
 
 	label, err := params.Data.Root.StringOfBase(multibase.Base64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to print label: %w", err)
+		return nil, nil, fmt.Errorf("failed to print label: %w", err)
 	}
 	dealProposal := market.DealProposal{
 		PieceCID:             *params.Data.PieceCid,
@@ -326,12 +331,12 @@ func (s *Storage) ProposeDeal(ctx context.Context, params StartDealParams) (*net
 
 	signedProposal, err := s.adapter.SignProposal(ctx, params.Wallet, dealProposal)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign proposal: %w", err)
+		return nil, nil, fmt.Errorf("failed to sign proposal: %w", err)
 	}
 
 	dealStream, err := s.net.NewDealStream(ctx, params.Miner.Info.PeerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open deal stream: %w", err)
+		return nil, nil, fmt.Errorf("failed to open deal stream: %w", err)
 	}
 
 	if err := dealStream.WriteDealProposal(network.Proposal{
@@ -339,14 +344,14 @@ func (s *Storage) ProposeDeal(ctx context.Context, params StartDealParams) (*net
 		DealProposal:  signedProposal,
 		Piece:         params.Data,
 	}); err != nil {
-		return nil, fmt.Errorf("failed to send deal proposal: %w", err)
+		return nil, nil, fmt.Errorf("failed to send deal proposal: %w", err)
 	}
 
 	res, _, err := dealStream.ReadDealResponse()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read proposal response: %w", err)
+		return nil, nil, fmt.Errorf("failed to read proposal response: %w", err)
 	}
-	return &res, nil
+	return &dealProposal, &res, nil
 }
 
 // QuoteParams is the params to calculate the storage quote with.
@@ -445,9 +450,8 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		ma = append(ma, m.Info.Address)
 	}
 	epochs := calcEpochs(p.Duration)
-	var responses []*network.SignedResponse
 	for _, m := range p.Miners {
-		resp, err := s.ProposeDeal(ctx, StartDealParams{
+		prop, resp, err := s.ProposeDeal(ctx, StartDealParams{
 			Data:              p.Payload,
 			Wallet:            p.Address,
 			Miner:             m,
@@ -467,7 +471,32 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 			fmt.Println("ProposalRejected", m.Info.Address, resp.Response.Message)
 		case storagemarket.StorageDealWaitingForData, storagemarket.StorageDealProposalAccepted:
 			fmt.Println("ProposalAccepted")
-			responses = append(responses, resp)
+
+			msgcid, err := s.adapter.AddFunds(ctx, m.Info.Address, prop.ClientBalanceRequirement())
+			if err != nil {
+				fmt.Println("failed to add funds", err)
+				continue
+			}
+			_, err = s.fAPI.StateWaitMsg(ctx, msgcid, uint64(5))
+			if err != nil {
+				fmt.Println("failed to confirm message on chain", err)
+				continue
+			}
+
+			nd, err := cborutil.AsIpld(prop)
+			if err != nil {
+				fmt.Println("failed to encode proposal as ipld node", err)
+				continue
+			}
+
+			voucher := requestvalidation.StorageDataTransferVoucher{Proposal: nd.Cid()}
+
+			_, err = s.dt.OpenPushDataChannel(ctx, m.Info.PeerID, &voucher, p.Payload.Root, selectors.All())
+			if err != nil {
+				fmt.Println("failed to open push data transfer for miner", m.Info.Address)
+				continue
+			}
+			// TODO: handle events
 		}
 	}
 
