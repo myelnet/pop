@@ -9,21 +9,20 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	discoveryimpl "github.com/filecoin-project/go-fil-markets/discovery/impl"
+	"github.com/filecoin-project/go-fil-markets/shared"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
-	storageimpl "github.com/filecoin-project/go-fil-markets/storagemarket/impl"
-	smnet "github.com/filecoin-project/go-fil-markets/storagemarket/network"
+	"github.com/filecoin-project/go-fil-markets/storagemarket/network"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin/market"
 	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multibase"
 	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
@@ -93,70 +92,34 @@ type MinerFinder interface {
 // Storage is a minimal system for creating basic storage deals on Filecoin
 type Storage struct {
 	host    host.Host
-	client  storagemarket.StorageClient
+	net     network.StorageMarketNetwork
 	adapter *Adapter
-	fundmgr *FundManager
 	fAPI    fil.API
-	disc    *discoveryimpl.Local
-	sg      StoreIDGetter
 	mf      MinerFinder
 }
 
 // New creates a new storage client instance
 func New(
 	h host.Host,
-	bs blockstore.Blockstore,
-	ms *multistore.MultiStore,
-	ds datastore.Batching,
 	dt datatransfer.Manager,
 	w wallet.Driver,
 	api fil.API,
-	sg StoreIDGetter,
 ) (*Storage, error) {
-	fundmgr := NewFundManager(ds, api, w)
 	ad := &Adapter{
-		fAPI:    api,
-		wallet:  w,
-		fundmgr: fundmgr,
+		fAPI:   api,
+		wallet: w,
 	}
 
-	marketsRetryParams := smnet.RetryParameters(time.Second, 5*time.Minute, 15, 5)
-	net := smnet.NewFromLibp2pHost(h, marketsRetryParams)
-
-	disc, err := discoveryimpl.NewLocal(ds)
-	if err != nil {
-		return nil, err
-	}
-
-	c, err := storageimpl.NewClient(net, bs, ms, dt, disc, ds, ad, storageimpl.DealPollingInterval(time.Second))
-	if err != nil {
-		return nil, err
-	}
+	marketsRetryParams := network.RetryParameters(time.Second, 5*time.Minute, 15, 5)
+	net := network.NewFromLibp2pHost(h, marketsRetryParams)
 
 	return &Storage{
 		host:    h,
-		client:  c,
+		net:     net,
 		adapter: ad,
-		fundmgr: fundmgr,
-		sg:      sg,
 		mf:      NewFilRep(),
 		fAPI:    api,
-		disc:    disc,
 	}, nil
-}
-
-// Start is required to launch the fund manager and storage client before making new deals
-func (s *Storage) Start(ctx context.Context) error {
-	// start discovery ds migrations
-	if err := s.disc.Start(ctx); err != nil {
-		return err
-	}
-
-	err := s.fundmgr.Start()
-	if err != nil {
-		return err
-	}
-	return s.client.Start(ctx)
 }
 
 // PeerInfo resolves a Filecoin address to find the peer info and add to our address book
@@ -198,6 +161,41 @@ type MinerSelectionParams struct {
 	MaxPrice uint64
 	RF       int
 	Region   string
+}
+
+// GetAsk requests and verifies a signed ask from a given miner
+func (s *Storage) GetAsk(ctx context.Context, info storagemarket.StorageProviderInfo) (*storagemarket.StorageAsk, error) {
+	as, err := s.net.NewAskStream(ctx, info.PeerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open ask stream: %w", err)
+	}
+	request := network.AskRequest{Miner: info.Address}
+	if err := as.WriteAskRequest(request); err != nil {
+		return nil, fmt.Errorf("failed to send ask request: %w", err)
+	}
+
+	out, origBytes, err := as.ReadAskResponse()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ask response: %w", err)
+	}
+
+	if out.Ask == nil {
+		return nil, fmt.Errorf("no ask in response")
+	}
+
+	if out.Ask.Ask.Miner != info.Address {
+		return nil, fmt.Errorf("wrong ask for miner")
+	}
+
+	valid, err := s.adapter.VerifySignature(ctx, *out.Ask.Signature, info.Worker, origBytes, shared.TipSetToken{})
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
+		return nil, fmt.Errorf("miner signature invalid")
+	}
+
+	return out.Ask.Ask, nil
 }
 
 // LoadMiners selects a set of miners to queue storage deals with
@@ -244,7 +242,7 @@ func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]M
 				continue
 			}
 
-			ask, err := s.client.GetAsk(ctx, info)
+			ask, err := s.GetAsk(ctx, info)
 			if err != nil {
 				continue
 			}
@@ -275,23 +273,18 @@ func (s *Storage) LoadMiners(ctx context.Context, msp MinerSelectionParams) ([]M
 
 // StartDealParams are params configurable on the user side
 type StartDealParams struct {
-	Data               *storagemarket.DataRef
-	Wallet             address.Address
-	Miner              Miner
-	EpochPrice         fil.BigInt
-	MinBlocksDuration  uint64
-	ProviderCollateral big.Int
-	DealStartEpoch     abi.ChainEpoch
-	FastRetrieval      bool
-	VerifiedDeal       bool
+	Data              *storagemarket.DataRef
+	Wallet            address.Address
+	Miner             Miner
+	EpochPrice        fil.BigInt
+	MinBlocksDuration uint64
+	DealStartEpoch    abi.ChainEpoch
+	FastRetrieval     bool
+	VerifiedDeal      bool
 }
 
-// StartDeal starts a new storage deal with a Filecoin storage miner
-func (s *Storage) StartDeal(ctx context.Context, params StartDealParams) (*cid.Cid, error) {
-	storeID, err := s.sg.GetStoreID(params.Data.Root)
-	if err != nil {
-		return nil, err
-	}
+// ProposeDeal starts a new storage deal with a Filecoin storage miner
+func (s *Storage) ProposeDeal(ctx context.Context, params StartDealParams) (*network.SignedResponse, error) {
 	md, err := s.fAPI.StateMinerProvingDeadline(ctx, params.Miner.Info.Address, fil.EmptyTSK)
 	if err != nil {
 		return nil, fmt.Errorf("failed getting miner's deadline info: %w", err)
@@ -308,31 +301,52 @@ func (s *Storage) StartDeal(ctx context.Context, params StartDealParams) (*cid.C
 		dealStart = ts.Height() + abi.ChainEpoch(dealStartBufferHours*blocksPerHour) // TODO: Get this from storage ask
 	}
 
-	st, err := PreferredSealProofTypeFromWindowPoStType(params.Miner.WindowPoStProofType)
+	pcMin, _, err := s.adapter.DealProviderCollateralBounds(ctx, params.Data.PieceSize.Padded(), params.VerifiedDeal)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get seal proof type: %w", err)
+		return nil, fmt.Errorf("computing deal provider collateral bound failed: %w", err)
 	}
 
-	fmt.Println("ProposeStorageDeal")
-	result, err := s.client.ProposeStorageDeal(ctx, storagemarket.ProposeStorageDealParams{
-		Addr:          params.Wallet,
-		Info:          params.Miner.Info,
-		Data:          params.Data,
-		StartEpoch:    dealStart,
-		EndEpoch:      calcDealExpiration(params.MinBlocksDuration, md, dealStart),
-		Price:         params.EpochPrice,
-		Collateral:    params.ProviderCollateral,
-		Rt:            st,
-		FastRetrieval: params.FastRetrieval,
-		VerifiedDeal:  params.VerifiedDeal,
-		StoreID:       &storeID,
-	})
-
+	label, err := params.Data.Root.StringOfBase(multibase.Base64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start deal: %w", err)
+		return nil, fmt.Errorf("failed to print label: %w", err)
+	}
+	dealProposal := market.DealProposal{
+		PieceCID:             *params.Data.PieceCid,
+		PieceSize:            params.Data.PieceSize.Padded(),
+		Client:               params.Wallet,
+		Provider:             params.Miner.Info.Address,
+		Label:                label,
+		StartEpoch:           dealStart,
+		EndEpoch:             calcDealExpiration(params.MinBlocksDuration, md, dealStart),
+		StoragePricePerEpoch: params.EpochPrice,
+		ProviderCollateral:   pcMin,
+		ClientCollateral:     big.Zero(),
+		VerifiedDeal:         params.VerifiedDeal,
 	}
 
-	return &result.ProposalCid, nil
+	signedProposal, err := s.adapter.SignProposal(ctx, params.Wallet, dealProposal)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign proposal: %w", err)
+	}
+
+	dealStream, err := s.net.NewDealStream(ctx, params.Miner.Info.PeerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open deal stream: %w", err)
+	}
+
+	if err := dealStream.WriteDealProposal(network.Proposal{
+		FastRetrieval: true,
+		DealProposal:  signedProposal,
+		Piece:         params.Data,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to send deal proposal: %w", err)
+	}
+
+	res, _, err := dealStream.ReadDealResponse()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read proposal response: %w", err)
+	}
+	return &res, nil
 }
 
 // QuoteParams is the params to calculate the storage quote with.
@@ -431,9 +445,9 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		ma = append(ma, m.Info.Address)
 	}
 	epochs := calcEpochs(p.Duration)
-	var drfs []cid.Cid
+	var responses []*network.SignedResponse
 	for _, m := range p.Miners {
-		pcid, err := s.StartDeal(ctx, StartDealParams{
+		resp, err := s.ProposeDeal(ctx, StartDealParams{
 			Data:              p.Payload,
 			Wallet:            p.Address,
 			Miner:             m,
@@ -446,32 +460,20 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		if err != nil {
 			return nil, err
 		}
-		if pcid != nil {
-			drfs = append(drfs, *pcid)
+		switch resp.Response.State {
+		case storagemarket.StorageDealError:
+			fmt.Println("StorageDealError", m.Info.Address, resp.Response.Message)
+		case storagemarket.StorageDealProposalRejected:
+			fmt.Println("ProposalRejected", m.Info.Address, resp.Response.Message)
+		case storagemarket.StorageDealWaitingForData, storagemarket.StorageDealProposalAccepted:
+			fmt.Println("ProposalAccepted")
+			responses = append(responses, resp)
 		}
 	}
 
 	return &Receipt{
-		Miners:   ma,
-		DealRefs: drfs,
+		Miners: ma,
 	}, nil
-}
-
-func PreferredSealProofTypeFromWindowPoStType(proof abi.RegisteredPoStProof) (abi.RegisteredSealProof, error) {
-	switch proof {
-	case abi.RegisteredPoStProof_StackedDrgWindow2KiBV1:
-		return abi.RegisteredSealProof_StackedDrg2KiBV1_1, nil
-	case abi.RegisteredPoStProof_StackedDrgWindow8MiBV1:
-		return abi.RegisteredSealProof_StackedDrg8MiBV1_1, nil
-	case abi.RegisteredPoStProof_StackedDrgWindow512MiBV1:
-		return abi.RegisteredSealProof_StackedDrg512MiBV1_1, nil
-	case abi.RegisteredPoStProof_StackedDrgWindow32GiBV1:
-		return abi.RegisteredSealProof_StackedDrg32GiBV1_1, nil
-	case abi.RegisteredPoStProof_StackedDrgWindow64GiBV1:
-		return abi.RegisteredSealProof_StackedDrg64GiBV1_1, nil
-	default:
-		return -1, fmt.Errorf("unrecognized window post type: %d", proof)
-	}
 }
 
 func calcDealExpiration(minDuration uint64, md *dline.Info, startEpoch abi.ChainEpoch) abi.ChainEpoch {

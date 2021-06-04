@@ -21,7 +21,6 @@ import (
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
 	badgerds "github.com/ipfs/go-ds-badger"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
@@ -101,7 +100,6 @@ type Options struct {
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
 type RemoteStorer interface {
-	Start(context.Context) error
 	Store(context.Context, storage.Params) (*storage.Receipt, error)
 	GetMarketQuote(context.Context, storage.QuoteParams) (*storage.Quote, error)
 	PeerInfo(context.Context, address.Address) (*peer.AddrInfo, error)
@@ -221,18 +219,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.rs, err = storage.New(
 		nd.host,
-		nd.bs,
-		nd.ms,
-		namespace.Wrap(nd.ds, datastore.NewKey("/storage/client")),
 		nd.exch.DataTransfer(),
 		nd.exch.Wallet(),
 		nd.exch.FilecoinAPI(),
-		nd.exch,
 	)
-	if err != nil {
-		return nil, err
-	}
-	err = nd.rs.Start(ctx)
 	if err != nil {
 		return nil, err
 	}

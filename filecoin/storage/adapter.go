@@ -25,9 +25,8 @@ import (
 
 // Adapter implements the interface required by the Filecoin storage market client
 type Adapter struct {
-	fAPI    fil.API
-	wallet  wallet.Driver
-	fundmgr *FundManager
+	fAPI   fil.API
+	wallet wallet.Driver
 }
 
 // GetChainHead returns a tipset token for the current chain head
@@ -82,19 +81,7 @@ func (a *Adapter) AddFunds(ctx context.Context, addr address.Address, amount abi
 	return a.fAPI.MpoolPush(ctx, smsg)
 }
 
-// ReserveFunds reserves the given amount of funds is ensures it is available for the deal
-func (a *Adapter) ReserveFunds(ctx context.Context, wallet, addr address.Address, amt abi.TokenAmount) (cid.Cid, error) {
-	fmt.Println("ReserveFunds")
-	return a.fundmgr.Reserve(ctx, wallet, addr, amt)
-}
-
-// ReleaseFunds releases funds reserved with ReserveFunds
-func (a *Adapter) ReleaseFunds(ctx context.Context, addr address.Address, amt abi.TokenAmount) error {
-	fmt.Println("ReleaseFunds")
-	return a.fundmgr.Release(addr, amt)
-}
-
-// GetBalance returns locked/unlocked for a storage participant.  Used by both providers and clients.
+// GetBalance returns locked/unlocked for a storage participant.
 func (a *Adapter) GetBalance(ctx context.Context, addr address.Address, tok shared.TipSetToken) (sm.Balance, error) {
 	fmt.Println("GetBalance")
 	tsk, err := fil.TipSetKeyFromBytes(tok)
@@ -165,34 +152,6 @@ func (a *Adapter) DealProviderCollateralBounds(ctx context.Context, size abi.Pad
 	}
 
 	return big.Mul(bounds.Min, big.NewInt(clientOverestimation)), bounds.Max, nil
-}
-
-// OnDealSectorPreCommitted waits for a deal's sector to be pre-committed
-// TODO
-func (a *Adapter) OnDealSectorPreCommitted(ctx context.Context, provider address.Address, dealID abi.DealID, proposal market3.DealProposal, publishCid *cid.Cid, cb sm.DealSectorPreCommittedCallback) error {
-	fmt.Println("OnDealSectorPreCommitted")
-	return nil
-}
-
-// OnDealSectorCommitted waits for a deal's sector to be sealed and proved, indicating the deal is active
-// TODO
-func (a *Adapter) OnDealSectorCommitted(ctx context.Context, provider address.Address, dealID abi.DealID, sectorNumber abi.SectorNumber, proposal market3.DealProposal, publishCid *cid.Cid, cb sm.DealSectorCommittedCallback) error {
-	fmt.Println("OnDealSectorCommitted")
-	return nil
-}
-
-// OnDealExpiredOrSlashed registers callbacks to be called when the deal expires or is slashed
-// TODO
-func (a *Adapter) OnDealExpiredOrSlashed(ctx context.Context, dealID abi.DealID, onDealExpired sm.DealExpiredCallback, onDealSlashed sm.DealSlashedCallback) error {
-	fmt.Println("OnDealExpiredOrSlashed")
-	return nil
-}
-
-// ListStorageProviders returns information about known miners
-// we use our own currated list so we don't actually need it at this time
-func (a *Adapter) ListStorageProviders(ctx context.Context, tok shared.TipSetToken) ([]*sm.StorageProviderInfo, error) {
-	var out []*sm.StorageProviderInfo
-	return out, nil
 }
 
 // ValidatePublishedDeal verifies a deal is published on chain and returns the dealID
