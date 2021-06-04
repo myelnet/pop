@@ -139,9 +139,12 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 
 	// TODO: clean this up
 	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		if event.Code == datatransfer.Error && channelState.Recipient() == h.ID() {
-			// If transfers fail and we're the recipient we need to remove it from our index
-			r.idx.DropRef(channelState.BaseCID())
+		switch event.Code {
+		case datatransfer.Error:
+			if channelState.Recipient() == h.ID() {
+				// If transfers fail and we're the recipient we need to remove it from our index
+				r.idx.DropRef(channelState.BaseCID())
+			}
 		}
 	})
 
@@ -354,6 +357,8 @@ func (r *Replication) handleRequest(s network.Stream) {
 			StoreID:     storeID,
 			Keys:        [][]byte{},
 		}
+
+		r.idx.GetRef(req.PayloadCID)
 
 		//for key := range tx.entries {
 		//	ref.Keys[key] = true
