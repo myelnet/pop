@@ -46,6 +46,8 @@ type CommArgs struct {
 	StorageRF int // StorageRF if the replication factor for storage
 	Duration  time.Duration
 	Miners    map[string]bool
+	MaxPrice  uint64
+	Verified  bool
 }
 
 // GetArgs get passed to the Get command
@@ -104,17 +106,20 @@ type StatusResult struct {
 
 // QuoteResult returns the output of the Quote request
 type QuoteResult struct {
-	Ref    string
-	Quotes map[string]string
-	Err    string
+	Ref         string
+	Quotes      map[string]string
+	PayloadSize uint64
+	PieceSize   uint64
+	Err         string
 }
 
 // CommResult is feedback on the push operation
 type CommResult struct {
-	Miners []string
-	Deals  []string
-	Caches []string
-	Err    string
+	Miners   []string
+	Deals    []string
+	Caches   []string
+	Capacity uint64 // Capacity is the space left before it is possible to store on Filecoin
+	Err      string
 }
 
 // GetResult gives us feedback on the result of the Get request

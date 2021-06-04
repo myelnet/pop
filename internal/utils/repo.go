@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/filecoin-project/go-hamt-ipld/v3"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -176,3 +178,9 @@ func AddrBytesToAddrInfo(b []byte) (*peer.AddrInfo, error) {
 	}
 	return addrInfo, nil
 }
+
+// HAMTHashOption uses 256 hash to prevent collision attacks
+var HAMTHashOption = hamt.UseHashFunction(func(input []byte) []byte {
+	res := sha256.Sum256(input)
+	return res[:]
+})
