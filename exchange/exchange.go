@@ -254,29 +254,6 @@ func (e *Exchange) Index() *Index {
 	return e.idx
 }
 
-// ListMiners returns a list of miners based on the regions this exchange is part of
-// We keep a context as this could also query a remote service or API
-func (e *Exchange) ListMiners(ctx context.Context) ([]address.Address, error) {
-	var strList []string
-	for _, r := range e.opts.Regions {
-		// Global region is already a list of miners in all regions
-		if r.Name == "Global" {
-			strList = r.StorageMiners
-			break
-		}
-		strList = append(strList, r.StorageMiners...)
-	}
-	var addrList []address.Address
-	for _, s := range strList {
-		addr, err := address.NewFromString(s)
-		if err != nil {
-			return addrList, err
-		}
-		addrList = append(addrList, addr)
-	}
-	return addrList, nil
-}
-
 // GetStoreID exposes a method to get the store ID used by a given CID
 func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
 	return e.idx.GetStoreID(id)

@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bufio"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -16,25 +15,24 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-commp-utils/writer"
+	"github.com/filecoin-project/go-hamt-ipld/v3"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
 	badgerds "github.com/ipfs/go-ds-badger"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-path"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
-	"github.com/ipld/go-car"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
@@ -56,8 +54,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// KLibp2pHost is the keystore key used for storing the host private key
-const KLibp2pHost = "libp2p-host"
+// KContentBatch is the keystore used for storing the root CID of the HAMT used to aggregate content for storage
+const KContentBatch = "content-batch"
 
 // ErrFilecoinRPCOffline is returned when the node is running without a provided filecoin api endpoint + token
 var ErrFilecoinRPCOffline = errors.New("filecoin RPC is offline")
@@ -65,11 +63,8 @@ var ErrFilecoinRPCOffline = errors.New("filecoin RPC is offline")
 // ErrAllDealsFailed is returned when all storage deals failed to get started
 var ErrAllDealsFailed = errors.New("all deals failed")
 
-// ErrNoDAGForPacking is returned when no DAGs are staged in the index before packing
-var ErrNoDAGForPacking = errors.New("no DAG for packing")
-
-// ErrDAGNotPacked is returned when dags have not been packed and the node attempts to start a storage deal
-var ErrDAGNotPacked = errors.New("DAG not packed")
+// ErrNoTx is returned when no transaction is staged and we attempt to commit
+var ErrNoTx = errors.New("no tx to commit")
 
 // ErrNodeNotFound is returned when we cannot find the node in the given root
 var ErrNodeNotFound = errors.New("node not found")
@@ -105,7 +100,6 @@ type Options struct {
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
 type RemoteStorer interface {
-	Start(context.Context) error
 	Store(context.Context, storage.Params) (*storage.Receipt, error)
 	GetMarketQuote(context.Context, storage.QuoteParams) (*storage.Quote, error)
 	PeerInfo(context.Context, address.Address) (*peer.AddrInfo, error)
@@ -116,16 +110,17 @@ type node struct {
 	ds   datastore.Batching
 	bs   blockstore.Blockstore
 	ms   *multistore.MultiStore
+	is   cbor.IpldStore
 	dag  ipldformat.DAGService
 	exch *exchange.Exchange
 	rs   RemoteStorer
 
+	// root of any pending HAMT for storage. This HAMT indexes multiple transactions to
+	// be stored in a single CAR for storage.
+	pieceHAMT *hamt.Node
+
 	mu     sync.Mutex
 	notify func(Notify)
-
-	// cache the last storage quote
-	qmu    sync.Mutex
-	sQuote *storage.Quote
 
 	// keep track of an ongoing transaction
 	txmu sync.Mutex
@@ -146,10 +141,14 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	nd.bs = blockstore.NewBlockstore(nd.ds)
-
 	nd.ms, err = multistore.NewMultiDstore(nd.ds)
 	if err != nil {
+		return nil, err
+	}
+
+	nd.bs = blockstore.NewBlockstore(nd.ds)
+
+	if err := nd.loadPieceHAMT(); err != nil {
 		return nil, err
 	}
 
@@ -220,18 +219,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.rs, err = storage.New(
 		nd.host,
-		nd.bs,
-		nd.ms,
-		namespace.Wrap(nd.ds, datastore.NewKey("/storage/client")),
 		nd.exch.DataTransfer(),
 		nd.exch.Wallet(),
 		nd.exch.FilecoinAPI(),
-		nd.exch,
 	)
-	if err != nil {
-		return nil, err
-	}
-	err = nd.rs.Start(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +231,40 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	return nd, nil
 
+}
+
+// load HAMT from the datastore or create new one
+func (nd *node) loadPieceHAMT() error {
+	ms, err := nd.ms.Get(nd.ms.Next())
+	if err != nil {
+		return err
+	}
+
+	enc, err := nd.ds.Get(datastore.NewKey(KContentBatch))
+
+	nd.is = cbor.NewCborStore(ms.Bstore)
+	if err != nil && errors.Is(err, datastore.ErrNotFound) {
+		hnd, err := hamt.NewNode(nd.is, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
+		if err != nil {
+			return err
+		}
+		nd.pieceHAMT = hnd
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	r, err := cid.Cast(enc)
+	if err != nil {
+		return err
+	}
+	hnd, err := hamt.LoadNode(context.TODO(), nd.is, r, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
+	if err != nil {
+		return err
+	}
+	nd.pieceHAMT = hnd
+	return nil
 }
 
 // send hits out notify callback if we attached one
@@ -416,7 +441,7 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 		})
 		return
 	}
-	sendErr(errors.New("no pending transaction"))
+	sendErr(ErrNoTx)
 }
 
 // getRef is an internal function to find a ref with a given string cid
@@ -442,7 +467,7 @@ func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
 		return nd.tx.Ref(), nil
 	}
 
-	return nil, ErrDAGNotPacked
+	return nil, ErrNoTx
 }
 
 // Quote returns an estimation of market price for storing a commit on Filecoin
@@ -463,12 +488,7 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(err)
 		return
 	}
-	store, err := nd.ms.Get(com.StoreID)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	piece, err := nd.archive(ctx, store.DAG, com.PayloadCID)
+	piece, err := nd.archive(ctx, com.PayloadCID)
 	if err != nil {
 		sendErr(err)
 		return
@@ -480,10 +500,6 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		RF:        args.StorageRF,
 		MaxPrice:  args.MaxPrice,
 	})
-	nd.qmu.Lock()
-	nd.sQuote = quote
-	nd.qmu.Unlock()
-
 	if err != nil {
 		sendErr(err)
 		return
@@ -496,8 +512,10 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 
 	nd.send(Notify{
 		QuoteResult: &QuoteResult{
-			Ref:    com.PayloadCID.String(),
-			Quotes: quotes,
+			Ref:         com.PayloadCID.String(),
+			Quotes:      quotes,
+			PayloadSize: uint64(piece.PayloadSize),
+			PieceSize:   uint64(piece.PieceSize),
 		},
 	})
 }
@@ -512,6 +530,11 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		})
 	}
 	nd.txmu.Lock()
+	if nd.tx == nil {
+		nd.txmu.Unlock()
+		sendErr(ErrNoTx)
+		return
+	}
 	nd.tx.SetCacheRF(args.CacheRF)
 	err := nd.tx.Commit()
 	if err != nil {
@@ -538,28 +561,44 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 			return
 		}
 
-		nd.qmu.Lock()
-		if nd.sQuote == nil {
-			nd.qmu.Unlock()
-			sendErr(ErrQuoteNotFound)
+		piece, err := nd.archive(ctx, ref.PayloadCID)
+		if err != nil {
+			sendErr(err)
 			return
 		}
-		quote := nd.sQuote
-		nd.qmu.Unlock()
 
-		var miners []storage.Miner
-		for _, m := range quote.Miners {
-			addr := m.Info.Address
-			if args.Miners[addr.String()] {
-				miners = append(miners, m)
-			}
+		fmt.Println("getting quote for a piece")
+
+		quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
+			PieceSize: uint64(piece.PieceSize),
+			Duration:  args.Duration,
+			RF:        args.StorageRF,
+			MaxPrice:  args.MaxPrice,
+			Region:    "Europe",
+			Verified:  args.Verified,
+		})
+		if err != nil {
+			sendErr(err)
+			return
+		}
+
+		fmt.Println("got a quote", quote.MinPieceSize, quote.Prices)
+
+		if quote.MinPieceSize > uint64(piece.PieceSize) {
+			nd.send(Notify{
+				CommResult: &CommResult{
+					Capacity: quote.MinPieceSize - uint64(piece.PieceSize),
+				},
+			})
+			return
 		}
 
 		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
 			ref.PayloadCID,
 			args.Duration,
 			nd.exch.Wallet().DefaultAddress(),
-			miners,
+			quote.Miners,
+			args.Verified,
 		))
 		if err != nil {
 			sendErr(err)
@@ -881,37 +920,4 @@ func (nd *node) importAddress(pk string) {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
 	}
-}
-
-// PieceRef contains Filecoin metadata about a storage piece
-type PieceRef struct {
-	CID         cid.Cid
-	PayloadSize int64
-	PieceSize   abi.PaddedPieceSize
-}
-
-// archive a DAG into a CAR
-func (nd *node) archive(ctx context.Context, DAG ipldformat.DAGService, root cid.Cid) (*PieceRef, error) {
-	wr := &writer.Writer{}
-	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
-
-	err := car.WriteCar(ctx, DAG, []cid.Cid{root}, wr)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := bw.Flush(); err != nil {
-		return nil, err
-	}
-
-	dataCIDSize, err := wr.Sum()
-	if err != nil {
-		return nil, err
-	}
-
-	return &PieceRef{
-		CID:         dataCIDSize.PieceCID,
-		PayloadSize: dataCIDSize.PayloadSize,
-		PieceSize:   dataCIDSize.PieceSize,
-	}, nil
 }
