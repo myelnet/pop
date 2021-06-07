@@ -137,17 +137,6 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
 	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
 
-	// TODO: clean this up
-	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		switch event.Code {
-		case datatransfer.Error:
-			if channelState.Recipient() == h.ID() {
-				// If transfers fail and we're the recipient we need to remove it from our index
-				r.idx.DropRef(channelState.BaseCID())
-			}
-		}
-	})
-
 	return r
 }
 
@@ -351,26 +340,37 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// It will be automatically picked up in the TransportConfigurer
 		storeID := r.idx.ms.Next()
 
-		ref := &DataRef{
-			PayloadCID:  req.PayloadCID,
-			PayloadSize: int64(req.Size),
-			StoreID:     storeID,
-			Keys:        [][]byte{},
+		ref, err := r.idx.GetRef(req.PayloadCID)
+		if err != nil {
+			ref = &DataRef{
+				PayloadCID:  req.PayloadCID,
+				PayloadSize: int64(req.Size),
+				StoreID:     storeID,
+				Keys:        [][]byte{},
+			}
 		}
 
-		r.idx.GetRef(req.PayloadCID)
-
-		//for key := range tx.entries {
-		//	ref.Keys[key] = true
-		//}
-
-		err = r.idx.SetRef(ref)
+		ctx := context.TODO()
+		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
 			return
 		}
-		_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, sel.All())
-		if err != nil {
-			return
+
+		for {
+			state, err := r.dt.ChannelState(ctx, chid)
+			if err != nil {
+				return
+			}
+
+			switch state.Status() {
+			case datatransfer.Failed, datatransfer.Cancelled:
+				r.idx.DropRef(state.BaseCID())
+				return
+
+			case datatransfer.Completed:
+				r.idx.SetRef(ref)
+				return
+			}
 		}
 	}
 }
