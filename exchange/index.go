@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"container/list"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"sync"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	"github.com/myelnet/pop/internal/utils"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -25,12 +25,6 @@ var ErrRefNotFound = errors.New("ref not found")
 
 // KIndex is the datastore key for persisting the index of a workdag
 const KIndex = "idx"
-
-// use 256 hash to prevent collision attacks
-var hashOption = hamt.UseHashFunction(func(input []byte) []byte {
-	res := sha256.Sum256(input)
-	return res[:]
-})
 
 // Index contains the information about which objects are currently stored
 // the key is a CID.String().
@@ -179,7 +173,7 @@ func (idx *Index) loadFromStore() error {
 	// var err error
 	enc, err := idx.ds.Get(datastore.NewKey(KIndex))
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
-		nd, err := hamt.NewNode(idx.store, hamt.UseTreeBitWidth(5), hashOption)
+		nd, err := hamt.NewNode(idx.store, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 		if err != nil {
 			return err
 		}
@@ -204,7 +198,7 @@ func (idx *Index) loadFromStore() error {
 // LoadRoot loads a new HAMT root node from a given CID, it can be used to load a node
 // from a different root than the current one for example
 func (idx *Index) LoadRoot(r cid.Cid, store cbor.IpldStore) (*hamt.Node, error) {
-	return hamt.LoadNode(context.TODO(), store, r, hamt.UseTreeBitWidth(5), hashOption)
+	return hamt.LoadNode(context.TODO(), store, r, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 }
 
 // GetStoreID returns the StoreID of the store which has the given content

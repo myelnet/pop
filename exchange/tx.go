@@ -312,6 +312,10 @@ func (tx *Tx) Commit() error {
 	if tx.cacheRF > 0 {
 		opts.RF = tx.cacheRF
 		tx.dispatching = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
+	} else {
+		// Do not block WatchDispatch
+		tx.dispatching = make(chan PRecord)
+		close(tx.dispatching)
 	}
 	return nil
 }

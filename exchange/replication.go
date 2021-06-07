@@ -245,21 +245,7 @@ type fetchResult struct {
 // fetchIndex handles the data transfer for retrieving the index of a given peer anounced in a Hey
 // msg. It blocks until the transfer is completed or fails.
 func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
-	done := make(chan error, 1)
 	rcid := *hvt.IndexRoot
-	unsub := r.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
-		root := chState.BaseCID()
-		if root != rcid {
-			return
-		}
-		switch chState.Status() {
-		case datatransfer.Completed:
-			done <- nil
-		case datatransfer.Failed, datatransfer.Cancelled:
-			done <- fmt.Errorf(chState.Message())
-		}
-	})
-	defer unsub()
 	req := Request{
 		Method:     FetchIndex,
 		PayloadCID: rcid,
@@ -273,15 +259,24 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	r.stores[rcid] = store
 	r.smu.Unlock()
 
-	_, err = r.dt.OpenPullDataChannel(ctx, hvt.Peer, &req, rcid, sel.Hamt())
+	chid, err := r.dt.OpenPullDataChannel(ctx, hvt.Peer, &req, rcid, sel.Hamt())
 	if err != nil {
 		return err
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
+
+	for {
+		state, err := r.dt.ChannelState(ctx, chid)
+		if err != nil {
+			return err
+		}
+		switch state.Status() {
+		case datatransfer.Failed:
+			return fmt.Errorf("data transfer failed: %s", state.Message())
+		case datatransfer.Cancelled:
+			return fmt.Errorf("data transfer cancelled: %s", state.Message())
+		case datatransfer.Completed:
+			return nil
+		}
 	}
 }
 
