@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/myelnet/pop/internal/utils"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
@@ -275,8 +276,9 @@ func (tx *Tx) Ref() *DataRef {
 		PayloadSize: tx.size,
 	}
 
-	for key := range tx.entries {
-		ref.Keys = append(ref.Keys, []byte(key))
+	if len(tx.entries) <= 0 {
+		keys, _ := utils.MapKeys(context.TODO(), tx.root, tx.Store().Loader)
+		ref.Keys = keys
 	}
 
 	return ref
@@ -378,9 +380,7 @@ func (tx *Tx) GetEntries() ([]string, error) {
 		}
 		return entries, nil
 	}
-
-	ref, err := tx.index.GetRef(tx.root)
-	if err == nil {
+	if ref, err := tx.index.GetRef(tx.root); err == nil {
 		store, err := tx.ms.Get(ref.StoreID)
 		if err != nil {
 			return nil, err

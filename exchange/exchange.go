@@ -213,14 +213,16 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			PayloadCID:  root,
 			StoreID:     tx.StoreID(),
 			PayloadSize: int64(res.Size),
-			Keys:        [][]byte{},
 		}
 
-		for key := range tx.entries {
-			ref.Keys = append(ref.Keys, []byte(key))
+		keys, err := utils.MapKeys(ctx, root, tx.Store().Loader)
+		if err != nil {
+			return err
 		}
+		ref.Keys = keys
 
 		return e.idx.SetRef(ref)
+
 	case <-ctx.Done():
 		return ctx.Err()
 	}

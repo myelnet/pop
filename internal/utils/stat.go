@@ -77,7 +77,7 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	return res, nil
 }
 
-func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([]string, error) {
+func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([][]byte, error) {
 	// Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
 	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
@@ -90,7 +90,7 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([]string, e
 	// load the IPLD tree
 	nd := nb.Build()
 	// Gather the keys in an array
-	entries := make([]string, nd.Length())
+	entries := make([][]byte, nd.Length())
 	it := nd.MapIterator()
 	i := 0
 	// Iterate over all the map entries
@@ -100,8 +100,8 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([]string, e
 		if err != nil {
 			return nil, err
 		}
-		// The key IPLD node needs to be decoded as a string
-		key, err := k.AsString()
+		// The key IPLD node needs to be decoded as bytes
+		key, err := k.AsBytes()
 		if err != nil {
 			return nil, err
 		}
