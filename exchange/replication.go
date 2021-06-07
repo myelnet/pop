@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 
@@ -325,8 +326,10 @@ func (r *Replication) handleRequest(s network.Stream) {
 	defer rs.Close()
 	req, err := rs.ReadRequest()
 	if err != nil {
+		log.Error().Err(fmt.Errorf("error when reading stream request : %v", err))
 		return
 	}
+
 	// Only the dispatch method is streamed directly at this time
 	switch req.Method {
 	case Dispatch:
@@ -345,27 +348,38 @@ func (r *Replication) handleRequest(s network.Stream) {
 			}
 		}
 
-		_ = r.idx.SetRef(ref)
+		err = r.idx.SetRef(ref)
+		if err != nil {
+			log.Error().Err(fmt.Errorf("error when setting ref before OpenPullDataChannel : %v", err))
+		}
 
 		ctx := context.TODO()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
+			log.Error().Err(fmt.Errorf("error when opening channel data channel : %v", err))
 			return
 		}
 
 		for {
 			state, err := r.dt.ChannelState(ctx, chid)
 			if err != nil {
+				log.Error().Err(fmt.Errorf("error when fetching channel state : %v", err))
 				return
 			}
 
 			switch state.Status() {
 			case datatransfer.Failed, datatransfer.Cancelled:
-				r.idx.DropRef(state.BaseCID())
+				err = r.idx.DropRef(state.BaseCID())
+				if err != nil {
+					log.Error().Err(fmt.Errorf("error when droping ref : %v", err))
+				}
 				return
 
 			case datatransfer.Completed:
-				r.idx.SetRef(ref)
+				err = r.idx.SetRef(ref)
+				if err != nil {
+					log.Error().Err(fmt.Errorf("error when setting ref : %v", err))
+				}
 				return
 			}
 		}
