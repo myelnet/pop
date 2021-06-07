@@ -67,16 +67,6 @@ func (mr *mockRetriever) SetTable(t map[cid.Cid]peer.ID) {
 }
 
 func (mr *mockRetriever) FindAndRetrieve(ctx context.Context, l cid.Cid) error {
-	done := make(chan error, 1)
-	unsub := mr.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
-		switch chState.Status() {
-		case datatransfer.Completed:
-			done <- nil
-		case datatransfer.Failed, datatransfer.Cancelled:
-			done <- fmt.Errorf(chState.Message())
-		}
-	})
-	defer unsub()
 	mr.mu.Lock()
 	peer, ok := mr.routing[l]
 	mr.mu.Unlock()
@@ -88,15 +78,22 @@ func (mr *mockRetriever) FindAndRetrieve(ctx context.Context, l cid.Cid) error {
 		PayloadSize: int64(256000),
 		StoreID:     mr.idx.ms.Next(),
 	})
-	_, err := mr.dt.OpenPullDataChannel(ctx, peer, &testutil.FakeDTType{Data: l.String()}, l, sel.All())
+	chid, err := mr.dt.OpenPullDataChannel(ctx, peer, &testutil.FakeDTType{Data: l.String()}, l, sel.All())
 	if err != nil {
 		return err
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
+	for {
+		chState, err := mr.dt.ChannelState(ctx, chid)
+		if err != nil {
+			return err
+		}
+
+		switch chState.Status() {
+		case datatransfer.Completed:
+			return nil
+		case datatransfer.Failed, datatransfer.Cancelled:
+			return fmt.Errorf(chState.Message())
+		}
 	}
 }
 
