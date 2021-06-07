@@ -345,6 +345,8 @@ func (r *Replication) handleRequest(s network.Stream) {
 			}
 		}
 
+		_ = r.idx.SetRef(ref)
+
 		ctx := context.TODO()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
