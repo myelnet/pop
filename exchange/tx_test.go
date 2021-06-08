@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/filecoin-project/go-multistore"
 	files "github.com/ipfs/go-ipfs-files"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/ipfs/go-path"
@@ -27,80 +28,89 @@ func TestTx(t *testing.T) {
 	newNode := func(ctx context.Context, mn mocknet.Mocknet) (*Exchange, *testutil.TestNode) {
 		n := testutil.NewTestNode(mn, t)
 		opts := Options{
-			RepoPath: n.DTTmpDir,
-			Keystore: keystore.NewMemKeystore(),
+			RepoPath:     n.DTTmpDir,
+			Keystore:     keystore.NewMemKeystore(),
+			ReplInterval: -1,
 		}
 		exch, err := New(ctx, n.Host, n.Ds, opts)
 		require.NoError(t, err)
 		return exch, n
 	}
-	// Iterating a ton helps weed out false positives
-	for i := 0; i < 1; i++ {
-		t.Run(fmt.Sprintf("Try %v", i), func(t *testing.T) {
-			bgCtx := context.Background()
+	bgCtx := context.Background()
 
-			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
-			defer cancel()
+	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+	defer cancel()
 
-			mn := mocknet.New(bgCtx)
+	mn := mocknet.New(bgCtx)
 
-			var providers []*Exchange
-			var pnodes []*testutil.TestNode
+	var providers []*Exchange
+	var pnodes []*testutil.TestNode
 
-			for i := 0; i < 11; i++ {
-				exch, n := newNode(ctx, mn)
-				providers = append(providers, exch)
-				pnodes = append(pnodes, n)
-			}
-			require.NoError(t, mn.LinkAll())
-			require.NoError(t, mn.ConnectAllButSelf())
-
-			// The peer manager has time to fill up while we load this file
-			fname := pnodes[0].CreateRandomFile(t, 56000)
-			tx := providers[0].Tx(ctx)
-			link, bytes := pnodes[0].LoadFileToStore(ctx, t, tx.Store(), fname)
-			rootCid := link.(cidlink.Link).Cid
-			require.NoError(t, tx.Put(KeyFromPath(fname), rootCid, int64(len(bytes))))
-
-			file, err := tx.GetFile(KeyFromPath(fname))
-			require.NoError(t, err)
-			size, err := file.Size()
-			require.NoError(t, err)
-			require.Equal(t, size, int64(56000))
-
-			// Commit the transaction will dipatch the content to the network
-			require.NoError(t, tx.Commit())
-
-			var records []PRecord
-			tx.WatchDispatch(func(rec PRecord) {
-				records = append(records, rec)
-			})
-			require.Equal(t, 6, len(records))
-			root := tx.Root()
-			tx.Close()
-
-			// Create a new client
-			client, _ := newNode(ctx, mn)
-
-			require.NoError(t, mn.LinkAll())
-			require.NoError(t, mn.ConnectAllButSelf())
-
-			tx = client.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
-			require.NoError(t, tx.Query(sel.Key(KeyFromPath(fname))))
-			select {
-			case <-ctx.Done():
-				t.Fatal("tx timeout")
-			case <-tx.Done():
-			}
-			file, err = tx.GetFile(KeyFromPath(fname))
-			require.NoError(t, err)
-			size, err = file.Size()
-			require.NoError(t, err)
-			require.Equal(t, size, int64(56000))
-		})
+	for i := 0; i < 11; i++ {
+		exch, n := newNode(ctx, mn)
+		providers = append(providers, exch)
+		pnodes = append(pnodes, n)
 	}
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
 
+	// The peer manager has time to fill up while we load this file
+	fname := pnodes[0].CreateRandomFile(t, 56000)
+	tx := providers[0].Tx(ctx)
+	link, bytes := pnodes[0].LoadFileToStore(ctx, t, tx.Store(), fname)
+	rootCid := link.(cidlink.Link).Cid
+	require.NoError(t, tx.Put(KeyFromPath(fname), rootCid, int64(len(bytes))))
+
+	file, err := tx.GetFile(KeyFromPath(fname))
+	require.NoError(t, err)
+	size, err := file.Size()
+	require.NoError(t, err)
+	require.Equal(t, size, int64(56000))
+
+	// Commit the transaction will dipatch the content to the network
+	require.NoError(t, tx.Commit())
+
+	var records []PRecord
+	tx.WatchDispatch(func(rec PRecord) {
+		records = append(records, rec)
+	})
+	require.Equal(t, 6, len(records))
+	root := tx.Root()
+	require.NoError(t, tx.Close())
+
+	// Create a new client
+	client, _ := newNode(ctx, mn)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	tx = client.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
+	require.NoError(t, tx.Query(sel.Key(KeyFromPath(fname))))
+	select {
+	case <-ctx.Done():
+		t.Fatal("tx timeout")
+	case <-tx.Done():
+	}
+	file, err = tx.GetFile(KeyFromPath(fname))
+	require.NoError(t, err)
+	size, err = file.Size()
+	require.NoError(t, err)
+	require.Equal(t, size, int64(56000))
+
+	require.NoError(t, tx.Close())
+	// Check the global blockstore now has the blocks
+	_, err = utils.Stat(ctx, &multistore.Store{Bstore: client.opts.Blockstore}, root, sel.All())
+	require.NoError(t, err)
+
+	// Get will by default create a new store if it's been deleted
+	store, err := tx.ms.Get(tx.StoreID())
+	require.NoError(t, err)
+	// That new store should not have our blocks
+	has, err := store.Bstore.Has(root)
+	require.NoError(t, err)
+	require.False(t, has)
 }
+
 func genTestFiles(t *testing.T) (map[string]string, []string) {
 	dir := t.TempDir()
 

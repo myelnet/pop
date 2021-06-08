@@ -132,7 +132,8 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	return resp, nil
 }
 
-// Tx returns a new transaction
+// Tx returns a new transaction. The caller must also call tx.Close to cleanup and perist the new blocks
+// retrieved or created by the transaction.
 func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
@@ -167,6 +168,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	tx := &Tx{
 		ctx:        ctx,
 		cancelCtx:  cancel,
+		bs:         e.opts.Blockstore,
 		ms:         e.opts.MultiStore,
 		rou:        e.rou,
 		retriever:  cl,

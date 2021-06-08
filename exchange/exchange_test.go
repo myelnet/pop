@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	keystore "github.com/ipfs/go-ipfs-keystore"
+	"github.com/ipfs/go-merkledag"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-eventbus"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -273,7 +276,6 @@ func TestExchangeE2E(t *testing.T) {
 
 			// Now we fetch it again from our providers
 			tx := client.Tx(ctx, WithRoot(rootCid), WithStrategy(SelectFirst), WithTriage())
-			defer tx.Close()
 
 			err = tx.Query(sel.All())
 			require.NoError(t, err)
@@ -293,11 +295,12 @@ func TestExchangeE2E(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("failed to finish sync")
 			}
+			require.NoError(t, tx.Close())
 
-			store, err := cnode.Ms.Get(tx.StoreID())
-			require.NoError(t, err)
+			bs := client.opts.Blockstore
+			dag := merkledag.NewDAGService(blockservice.New(bs, offline.Exchange(bs)))
 			// And we verify we got the file back
-			cnode.VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
+			cnode.VerifyFileTransferred(ctx, t, dag, rootCid, origBytes)
 		})
 	}
 }

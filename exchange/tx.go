@@ -14,6 +14,7 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	cid "github.com/ipfs/go-cid"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	unixfile "github.com/ipfs/go-unixfs/file"
@@ -56,8 +57,9 @@ type TxResult struct {
 type Tx struct {
 	ctx       context.Context
 	cancelCtx context.CancelFunc
-	// multistore is used to get a different store if this transaction is for content located in a
-	// different store
+	// global blockstore to dump the content to when the work is over
+	bs blockstore.Blockstore
+	// MultiStore creates an isolated store for this transaction before it is migrated over to the main store
 	ms *multistore.MultiStore
 	// storeID is the ID of the store used to read or write the content of this session
 	storeID multistore.StoreID
@@ -582,18 +584,46 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 }
 
 // Close removes any listeners and stream handlers related to a session
-// TODO: cleanup further in case we close before committing
-func (tx *Tx) Close() {
+func (tx *Tx) Close() error {
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}
 	tx.unsub()
+	err := tx.dumpStore()
+	if err != nil {
+		return err
+	}
 	tx.cancelCtx()
+	return nil
 }
 
 // SetAddress to use for funding the retriebal
 func (tx *Tx) SetAddress(addr address.Address) {
 	tx.clientAddr = addr
+}
+
+// dumpStore transfers all the content from the tx store to the global blockstore
+// then deletes the store
+func (tx *Tx) dumpStore() error {
+	tempbs := tx.store.Bstore
+	kchan, err := tempbs.AllKeysChan(tx.ctx)
+	if err != nil {
+		return err
+	}
+	for k := range kchan {
+		if err != nil {
+			return err
+		}
+		blk, err := tempbs.Get(k)
+		if err != nil {
+			return err
+		}
+		err = tx.bs.Put(blk)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.ms.Delete(tx.storeID)
 }
 
 // ErrUserDeniedOffer is returned when a user denies an offer
