@@ -475,7 +475,7 @@ func TestMultipleGet(t *testing.T) {
 
 	pn := newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
-	// cn2 := newTestNode(bgCtx, mn, t)
+	//cn2 := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -541,23 +541,22 @@ func TestMultipleGet(t *testing.T) {
 	res = <-got1
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	// @TODO: register keys in index
-	// Now let's try to request the second file
-	// got2 := make(chan *GetResult, 2)
-	// cn.notify = func(n Notify) {
-	// 	require.Equal(t, n.GetResult.Err, "")
-	// 	got2 <- n.GetResult
-	// }
-	// cn.Get(ctx, &GetArgs{
-	// 	Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
-	// 	Strategy: "SelectFirst",
-	// 	Timeout:  1,
-	// })
-	// res = <-got2
-	// require.NotEqual(t, "", res.DealID)
+	//Now let's try to request the second file
+	got2 := make(chan *GetResult, 2)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.GetResult.Err, "")
+		got2 <- n.GetResult
+	}
+	cn.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res = <-got2
+	require.NotEqual(t, "", res.DealID)
 
-	// res = <-got2
-	// require.Greater(t, res.TransLatSeconds, 0.0)
+	res = <-got2
+	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// @BUG: not entirely sure why this doesn't work if data2 isn't fetched first
 	// got3 := make(chan *GetResult, 2)
