@@ -209,17 +209,17 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			return res.Err
 		}
 
-		ref := &DataRef{
-			PayloadCID:  root,
-			StoreID:     tx.StoreID(),
-			PayloadSize: int64(res.Size),
-		}
-
 		keys, err := utils.MapKeys(ctx, root, tx.Store().Loader)
 		if err != nil {
 			return err
 		}
-		ref.Keys = keys
+
+		ref := &DataRef{
+			PayloadCID:  root,
+			StoreID:     tx.StoreID(),
+			PayloadSize: int64(res.Size),
+			Keys:        keys,
+		}
 
 		return e.idx.SetRef(ref)
 

@@ -77,6 +77,7 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	return res, nil
 }
 
+// MapKeys returns all the keys of a Tx, given its cid and a datastore
 func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([][]byte, error) {
 	// Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}

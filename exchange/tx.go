@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/myelnet/pop/internal/utils"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
@@ -24,6 +23,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/deal"
 )
@@ -270,15 +270,21 @@ func (tx *Tx) buildRoot() error {
 
 // Ref returns the DataRef associated with this transaction
 func (tx *Tx) Ref() *DataRef {
+	var err error
+	keys := [][]byte{}
+
+	if len(tx.entries) == 0 {
+		keys, err = utils.MapKeys(context.TODO(), tx.root, tx.Store().Loader)
+		if err != nil {
+			fmt.Println("error when fetching keys :", err)
+		}
+	}
+
 	ref := &DataRef{
 		PayloadCID:  tx.root,
 		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
-	}
-
-	if len(tx.entries) <= 0 {
-		keys, _ := utils.MapKeys(context.TODO(), tx.root, tx.Store().Loader)
-		ref.Keys = keys
+		Keys:        keys,
 	}
 
 	return ref
@@ -380,11 +386,23 @@ func (tx *Tx) GetEntries() ([]string, error) {
 		}
 		return entries, nil
 	}
+
 	if ref, err := tx.index.GetRef(tx.root); err == nil {
 		store, err := tx.ms.Get(ref.StoreID)
 		if err != nil {
 			return nil, err
 		}
+
+		//keys, err := utils.MapKeys(tx.ctx, ref.PayloadCID, store.Loader)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//
+		//entries := make([]string, len(keys))
+		//for _, entry := range keys {
+		//	entries = append(entries, string(entry))
+		//}
+
 		lk := cidlink.Link{Cid: tx.root}
 		nb := basicnode.Prototype.Map.NewBuilder()
 		err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, store.Loader)

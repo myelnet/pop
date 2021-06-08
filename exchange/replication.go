@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/rs/zerolog/log"
+	"github.com/myelnet/pop/internal/utils"
 	"sync"
 	"time"
 
@@ -326,7 +326,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 	defer rs.Close()
 	req, err := rs.ReadRequest()
 	if err != nil {
-		log.Error().Err(fmt.Errorf("error when reading stream request : %v", err))
+		fmt.Println("error when reading stream request :", err)
 		return
 	}
 
@@ -338,32 +338,34 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// It will be automatically picked up in the TransportConfigurer
 		storeID := r.idx.ms.Next()
 
-		ref, err := r.idx.GetRef(req.PayloadCID)
+		_, err := r.idx.GetRef(req.PayloadCID)
 		if err != nil {
-			ref = &DataRef{
-				PayloadCID:  req.PayloadCID,
-				PayloadSize: int64(req.Size),
-				StoreID:     storeID,
-				Keys:        [][]byte{},
-			}
+			fmt.Printf("Payload CID %s already exists\n", req.PayloadCID.String())
+			//return
+		}
+
+		ref := &DataRef{
+			PayloadCID:  req.PayloadCID,
+			PayloadSize: int64(req.Size),
+			StoreID:     storeID,
 		}
 
 		err = r.idx.SetRef(ref)
 		if err != nil {
-			log.Error().Err(fmt.Errorf("error when setting ref before OpenPullDataChannel : %v", err))
+			fmt.Println("error when setting ref before OpenPullDataChannel :", err)
 		}
 
 		ctx := context.TODO()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
-			log.Error().Err(fmt.Errorf("error when opening channel data channel : %v", err))
+			fmt.Println("error when opening channel data channel :", err)
 			return
 		}
 
 		for {
 			state, err := r.dt.ChannelState(ctx, chid)
 			if err != nil {
-				log.Error().Err(fmt.Errorf("error when fetching channel state : %v", err))
+				fmt.Println("error when fetching channel state :", err)
 				return
 			}
 
@@ -371,14 +373,27 @@ func (r *Replication) handleRequest(s network.Stream) {
 			case datatransfer.Failed, datatransfer.Cancelled:
 				err = r.idx.DropRef(state.BaseCID())
 				if err != nil {
-					log.Error().Err(fmt.Errorf("error when droping ref : %v", err))
+					fmt.Println("error when droping ref :", err)
 				}
 				return
 
 			case datatransfer.Completed:
+				store, err := r.idx.ms.Get(storeID)
+				if err != nil {
+					fmt.Println("error when fetching store :", err)
+					return
+				}
+
+				keys, err := utils.MapKeys(ctx, ref.PayloadCID, store.Loader)
+				if err != nil {
+					fmt.Println("error when fetching keys :", err)
+					return
+				}
+				ref.Keys = keys
+
 				err = r.idx.SetRef(ref)
 				if err != nil {
-					log.Error().Err(fmt.Errorf("error when setting ref : %v", err))
+					fmt.Println("error when setting ref :", err)
 				}
 				return
 			}
