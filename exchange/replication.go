@@ -339,15 +339,16 @@ func (r *Replication) handleRequest(s network.Stream) {
 		storeID := r.idx.ms.Next()
 
 		_, err := r.idx.GetRef(req.PayloadCID)
-		if err != nil {
+		if err == nil {
 			fmt.Printf("Payload CID %s already exists\n", req.PayloadCID.String())
-			//return
+			return
 		}
 
 		ref := &DataRef{
 			PayloadCID:  req.PayloadCID,
 			PayloadSize: int64(req.Size),
 			StoreID:     storeID,
+			Keys:        [][]byte{},
 		}
 
 		err = r.idx.SetRef(ref)
@@ -355,7 +356,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 			fmt.Println("error when setting ref before OpenPullDataChannel :", err)
 		}
 
-		ctx := context.TODO()
+		ctx := context.Background()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
 			fmt.Println("error when opening channel data channel :", err)
@@ -389,7 +390,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 					fmt.Println("error when fetching keys :", err)
 					return
 				}
-				ref.Keys = keys
+				ref.Keys = keys.AsBytes()
 
 				err = r.idx.SetRef(ref)
 				if err != nil {

@@ -77,8 +77,20 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	return res, nil
 }
 
-// MapKeys returns all the keys of a Tx, given its cid and a datastore
-func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([][]byte, error) {
+// KeyList is a list of strings representing all the keys in an IPLD Map
+type KeyList []string
+
+// AsBytes returns all the keys as byte slices
+func (kl KeyList) AsBytes() [][]byte {
+	out := make([][]byte, len(kl))
+	for i, k := range kl {
+		out[i] = []byte(k)
+	}
+	return out
+}
+
+// MapKeys returns all the keys of a Tx, given its cid and a loader
+func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) {
 	// Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
 	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
@@ -91,7 +103,7 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([][]byte, e
 	// load the IPLD tree
 	nd := nb.Build()
 	// Gather the keys in an array
-	entries := make([][]byte, nd.Length())
+	entries := make([]string, nd.Length())
 	it := nd.MapIterator()
 	i := 0
 	// Iterate over all the map entries
@@ -102,12 +114,12 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) ([][]byte, e
 			return nil, err
 		}
 		// The key IPLD node needs to be decoded as bytes
-		key, err := k.AsBytes()
+		key, err := k.AsString()
 		if err != nil {
 			return nil, err
 		}
 		entries[i] = key
 		i++
 	}
-	return entries, nil
+	return KeyList(entries), nil
 }

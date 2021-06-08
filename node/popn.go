@@ -800,27 +800,24 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			}
 		}
 
-		keys := [][]byte{}
-		ref, err := nd.exch.Index().GetRef(c)
-		if err != nil {
-			ref = &exchange.DataRef{
-				PayloadCID:  c,
-				StoreID:     tx.StoreID(),
-				PayloadSize: int64(res.Size),
-			}
-		}
-
+		var keys [][]byte
 		if args.Key != "" {
-			keys = append(ref.Keys, []byte(args.Key))
+			keys = append(keys, []byte(args.Key))
 		} else {
-			keys, err = utils.MapKeys(ctx, ref.PayloadCID, tx.Store().Loader)
+			mk, err := utils.MapKeys(ctx, c, tx.Store().Loader)
 			if err != nil {
 				return err
 			}
-		}
-		ref.Keys = keys
+			keys = mk.AsBytes()
 
-		err = nd.exch.Index().SetRef(ref)
+		}
+
+		err = nd.exch.Index().SetRef(&exchange.DataRef{
+			PayloadCID:  c,
+			StoreID:     tx.StoreID(),
+			PayloadSize: int64(res.Size),
+			Keys:        keys,
+		})
 		if err != nil {
 			return err
 		}
