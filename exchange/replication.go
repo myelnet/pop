@@ -22,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 )
 
@@ -136,14 +137,6 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 	r.dt.RegisterVoucherType(&Request{}, r)
 	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
 	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
-
-	// TODO: clean this up
-	r.dt.SubscribeToEvents(func(event datatransfer.Event, channelState datatransfer.ChannelState) {
-		if event.Code == datatransfer.Error && channelState.Recipient() == h.ID() {
-			// If transfers fail and we're the recipient we need to remove it from our index
-			r.idx.DropRef(channelState.BaseCID())
-		}
-	})
 
 	return r
 }
@@ -333,8 +326,10 @@ func (r *Replication) handleRequest(s network.Stream) {
 	defer rs.Close()
 	req, err := rs.ReadRequest()
 	if err != nil {
+		fmt.Println("error when reading stream request :", err)
 		return
 	}
+
 	// Only the dispatch method is streamed directly at this time
 	switch req.Method {
 	case Dispatch:
@@ -342,17 +337,67 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// Create a new store to receive our new blocks
 		// It will be automatically picked up in the TransportConfigurer
 		storeID := r.idx.ms.Next()
-		err = r.idx.SetRef(&DataRef{
+
+		_, err := r.idx.GetRef(req.PayloadCID)
+		if err == nil {
+			fmt.Printf("Payload CID %s already exists\n", req.PayloadCID.String())
+			return
+		}
+
+		ref := &DataRef{
 			PayloadCID:  req.PayloadCID,
 			PayloadSize: int64(req.Size),
 			StoreID:     storeID,
-		})
+			Keys:        [][]byte{},
+		}
+
+		err = r.idx.SetRef(ref)
 		if err != nil {
+			fmt.Println("error when setting ref before OpenPullDataChannel :", err)
+		}
+
+		ctx := context.Background()
+		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
+		if err != nil {
+			fmt.Println("error when opening channel data channel :", err)
 			return
 		}
-		_, err = r.dt.OpenPullDataChannel(context.TODO(), p, &req, req.PayloadCID, sel.All())
-		if err != nil {
-			return
+
+		for {
+			state, err := r.dt.ChannelState(ctx, chid)
+			if err != nil {
+				fmt.Println("error when fetching channel state :", err)
+				return
+			}
+
+			switch state.Status() {
+			case datatransfer.Failed, datatransfer.Cancelled:
+				err = r.idx.DropRef(state.BaseCID())
+				if err != nil {
+					fmt.Println("error when droping ref :", err)
+				}
+				return
+
+			case datatransfer.Completed:
+				store, err := r.idx.ms.Get(storeID)
+				if err != nil {
+					fmt.Println("error when fetching store :", err)
+					return
+				}
+
+				keys, err := utils.MapKeys(ctx, ref.PayloadCID, store.Loader)
+				if err != nil {
+					fmt.Println("error when fetching keys :", err)
+					return
+				}
+				ref.Keys = keys.AsBytes()
+
+				err = r.idx.SetRef(ref)
+				if err != nil {
+					fmt.Println("error when setting ref :", err)
+				}
+				return
+			}
 		}
 	}
 }

@@ -67,10 +67,20 @@ type DataRef struct {
 	PayloadCID  cid.Cid
 	PayloadSize int64
 	StoreID     multistore.StoreID
+	Keys        [][]byte
 	Freq        int64
 	BucketID    int64
 	// do not serialize
 	bucketNode *list.Element
+}
+
+func (d DataRef) Has(key string) bool {
+	for _, elt := range d.Keys {
+		if bytes.Compare(elt, []byte(key)) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // IndexOption customizes the behavior of the index

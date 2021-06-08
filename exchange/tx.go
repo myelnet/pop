@@ -23,6 +23,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/deal"
 )
@@ -269,10 +270,26 @@ func (tx *Tx) buildRoot() error {
 
 // Ref returns the DataRef associated with this transaction
 func (tx *Tx) Ref() *DataRef {
+	var keys [][]byte
+
+	if len(tx.entries) == 0 {
+		for k := range tx.entries {
+			keys = append(keys, []byte(k))
+		}
+	} else {
+		kl, err := utils.MapKeys(context.TODO(), tx.root, tx.Store().Loader)
+		if err != nil {
+			tx.Err = err
+		} else {
+			keys = kl.AsBytes()
+		}
+	}
+
 	return &DataRef{
 		PayloadCID:  tx.root,
 		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
+		Keys:        keys,
 	}
 }
 
@@ -281,14 +298,27 @@ func (tx *Tx) Commit() error {
 	if tx.Err != nil {
 		return tx.Err
 	}
-	err := tx.index.SetRef(&DataRef{
+
+	ref := &DataRef{
 		PayloadCID:  tx.root,
 		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
-	})
+	}
+
+	entries, err := tx.GetEntries()
 	if err != nil {
 		return err
 	}
+
+	for _, key := range entries {
+		ref.Keys = append(ref.Keys, []byte(key))
+	}
+
+	err = tx.index.SetRef(ref)
+	if err != nil {
+		return err
+	}
+
 	opts := DefaultDispatchOptions
 	if tx.cacheRF > 0 {
 		opts.RF = tx.cacheRF
@@ -329,15 +359,21 @@ func (tx *Tx) GetFile(k string) (files.Node, error) {
 }
 
 // IsLocal tells us if this node is storing the content of this transaction or if it needs to retrieve it
-func (tx *Tx) IsLocal() bool {
-	// We have entries this means the content from this root is stored locally
-	if len(tx.entries) > 0 {
+func (tx *Tx) IsLocal(key string) bool {
+	_, exists := tx.entries[key]
+	if exists {
 		return true
 	}
-	if _, err := tx.index.GetRef(tx.root); err != nil {
+
+	ref, err := tx.index.GetRef(tx.root)
+	if err != nil {
 		return false
 	}
-	return true
+	if ref != nil {
+		return ref.Has(key)
+	}
+
+	return false
 }
 
 // GetEntries retrieves all the entries associated with the root of this transaction
@@ -353,35 +389,14 @@ func (tx *Tx) GetEntries() ([]string, error) {
 		}
 		return entries, nil
 	}
+
 	if ref, err := tx.index.GetRef(tx.root); err == nil {
 		store, err := tx.ms.Get(ref.StoreID)
 		if err != nil {
 			return nil, err
 		}
-		lk := cidlink.Link{Cid: tx.root}
-		nb := basicnode.Prototype.Map.NewBuilder()
-		err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, store.Loader)
-		if err != nil {
-			return nil, err
-		}
-		nd := nb.Build()
-		entries := make([]string, nd.Length())
-		it := nd.MapIterator()
-		i := 0
-		for !it.Done() {
-			k, _, err := it.Next()
-			// all succeed of fail
-			if err != nil {
-				return nil, err
-			}
-			key, err := k.AsString()
-			if err != nil {
-				return nil, err
-			}
-			entries[i] = key
-			i++
-		}
-		return entries, nil
+
+		return utils.MapKeys(tx.ctx, ref.PayloadCID, store.Loader)
 	}
 	return nil, fmt.Errorf("failed to get entried")
 }
