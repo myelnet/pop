@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/myelnet/pop/internal/utils"
 	"sync"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 )
 
