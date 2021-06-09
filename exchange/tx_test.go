@@ -335,10 +335,15 @@ func TestMapFieldSelector(t *testing.T) {
 	pn.rtv.Provider().SetAsk(tx.Root(), resp)
 	require.NoError(t, qs.WriteQueryResponse(resp))
 
-	select {
-	case <-gtx.Done():
-	case <-ctx.Done():
-		t.Fatal("transaction could not complete")
+loop:
+	for {
+		select {
+		case <-gtx.Ongoing():
+		case <-gtx.Done():
+			break loop
+		case <-ctx.Done():
+			t.Fatal("transaction could not complete")
+		}
 	}
 	fnd, err := gtx.GetFile(key)
 	require.NoError(t, err)
