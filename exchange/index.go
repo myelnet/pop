@@ -469,6 +469,7 @@ func (idx *Index) LoadInterest(r cid.Cid, store cbor.IpldStore) error {
 	return root.ForEach(context.TODO(), func(k string, val *cbg.Deferred) error {
 		idx.mu.Lock()
 		if _, ok := idx.Refs[k]; ok {
+			idx.mu.Unlock()
 			// If we already have it skip it
 			return nil
 		}
