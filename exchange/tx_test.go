@@ -166,6 +166,8 @@ func TestTxPutGet(t *testing.T) {
 
 	require.NoError(t, tx.Commit())
 	r := tx.Root()
+	require.NoError(t, exch.Index().SetRef(tx.Ref()))
+	require.NoError(t, tx.Close())
 
 	tx = exch.Tx(ctx)
 
@@ -258,6 +260,7 @@ func TestTxRace(t *testing.T) {
 			require.NoError(t, tx.Put(KeyFromPath(fname2), rootCid, int64(len(bytes))))
 
 			require.NoError(t, tx.Commit())
+			require.NoError(t, tx.Close())
 		}()
 	}
 	wg.Wait()
@@ -296,12 +299,17 @@ func TestMapFieldSelector(t *testing.T) {
 		rootCid := link.(cidlink.Link).Cid
 		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
+	tx.SetCacheRF(0)
+	require.NoError(t, tx.Commit())
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
 	stat, err := utils.Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
 	require.NoError(t, err)
 	require.Equal(t, 2, stat.NumBlocks)
 	require.Equal(t, 627, stat.Size)
+
+	// Close the transaction
+	require.NoError(t, tx.Close())
 
 	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key := KeyFromPath(filepaths[0])
@@ -378,7 +386,10 @@ func TestMultiTx(t *testing.T) {
 		rootCid := link.(cidlink.Link).Cid
 		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
+	tx.SetCacheRF(0)
+	require.NoError(t, tx.Commit())
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
+	require.NoError(t, tx.Close())
 
 	gtx1 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key1 := KeyFromPath(filepaths[0])
@@ -430,6 +441,8 @@ func TestTxGetEntries(t *testing.T) {
 	}
 
 	require.NoError(t, tx.Commit())
+	require.NoError(t, pn.Index().SetRef(tx.Ref()))
+	require.NoError(t, tx.Close())
 
 	// Fresh new tx based on the root of the previous one
 	ntx := pn.Tx(ctx, WithRoot(tx.Root()))

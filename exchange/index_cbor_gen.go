@@ -7,7 +7,6 @@ import (
 	"io"
 	"sort"
 
-	multistore "github.com/filecoin-project/go-multistore"
 	cid "github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
@@ -22,7 +21,7 @@ func (t *DataRef) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{166}); err != nil {
+	if _, err := w.Write([]byte{165}); err != nil {
 		return err
 	}
 
@@ -64,22 +63,6 @@ func (t *DataRef) MarshalCBOR(w io.Writer) error {
 		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajNegativeInt, uint64(-t.PayloadSize-1)); err != nil {
 			return err
 		}
-	}
-
-	// t.StoreID (multistore.StoreID) (uint64)
-	if len("StoreID") > cbg.MaxLength {
-		return xerrors.Errorf("Value in field \"StoreID\" was too long")
-	}
-
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("StoreID"))); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(w, string("StoreID")); err != nil {
-		return err
-	}
-
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.StoreID)); err != nil {
-		return err
 	}
 
 	// t.Keys ([][]uint8) (slice)
@@ -232,21 +215,6 @@ func (t *DataRef) UnmarshalCBOR(r io.Reader) error {
 				}
 
 				t.PayloadSize = int64(extraI)
-			}
-			// t.StoreID (multistore.StoreID) (uint64)
-		case "StoreID":
-
-			{
-
-				maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
-				if err != nil {
-					return err
-				}
-				if maj != cbg.MajUnsignedInt {
-					return fmt.Errorf("wrong type for uint64 field")
-				}
-				t.StoreID = multistore.StoreID(extra)
-
 			}
 			// t.Keys ([][]uint8) (slice)
 		case "Keys":

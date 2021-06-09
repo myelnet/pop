@@ -53,7 +53,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	}
 	idx, err := NewIndex(
 		ds,
-		opts.MultiStore,
 		// leave a 20% lower bound so we don't evict too frequently
 		WithBounds(opts.Capacity, opts.Capacity-uint64(math.Round(float64(opts.Capacity)*0.2))),
 	)
@@ -83,7 +82,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		payments.New(ctx, opts.FilecoinAPI, exch.w, ds, opts.Blockstore),
 		opts.DataTransfer,
-		idx,
 		h.ID(),
 	)
 	if err != nil {
@@ -99,7 +97,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 }
 
 func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
-	store, err := e.idx.GetStore(q.PayloadCID)
+	_, err := e.idx.GetRef(q.PayloadCID)
 	if err != nil {
 		return deal.QueryResponse{}, err
 	}
@@ -112,7 +110,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
-	stats, err := utils.Stat(ctx, store, q.PayloadCID, sel)
+	stats, err := utils.Stat(ctx, &multistore.Store{Bstore: e.opts.Blockstore}, q.PayloadCID, sel)
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
@@ -216,14 +214,11 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			return err
 		}
 
-		ref := &DataRef{
+		return e.idx.SetRef(&DataRef{
 			PayloadCID:  root,
-			StoreID:     tx.StoreID(),
 			PayloadSize: int64(res.Size),
 			Keys:        keys.AsBytes(),
-		}
-
-		return e.idx.SetRef(ref)
+		})
 
 	case <-ctx.Done():
 		return ctx.Err()
@@ -264,9 +259,4 @@ func (e *Exchange) R() *Replication {
 // Index returns the exchange data index
 func (e *Exchange) Index() *Index {
 	return e.idx
-}
-
-// GetStoreID exposes a method to get the store ID used by a given CID
-func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
-	return e.idx.GetStoreID(id)
 }

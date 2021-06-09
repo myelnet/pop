@@ -13,10 +13,14 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-blockservice"
 	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
+	"github.com/ipfs/go-merkledag"
 	unixfile "github.com/ipfs/go-unixfs/file"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -105,6 +109,8 @@ type Tx struct {
 	triage chan DealSelection
 	// dispatching is a stream of peer confirmations when dispatching updates
 	dispatching chan PRecord
+	// committed indicates whether this transaction was committed or not
+	committed bool
 	// Err exposes any error reported by the session during use
 	Err error
 }
@@ -138,6 +144,7 @@ func WithTriage() TxOption {
 
 // SetCacheRF sets the cache replication factor before committing
 // we don't set it as an option as the value may only be known when committing
+// Setting a replication factor of 0 will not trigger any network requests when committing
 func (tx *Tx) SetCacheRF(rf int) {
 	tx.cacheRF = rf
 }
@@ -289,7 +296,6 @@ func (tx *Tx) Ref() *DataRef {
 
 	return &DataRef{
 		PayloadCID:  tx.root,
-		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
 		Keys:        keys,
 	}
@@ -301,30 +307,17 @@ func (tx *Tx) Commit() error {
 		return tx.Err
 	}
 
-	ref := &DataRef{
-		PayloadCID:  tx.root,
-		StoreID:     tx.storeID,
-		PayloadSize: tx.size,
-	}
-
-	entries, err := tx.GetEntries()
-	if err != nil {
-		return err
-	}
-
-	for _, key := range entries {
-		ref.Keys = append(ref.Keys, []byte(key))
-	}
-
-	err = tx.index.SetRef(ref)
-	if err != nil {
-		return err
-	}
+	tx.committed = true
 
 	opts := DefaultDispatchOptions
 	if tx.cacheRF > 0 {
 		opts.RF = tx.cacheRF
-		tx.dispatching = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
+		opts.StoreID = tx.storeID
+		var err error
+		tx.dispatching, err = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
+		if err != nil {
+			return err
+		}
 	} else {
 		// Do not block WatchDispatch
 		tx.dispatching = make(chan PRecord)
@@ -349,13 +342,11 @@ func (tx *Tx) GetFile(k string) (files.Node, error) {
 		return tx.getUnixDAG(e.Value, tx.store.DAG)
 	}
 	// Check the index if we may already have it from a different transaction
-	if ref, err := tx.index.GetRef(tx.root); err == nil {
-		// In this case we need to access a different store
-		store, err := tx.ms.Get(ref.StoreID)
-		if err != nil {
-			return nil, err
-		}
-		return tx.loadFileEntry(k, store)
+	if _, err := tx.index.GetRef(tx.root); err == nil {
+		return tx.loadFileEntry(k, &multistore.Store{
+			Loader: storeutil.LoaderForBlockstore(tx.bs),
+			DAG:    merkledag.NewDAGService(blockservice.New(tx.bs, offline.Exchange(tx.bs))),
+		})
 	}
 	return tx.loadFileEntry(k, tx.store)
 }
@@ -393,12 +384,11 @@ func (tx *Tx) GetEntries() ([]string, error) {
 	}
 
 	if ref, err := tx.index.GetRef(tx.root); err == nil {
-		store, err := tx.ms.Get(ref.StoreID)
-		if err != nil {
-			return nil, err
-		}
-
-		return utils.MapKeys(tx.ctx, ref.PayloadCID, store.Loader)
+		return utils.MapKeys(
+			tx.ctx,
+			ref.PayloadCID,
+			storeutil.LoaderForBlockstore(tx.bs),
+		)
 	}
 	return nil, fmt.Errorf("failed to get entried")
 }
@@ -584,6 +574,7 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 }
 
 // Close removes any listeners and stream handlers related to a session
+// If the transaction was not committed, any staged content will be deleted
 func (tx *Tx) Close() error {
 	if tx.worker != nil {
 		_ = tx.worker.Close()
@@ -605,20 +596,9 @@ func (tx *Tx) SetAddress(addr address.Address) {
 // dumpStore transfers all the content from the tx store to the global blockstore
 // then deletes the store
 func (tx *Tx) dumpStore() error {
-	tempbs := tx.store.Bstore
-	kchan, err := tempbs.AllKeysChan(tx.ctx)
-	if err != nil {
-		return err
-	}
-	for k := range kchan {
-		if err != nil {
-			return err
-		}
-		blk, err := tempbs.Get(k)
-		if err != nil {
-			return err
-		}
-		err = tx.bs.Put(blk)
+	// If we dump before the transaction is committed all the content is lost
+	if tx.committed {
+		err := utils.MigrateBlocks(tx.ctx, tx.store.Bstore, tx.bs)
 		if err != nil {
 			return err
 		}

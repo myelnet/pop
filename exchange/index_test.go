@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/filecoin-project/go-multistore"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -27,10 +26,8 @@ var blockGen = blocksutil.NewBlockGenerator()
 
 func TestIndexLFU(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
-	ms, err := multistore.NewMultiDstore(ds)
-	require.NoError(t, err)
 
-	idx, err := NewIndex(ds, ms, WithBounds(512000, 500000))
+	idx, err := NewIndex(ds, WithBounds(512000, 500000))
 
 	ref1 := &DataRef{
 		PayloadCID:  blockGen.Next().Cid(),
@@ -63,7 +60,7 @@ func TestIndexLFU(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test reinitializing the list from the stored frequencies
-	idx, err = NewIndex(ds, ms, WithBounds(512000, 500000))
+	idx, err = NewIndex(ds, WithBounds(512000, 500000))
 	require.NoError(t, err)
 
 	// Add another read to ref2
@@ -94,10 +91,8 @@ func TestIndexLFU(t *testing.T) {
 // This test verifies refs are moving correctly across buckets when incrementing reads and writes
 func TestIndexRanking(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
-	ms, err := multistore.NewMultiDstore(ds)
-	require.NoError(t, err)
 
-	idx, err := NewIndex(ds, ms, WithBounds(512000, 500000))
+	idx, err := NewIndex(ds, WithBounds(512000, 500000))
 
 	write := func() *DataRef {
 		ref := &DataRef{
@@ -245,10 +240,8 @@ func TestIndexRanking(t *testing.T) {
 
 func TestIndexDropRef(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
-	ms, err := multistore.NewMultiDstore(ds)
-	require.NoError(t, err)
 
-	idx, err := NewIndex(ds, ms)
+	idx, err := NewIndex(ds)
 	require.NoError(t, err)
 
 	ref := &DataRef{
@@ -266,10 +259,8 @@ func TestIndexDropRef(t *testing.T) {
 
 func TestIndexListRefs(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
-	ms, err := multistore.NewMultiDstore(ds)
-	require.NoError(t, err)
 
-	idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+	idx, err := NewIndex(ds, WithBounds(1000, 900))
 
 	var refs []*DataRef
 	// this loop sets 100 refs for 24 bytes = 2400 bytes
@@ -307,10 +298,9 @@ func TestIndexListRefs(t *testing.T) {
 func BenchmarkFlush(b *testing.B) {
 	b.Run("SetRef", func(b *testing.B) {
 		ds := dss.MutexWrap(datastore.NewMapDatastore())
-		ms, err := multistore.NewMultiDstore(ds)
-		require.NoError(b, err)
 
-		idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+		idx, err := NewIndex(ds, WithBounds(1000, 900))
+		require.NoError(b, err)
 
 		b.ReportAllocs()
 		runtime.GC()
@@ -320,7 +310,6 @@ func BenchmarkFlush(b *testing.B) {
 			require.NoError(b, idx.SetRef(&DataRef{
 				PayloadCID:  cid,
 				PayloadSize: 100000,
-				StoreID:     multistore.StoreID(1),
 				Freq:        3,
 			}))
 		}
@@ -330,10 +319,9 @@ func BenchmarkFlush(b *testing.B) {
 // This selector should query a HAMT without following the links
 func TestIndexSelector(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
-	ms, err := multistore.NewMultiDstore(ds)
-	require.NoError(t, err)
 
-	idx, err := NewIndex(ds, ms)
+	idx, err := NewIndex(ds)
+	require.NoError(t, err)
 
 	lb := cidlink.LinkBuilder{
 		Prefix: cid.Prefix{
@@ -393,10 +381,8 @@ func TestIndexSelector(t *testing.T) {
 func TestIndexInterest(t *testing.T) {
 	newIndex := func(n int) *Index {
 		ds := dss.MutexWrap(datastore.NewMapDatastore())
-		ms, err := multistore.NewMultiDstore(ds)
-		require.NoError(t, err)
 
-		idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+		idx, err := NewIndex(ds, WithBounds(1000, 900))
 		require.NoError(t, err)
 
 		var refs []*DataRef
@@ -429,10 +415,8 @@ func TestIndexInterest(t *testing.T) {
 func TestLoadInterest(t *testing.T) {
 	newIndex := func() *Index {
 		ds := dss.MutexWrap(datastore.NewMapDatastore())
-		ms, err := multistore.NewMultiDstore(ds)
-		require.NoError(t, err)
 
-		idx, err := NewIndex(ds, ms, WithBounds(1000, 900))
+		idx, err := NewIndex(ds, WithBounds(1000, 900))
 		require.NoError(t, err)
 		return idx
 	}

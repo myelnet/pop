@@ -17,6 +17,7 @@ import (
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 	bhost "github.com/tchardin/go-libp2p-blankhost"
@@ -29,24 +30,9 @@ type mockRetriever struct {
 	routing map[cid.Cid]peer.ID
 }
 
+// The NewMockRetriever doesn't use multi stores, it loads and retrieves directly from the global blockstore
 func NewMockRetriever(dt datatransfer.Manager, idx *Index) *mockRetriever {
 	dt.RegisterVoucherType(&testutil.FakeDTType{}, &testutil.FakeDTValidator{})
-	dt.RegisterTransportConfigurer(&testutil.FakeDTType{}, func(
-		chID datatransfer.ChannelID,
-		voucher datatransfer.Voucher,
-		tp datatransfer.Transport,
-	) {
-		k := voucher.(*testutil.FakeDTType).Data
-		c, err := cid.Decode(k)
-		if err != nil {
-			panic("bad CID")
-		}
-		store, err := idx.GetStore(c)
-		if err != nil {
-			panic("no store for content")
-		}
-		tp.(StoreConfigurableTransport).UseStore(chID, store.Loader, store.Storer)
-	})
 	return &mockRetriever{
 		dt:      dt,
 		idx:     idx,
@@ -73,11 +59,6 @@ func (mr *mockRetriever) FindAndRetrieve(ctx context.Context, l cid.Cid) error {
 	if !ok {
 		panic("fail to find provider in mock routing")
 	}
-	mr.idx.SetRef(&DataRef{
-		PayloadCID:  l,
-		PayloadSize: int64(256000),
-		StoreID:     mr.idx.ms.Next(),
-	})
 	chid, err := mr.dt.OpenPullDataChannel(ctx, peer, &testutil.FakeDTType{Data: l.String()}, l, sel.All())
 	if err != nil {
 		return err
@@ -90,7 +71,10 @@ func (mr *mockRetriever) FindAndRetrieve(ctx context.Context, l cid.Cid) error {
 
 		switch chState.Status() {
 		case datatransfer.Completed:
-			return nil
+			return mr.idx.SetRef(&DataRef{
+				PayloadCID:  l,
+				PayloadSize: int64(256000),
+			})
 		case datatransfer.Failed, datatransfer.Cancelled:
 			return fmt.Errorf(chState.Message())
 		}
@@ -115,7 +99,7 @@ func TestReplication(t *testing.T) {
 		n := testutil.NewTestNode(mn, t, withSwarmT)
 		names[name] = n.Host.ID()
 		n.SetupDataTransfer(ctx, t)
-		idx, err := NewIndex(n.Ds, n.Ms, WithBounds(2000000, 1800000))
+		idx, err := NewIndex(n.Ds, WithBounds(2000000, 1800000))
 		require.NoError(t, err)
 		rtv := NewMockRetriever(n.Dt, idx)
 		repl := NewReplication(
@@ -123,7 +107,12 @@ func TestReplication(t *testing.T) {
 			idx,
 			n.Dt,
 			rtv,
-			Options{Regions: []Region{global}, ReplInterval: 2 * time.Second},
+			Options{
+				Regions:      []Region{global},
+				ReplInterval: 2 * time.Second,
+				MultiStore:   n.Ms,
+				Blockstore:   n.Bs,
+			},
 		)
 		require.NoError(t, repl.Start(ctx))
 		return n, repl, rtv
@@ -170,12 +159,14 @@ func TestReplication(t *testing.T) {
 	linkD, storeIDD, _ := nD.LoadFileToNewStore(ctx, t, fnameD)
 	rootCidD := linkD.(cidlink.Link).Cid
 	require.NoError(t, rD.idx.SetRef(&DataRef{
-		PayloadCID: rootCidD,
-		StoreID:    storeIDD,
+		PayloadCID:  rootCidD,
+		PayloadSize: int64(256000),
 	}))
 	optsD := DefaultDispatchOptions
 	optsD.RF = 3
-	resD := rD.Dispatch(rootCidD, uint64(256000), optsD)
+	optsD.StoreID = storeIDD
+	resD, err := rD.Dispatch(rootCidD, uint64(256000), optsD)
+	require.NoError(t, err)
 	for r := range resD {
 		switch r.Provider {
 		case names["C"], names["E"], names["F"]:
@@ -183,18 +174,25 @@ func TestReplication(t *testing.T) {
 			t.Fatal("sent to wrong peer")
 		}
 	}
+	// Must migrate dispatched content to global store afterwards
+	store, err := nD.Ms.Get(storeIDD)
+	require.NoError(t, err)
+	require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, nD.Bs))
+	require.NoError(t, nD.Ms.Delete(storeIDD))
 
 	// 2) F write
 	fnameF := nF.CreateRandomFile(t, 256000)
 	linkF, storeIDF, _ := nF.LoadFileToNewStore(ctx, t, fnameF)
 	rootCidF := linkF.(cidlink.Link).Cid
 	require.NoError(t, rF.idx.SetRef(&DataRef{
-		PayloadCID: rootCidF,
-		StoreID:    storeIDF,
+		PayloadCID:  rootCidF,
+		PayloadSize: int64(256000),
 	}))
 	optsF := DefaultDispatchOptions
 	optsF.RF = 4
-	resF := rF.Dispatch(rootCidF, uint64(256000), optsF)
+	optsF.StoreID = storeIDF
+	resF, err := rF.Dispatch(rootCidF, uint64(256000), optsF)
+	require.NoError(t, err)
 	for r := range resF {
 		switch r.Provider {
 		case names["E"], names["D"], names["C"], names["B"]:
@@ -202,6 +200,11 @@ func TestReplication(t *testing.T) {
 			t.Fatal("wrong peer")
 		}
 	}
+	// Must migrate dispatched content to global store afterwards
+	store, err = nF.Ms.Get(storeIDF)
+	require.NoError(t, err)
+	require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, nF.Bs))
+	require.NoError(t, nF.Ms.Delete(storeIDF))
 
 	// New node G joins the network
 	nG, _, rtvG := setupNode("G")
@@ -234,12 +237,14 @@ func TestReplication(t *testing.T) {
 	linkB, storeIDB, _ := nB.LoadFileToNewStore(ctx, t, fnameB)
 	rootCidB := linkB.(cidlink.Link).Cid
 	require.NoError(t, rB.idx.SetRef(&DataRef{
-		PayloadCID: rootCidB,
-		StoreID:    storeIDB,
+		PayloadCID:  rootCidB,
+		PayloadSize: int64(256000),
 	}))
 	optsB := DefaultDispatchOptions
 	optsB.RF = 4
-	resB := rB.Dispatch(rootCidB, uint64(256000), optsB)
+	optsB.StoreID = storeIDB
+	resB, err := rB.Dispatch(rootCidB, uint64(256000), optsB)
+	require.NoError(t, err)
 	for r := range resB {
 		switch r.Provider {
 		case names["C"], names["F"], names["G"], names["A"]:
@@ -279,12 +284,14 @@ func TestReplication(t *testing.T) {
 	linkH, storeIDH, _ := nH.LoadFileToNewStore(ctx, t, fnameH)
 	rootCidH := linkH.(cidlink.Link).Cid
 	require.NoError(t, rH.idx.SetRef(&DataRef{
-		PayloadCID: rootCidH,
-		StoreID:    storeIDH,
+		PayloadCID:  rootCidH,
+		PayloadSize: int64(256000),
 	}))
 	optsH := DefaultDispatchOptions
 	optsH.RF = 3
-	resH := rH.Dispatch(rootCidH, uint64(256000), optsH)
+	optsH.StoreID = storeIDH
+	resH, err := rH.Dispatch(rootCidH, uint64(256000), optsH)
+	require.NoError(t, err)
 	for r := range resH {
 		switch r.Provider {
 		case names["A"], names["B"], names["G"]:
@@ -329,7 +336,7 @@ func TestConcurrentReplication(t *testing.T) {
 			newNode := func() (*testutil.TestNode, *Replication, *mockRetriever) {
 				n := testutil.NewTestNode(mn, t)
 				n.SetupDataTransfer(ctx, t)
-				idx, err := NewIndex(n.Ds, n.Ms, WithBounds(8000000, 7800000))
+				idx, err := NewIndex(n.Ds, WithBounds(8000000, 7800000))
 				require.NoError(t, err)
 				rtv := NewMockRetriever(n.Dt, idx)
 				repl := NewReplication(
@@ -337,7 +344,12 @@ func TestConcurrentReplication(t *testing.T) {
 					idx,
 					n.Dt,
 					rtv,
-					Options{Regions: []Region{global}, ReplInterval: 3 * time.Second},
+					Options{
+						Regions:      []Region{global},
+						ReplInterval: 3 * time.Second,
+						MultiStore:   n.Ms,
+						Blockstore:   n.Bs,
+					},
 				)
 				require.NoError(t, repl.Start(ctx))
 				return n, repl, rtv
@@ -364,14 +376,22 @@ func TestConcurrentReplication(t *testing.T) {
 					link, storeID, bytes := nodes[i].LoadFileToNewStore(ctx, t, fname)
 					rootCid := link.(cidlink.Link).Cid
 					require.NoError(t, repls[i].idx.SetRef(&DataRef{
-						PayloadCID: rootCid,
-						StoreID:    storeID,
+						PayloadCID:  rootCid,
+						PayloadSize: int64(128000),
 					}))
 					opts := DefaultDispatchOptions
 					opts.RF = tc.p1 - 1
-					res := repls[i].Dispatch(rootCid, uint64(128000), opts)
+					opts.StoreID = storeID
+					res, err := repls[i].Dispatch(rootCid, uint64(128000), opts)
+					require.NoError(t, err)
 					for range res {
 					}
+					// Must migrate dispatched content to global store afterwards
+					store, err := nodes[i].Ms.Get(storeID)
+					require.NoError(t, err)
+					require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, nodes[i].Bs))
+					require.NoError(t, nodes[i].Ms.Delete(storeID))
+
 					content[rootCid] = bytes
 					routing[rootCid] = nodes[i].Host.ID()
 				}
@@ -407,11 +427,9 @@ func TestConcurrentReplication(t *testing.T) {
 
 					for k, b := range content {
 						// Now we fetch it again from our providers
-						ref, err := repl.idx.GetRef(k)
+						_, err := repl.idx.GetRef(k)
 						require.NoError(t, err)
-						store, err := repl.idx.ms.Get(ref.StoreID)
-						require.NoError(t, err)
-						node.VerifyFileTransferred(ctx, t, store.DAG, k, b)
+						node.VerifyFileTransferred(ctx, t, node.DAG, k, b)
 					}
 				}()
 			}
@@ -422,96 +440,93 @@ func TestConcurrentReplication(t *testing.T) {
 }
 
 func TestMultiDispatchStreams(t *testing.T) {
-	// Loop is useful for detecting any flakiness
-	for i := 0; i < 1; i++ {
-		t.Run(fmt.Sprintf("Run %d", i), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-			mn := mocknet.New(ctx)
+	mn := mocknet.New(ctx)
 
-			n1 := testutil.NewTestNode(mn, t)
-			n1.SetupDataTransfer(ctx, t)
-			t.Cleanup(func() {
-				err := n1.Dt.Stop(ctx)
-				require.NoError(t, err)
-			})
+	n1 := testutil.NewTestNode(mn, t)
+	n1.SetupDataTransfer(ctx, t)
+	t.Cleanup(func() {
+		err := n1.Dt.Stop(ctx)
+		require.NoError(t, err)
+	})
 
-			fname := n1.CreateRandomFile(t, 256000)
+	fname := n1.CreateRandomFile(t, 256000)
 
-			root, storeID, origBytes := n1.LoadFileToNewStore(ctx, t, fname)
-			rootCid := root.(cidlink.Link).Cid
+	root, storeID, origBytes := n1.LoadFileToNewStore(ctx, t, fname)
+	rootCid := root.(cidlink.Link).Cid
 
-			regions := []Region{
-				{
-					Name: "TestRegion",
-					Code: CustomRegion,
-				},
-			}
-			opts := Options{Regions: regions}
+	regions := []Region{
+		{
+			Name: "TestRegion",
+			Code: CustomRegion,
+		},
+	}
+	opts := Options{Regions: regions, MultiStore: n1.Ms, Blockstore: n1.Bs}
 
-			idx, err := NewIndex(n1.Ds, n1.Ms)
+	idx, err := NewIndex(n1.Ds)
+	require.NoError(t, err)
+	hn := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  rootCid,
+		PayloadSize: int64(256000),
+	}))
+	sub, err := hn.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
+	require.NoError(t, err)
+	require.NoError(t, hn.Start(ctx))
+
+	tnds := make(map[peer.ID]*testutil.TestNode)
+	receivers := make(map[peer.ID]*Replication)
+
+	for i := 0; i < 7; i++ {
+		tnode := testutil.NewTestNode(mn, t)
+		tnode.SetupDataTransfer(ctx, t)
+		t.Cleanup(func() {
+			err := tnode.Dt.Stop(ctx)
 			require.NoError(t, err)
-			hn := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
-			require.NoError(t, idx.SetRef(&DataRef{
-				PayloadCID: rootCid,
-				StoreID:    storeID,
-			}))
-			sub, err := hn.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
-			require.NoError(t, err)
-			require.NoError(t, hn.Start(ctx))
-
-			tnds := make(map[peer.ID]*testutil.TestNode)
-			receivers := make(map[peer.ID]*Replication)
-
-			for i := 0; i < 7; i++ {
-				tnode := testutil.NewTestNode(mn, t)
-				tnode.SetupDataTransfer(ctx, t)
-				t.Cleanup(func() {
-					err := tnode.Dt.Stop(ctx)
-					require.NoError(t, err)
-				})
-				idx, err := NewIndex(tnode.Ds, tnode.Ms)
-				require.NoError(t, err)
-				hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
-				require.NoError(t, hn1.Start(ctx))
-				receivers[tnode.Host.ID()] = hn1
-				tnds[tnode.Host.ID()] = tnode
-			}
-
-			err = mn.LinkAll()
-			require.NoError(t, err)
-
-			err = mn.ConnectAllButSelf()
-			require.NoError(t, err)
-
-			time.Sleep(time.Second)
-
-			// Wait for all peers to be received in the peer manager
-			for i := 0; i < 7; i++ {
-				select {
-				case <-sub.Out():
-				case <-ctx.Done():
-					t.Fatal("all peers didn't get in the peermgr")
-				}
-			}
-
-			res := hn.Dispatch(rootCid, uint64(len(origBytes)), DefaultDispatchOptions)
-
-			var recs []PRecord
-			for rec := range res {
-				recs = append(recs, rec)
-			}
-			require.Equal(t, len(recs), 6)
-
-			time.Sleep(time.Second)
-			for _, r := range recs {
-				store, err := receivers[r.Provider].idx.GetStore(rootCid)
-				require.NoError(t, err)
-				tnds[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
-			}
-
 		})
+		idx, err := NewIndex(tnode.Ds)
+		require.NoError(t, err)
+		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
+		hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
+		require.NoError(t, hn1.Start(ctx))
+		receivers[tnode.Host.ID()] = hn1
+		tnds[tnode.Host.ID()] = tnode
+	}
+
+	err = mn.LinkAll()
+	require.NoError(t, err)
+
+	err = mn.ConnectAllButSelf()
+	require.NoError(t, err)
+
+	time.Sleep(time.Second)
+
+	// Wait for all peers to be received in the peer manager
+	for i := 0; i < 7; i++ {
+		select {
+		case <-sub.Out():
+		case <-ctx.Done():
+			t.Fatal("all peers didn't get in the peermgr")
+		}
+	}
+
+	dopts := DefaultDispatchOptions
+	dopts.StoreID = storeID
+	res, err := hn.Dispatch(rootCid, uint64(len(origBytes)), dopts)
+	require.NoError(t, err)
+
+	var recs []PRecord
+	for rec := range res {
+		recs = append(recs, rec)
+	}
+	require.Equal(t, len(recs), 6)
+
+	time.Sleep(time.Second)
+	for _, r := range recs {
+		p := tnds[r.Provider]
+		p.VerifyFileTransferred(ctx, t, p.DAG, rootCid, origBytes)
 	}
 }
 
@@ -536,14 +551,14 @@ func TestSendDispatchNoPeers(t *testing.T) {
 			Code: CustomRegion,
 		},
 	}
-	opts := Options{Regions: regions}
+	opts := Options{Regions: regions, MultiStore: n1.Ms, Blockstore: n1.Bs}
 
-	idx, err := NewIndex(n1.Ds, n1.Ms)
+	idx, err := NewIndex(n1.Ds)
 	require.NoError(t, err)
 	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
-		PayloadCID: rootCid,
-		StoreID:    storeID,
+		PayloadCID:  rootCid,
+		PayloadSize: int64(256000),
 	}))
 	require.NoError(t, supply.Start(bgCtx))
 
@@ -551,8 +566,10 @@ func TestSendDispatchNoPeers(t *testing.T) {
 		BackoffMin:     10 * time.Millisecond,
 		BackoffAttemps: 4,
 		RF:             5,
+		StoreID:        storeID,
 	}
-	res := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
+	res, err := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
+	require.NoError(t, err)
 	for range res {
 	}
 }
@@ -583,9 +600,15 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		Regions["Asia"],
 	}
 
-	idx, err := NewIndex(n1.Ds, n1.Ms)
+	idx, err := NewIndex(n1.Ds)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), Options{Regions: asia})
+	supply := NewReplication(
+		n1.Host,
+		idx,
+		n1.Dt,
+		NewMockRetriever(n1.Dt, idx),
+		Options{Regions: asia, MultiStore: n1.Ms, Blockstore: n1.Bs},
+	)
 	sub, err := n1.Host.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
@@ -601,9 +624,15 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		idx, err := NewIndex(n.Ds, n.Ms)
+		idx, err := NewIndex(n.Ds)
 		require.NoError(t, err)
-		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n1.Dt, idx), Options{Regions: asia})
+		s := NewReplication(
+			n.Host,
+			idx,
+			n.Dt,
+			NewMockRetriever(n1.Dt, idx),
+			Options{Regions: asia, MultiStore: n.Ms, Blockstore: n.Bs},
+		)
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -625,10 +654,16 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		idx, err := NewIndex(n.Ds, n.Ms)
+		idx, err := NewIndex(n.Ds)
 		require.NoError(t, err)
 
-		s := NewReplication(n.Host, idx, n.Dt, NewMockRetriever(n.Dt, idx), Options{Regions: africa})
+		s := NewReplication(
+			n.Host,
+			idx,
+			n.Dt,
+			NewMockRetriever(n.Dt, idx),
+			Options{Regions: africa, MultiStore: n.Ms, Blockstore: n.Bs},
+		)
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
@@ -644,8 +679,8 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	time.Sleep(time.Second)
 
 	require.NoError(t, idx.SetRef(&DataRef{
-		PayloadCID: rootCid,
-		StoreID:    storeID,
+		PayloadCID:  rootCid,
+		PayloadSize: int64(512000),
 	}))
 
 	// Wait for all peers to be received in the peer manager
@@ -661,18 +696,18 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		BackoffMin:     100 * time.Millisecond,
 		BackoffAttemps: 4,
 		RF:             7,
+		StoreID:        storeID,
 	}
-	res := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
+	res, err := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
+	require.NoError(t, err)
 
 	var recipients []PRecord
 	for rec := range res {
 		recipients = append(recipients, rec)
 	}
 	for _, p := range recipients {
-		store, err := asiaSupplies[p.Provider].idx.GetStore(rootCid)
-		require.NoError(t, err)
-
-		asiaNodes[p.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
+		node := asiaNodes[p.Provider]
+		node.VerifyFileTransferred(ctx, t, node.DAG, rootCid, origBytes)
 	}
 	require.Equal(t, 5, len(recipients))
 }
