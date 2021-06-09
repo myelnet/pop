@@ -272,11 +272,11 @@ func ThisDir(t testing.TB) string {
 
 type FakeDTValidator struct{}
 
-func (v *FakeDTValidator) ValidatePush(isRestart bool, sender peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
+func (v *FakeDTValidator) ValidatePush(isRestart bool, chid datatransfer.ChannelID, sender peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
 	return nil, nil
 }
 
-func (v *FakeDTValidator) ValidatePull(isRestart bool, receiver peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
+func (v *FakeDTValidator) ValidatePull(isRestart bool, chid datatransfer.ChannelID, receiver peer.ID, voucher datatransfer.Voucher, baseCid cid.Cid, selector ipld.Node) (datatransfer.VoucherResult, error) {
 	return nil, nil
 }
 
