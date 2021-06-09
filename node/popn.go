@@ -551,6 +551,10 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 			},
 		})
 	})
+	if err := nd.exch.Index().SetRef(ref); err != nil {
+		sendErr(err)
+		return
+	}
 	nd.tx.Close()
 	nd.tx = nil
 	nd.txmu.Unlock()
@@ -618,7 +622,9 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		nd.send(Notify{
 			CommResult: &cr,
 		})
+		return
 	}
+	nd.send(Notify{CommResult: &CommResult{}})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli
@@ -809,12 +815,10 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 				return err
 			}
 			keys = mk.AsBytes()
-
 		}
 
 		err = nd.exch.Index().SetRef(&exchange.DataRef{
 			PayloadCID:  c,
-			StoreID:     tx.StoreID(),
 			PayloadSize: int64(res.Size),
 			Keys:        keys,
 		})

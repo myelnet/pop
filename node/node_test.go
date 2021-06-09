@@ -347,7 +347,7 @@ func TestCommit(t *testing.T) {
 	})
 	<-added
 
-	committed := make(chan []string, 2)
+	committed := make(chan []string, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.CommResult.Err, "")
 		committed <- n.CommResult.Caches
@@ -399,7 +399,16 @@ func TestGet(t *testing.T) {
 
 	ref, err := pn.getRef("")
 	require.NoError(t, err)
-	require.NoError(t, pn.exch.Index().SetRef(ref))
+	committed := make(chan struct{}, 1)
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.CommResult.Err, "")
+		committed <- struct{}{}
+	}
+	pn.Commit(ctx, &CommArgs{
+		CacheRF:   0,
+		StorageRF: 0,
+	})
+	<-committed
 
 	got := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
@@ -475,7 +484,7 @@ func TestMultipleGet(t *testing.T) {
 
 	pn := newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
-	//cn2 := newTestNode(bgCtx, mn, t)
+	cn2 := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -523,7 +532,16 @@ func TestMultipleGet(t *testing.T) {
 
 	ref, err := pn.getRef("")
 	require.NoError(t, err)
-	require.NoError(t, pn.exch.Index().SetRef(ref))
+	committed := make(chan struct{}, 1)
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.CommResult.Err, "")
+		committed <- struct{}{}
+	}
+	pn.Commit(ctx, &CommArgs{
+		CacheRF:   0,
+		StorageRF: 0,
+	})
+	<-committed
 
 	got1 := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
@@ -559,19 +577,19 @@ func TestMultipleGet(t *testing.T) {
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// @BUG: not entirely sure why this doesn't work if data2 isn't fetched first
-	// got3 := make(chan *GetResult, 2)
-	// cn2.notify = func(n Notify) {
-	// 	require.Equal(t, "", n.GetResult.Err)
-	// 	got3 <- n.GetResult
-	// }
-	// cn2.Get(ctx, &GetArgs{
-	// 	Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
-	// 	Strategy: "SelectFirst",
-	// 	Timeout:  1,
-	// })
-	// res = <-got3
-	// require.NotEqual(t, "", res.DealID)
+	got3 := make(chan *GetResult, 2)
+	cn2.notify = func(n Notify) {
+		require.Equal(t, "", n.GetResult.Err)
+		got3 <- n.GetResult
+	}
+	cn2.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res = <-got3
+	require.NotEqual(t, "", res.DealID)
 
-	// res = <-got3
-	// require.Greater(t, res.TransLatSeconds, 0.0)
+	res = <-got3
+	require.Greater(t, res.TransLatSeconds, 0.0)
 }

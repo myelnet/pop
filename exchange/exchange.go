@@ -17,7 +17,6 @@ import (
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval"
-	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/selectors"
 	sel "github.com/myelnet/pop/selectors"
@@ -135,31 +134,6 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
-	// Track when the session is completed
-	done := make(chan TxResult, 1)
-	// Track any issues with the transfer
-	errs := make(chan deal.Status)
-	// Subscribe to client events to send to the channel
-	cl := e.rtv.Client()
-	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
-		switch state.Status {
-		case deal.StatusCompleted:
-			select {
-			case done <- TxResult{
-				Size:  state.TotalReceived,
-				Spent: state.FundsSpent,
-			}:
-			default:
-			}
-			return
-		case deal.StatusCancelled, deal.StatusErrored:
-			select {
-			case errs <- state.Status:
-			default:
-			}
-			return
-		}
-	})
 	ms := e.opts.MultiStore
 	storeID := ms.Next()
 	store, err := ms.Get(storeID)
@@ -169,19 +143,18 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		bs:         e.opts.Blockstore,
 		ms:         e.opts.MultiStore,
 		rou:        e.rou,
-		retriever:  cl,
+		retriever:  e.rtv.Client(),
 		index:      e.idx,
 		repl:       e.rpl,
 		cacheRF:    6,
 		clientAddr: e.w.DefaultAddress(),
 		sel:        selectors.All(),
-		done:       done,
-		errs:       errs,
+		done:       make(chan TxResult, 1),
+		errs:       make(chan deal.Status),
 		ongoing:    make(chan DealRef),
 		// Triage should be manually activated with WithTriage option
 		// triage:  make(chan DealSelection),
 		entries: make(map[string]Entry),
-		unsub:   unsubscribe,
 		storeID: storeID,
 		store:   store,
 		Err:     err,

@@ -35,13 +35,15 @@ func (te testExecutor) SetError(err error) {
 	te.err <- err
 }
 
-func (te testExecutor) Execute(o deal.Offer) error {
+func (te testExecutor) Execute(o deal.Offer) TxResult {
 	err := <-te.err
 	if err != nil {
-		return err
+		return TxResult{
+			Err: err,
+		}
 	}
 	te.done <- o
-	return nil
+	return TxResult{}
 }
 
 func (te testExecutor) Confirm(o deal.Offer) bool {
@@ -52,7 +54,7 @@ func (te testExecutor) Confirm(o deal.Offer) bool {
 	return true
 }
 
-func (te testExecutor) Finish(err error) {
+func (te testExecutor) Finish(res TxResult) {
 }
 
 func TestSelectionStrategies(t *testing.T) {
@@ -126,11 +128,12 @@ func TestSelectionStrategies(t *testing.T) {
 				}()
 			}
 
+			for i := 0; i < testCase.failures; i++ {
+				go exec.SetError(errors.New("failing"))
+			}
+
 			wq.Start()
 
-			for i := 0; i < testCase.failures; i++ {
-				exec.SetError(errors.New("failing"))
-			}
 			exec.SetError(nil)
 
 			select {

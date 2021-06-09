@@ -86,10 +86,16 @@ func TestTx(t *testing.T) {
 
 	tx = client.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
 	require.NoError(t, tx.Query(sel.Key(KeyFromPath(fname))))
-	select {
-	case <-ctx.Done():
-		t.Fatal("tx timeout")
-	case <-tx.Done():
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("tx timeout")
+		case <-tx.Ongoing():
+		case <-tx.Done():
+			break loop
+		}
 	}
 	file, err = tx.GetFile(KeyFromPath(fname))
 	require.NoError(t, err)
@@ -395,10 +401,15 @@ func TestMultiTx(t *testing.T) {
 	key1 := KeyFromPath(filepaths[0])
 	require.NoError(t, gtx1.Query(sel.Key(key1)))
 
-	select {
-	case <-ctx.Done():
-		t.Fatal("could not finish gtx1")
-	case <-gtx1.Done():
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("could not finish gtx1")
+		case <-gtx1.Ongoing():
+		case <-gtx1.Done():
+			break loop
+		}
 	}
 
 	time.Sleep(10 * time.Millisecond)
@@ -410,10 +421,15 @@ func TestMultiTx(t *testing.T) {
 	key2 := KeyFromPath(filepaths[1])
 	require.NoError(t, gtx2.Query(sel.Key(key2)))
 
-	select {
-	case <-ctx.Done():
-		t.Fatal("could not finish gtx2")
-	case <-gtx2.Done():
+loop2:
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("could not finish gtx2")
+		case <-gtx2.Ongoing():
+		case <-gtx2.Done():
+			break loop2
+		}
 	}
 }
 

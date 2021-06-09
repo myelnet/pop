@@ -30,6 +30,7 @@ import (
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval"
+	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 )
 
@@ -486,7 +487,30 @@ func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
-func (tx *Tx) Execute(of deal.Offer) error {
+func (tx *Tx) Execute(of deal.Offer) TxResult {
+	result := make(chan TxResult, 1)
+	tx.unsub = tx.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
+		switch state.Status {
+		case deal.StatusCompleted:
+			select {
+			case result <- TxResult{
+				Size:  state.TotalReceived,
+				Spent: state.FundsSpent,
+			}:
+			default:
+			}
+			return
+		case deal.StatusCancelled, deal.StatusErrored:
+			select {
+			case result <- TxResult{
+				Err: errors.New(deal.Statuses[state.Status]),
+			}:
+			default:
+			}
+			return
+		}
+	})
+
 	// Make sure our provider is in our peerstore
 	tx.rou.AddAddrs(of.Provider.ID, of.Provider.Addrs)
 	params, err := deal.NewParams(
@@ -498,7 +522,9 @@ func (tx *Tx) Execute(of deal.Offer) error {
 		of.Response.UnsealPrice,
 	)
 	if err != nil {
-		return err
+		return TxResult{
+			Err: err,
+		}
 	}
 
 	id, err := tx.retriever.Retrieve(
@@ -512,19 +538,26 @@ func (tx *Tx) Execute(of deal.Offer) error {
 		&tx.storeID,
 	)
 	if err != nil {
-		return err
+		return TxResult{
+			Err: err,
+		}
 	}
 	tx.ongoing <- DealRef{
 		ID:    id,
 		Offer: of,
 	}
 	select {
-	case status := <-tx.errs:
+	case res := <-result:
+		if res.Err == nil {
+			tx.committed = true
+		}
 		// For now we just return the error and assume the transfer is failed
 		// we do have access to the status in order to try and restart the deal or something else
-		return errors.New(deal.Statuses[status])
+		return res
 	case <-tx.ctx.Done():
-		return tx.ctx.Err()
+		return TxResult{
+			Err: tx.ctx.Err(),
+		}
 	}
 }
 
@@ -557,10 +590,8 @@ func (tx *Tx) Triage() (DealSelection, error) {
 }
 
 // Finish tells the tx all operations have been completed
-func (tx *Tx) Finish(err error) {
-	tx.done <- TxResult{
-		Err: err,
-	}
+func (tx *Tx) Finish(res TxResult) {
+	tx.done <- res
 }
 
 // Done returns a channel that receives any resulting error from the latest operation
@@ -579,7 +610,9 @@ func (tx *Tx) Close() error {
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}
-	tx.unsub()
+	if tx.unsub != nil {
+		tx.unsub()
+	}
 	err := tx.dumpStore()
 	if err != nil {
 		return err
@@ -618,9 +651,9 @@ type OfferWorker interface {
 
 // OfferExecutor exposes the methods required to execute offers
 type OfferExecutor interface {
-	Execute(deal.Offer) error
+	Execute(deal.Offer) TxResult
 	Confirm(deal.Offer) bool
-	Finish(error)
+	Finish(TxResult)
 }
 
 // SelectionStrategy is a function that returns an OfferWorker with a defined strategy
@@ -687,7 +720,7 @@ type sessionWorker struct {
 	priceCeiling abi.TokenAmount
 }
 
-func (s sessionWorker) exec(offer deal.Offer, result chan error) {
+func (s sessionWorker) exec(offer deal.Offer, result chan TxResult) {
 	// Confirm may block until user sends a response
 	// if we are blocking for a while the worker acts as if we'd started the transfer and will continue
 	// buffering offers according to the given rules
@@ -695,7 +728,9 @@ func (s sessionWorker) exec(offer deal.Offer, result chan error) {
 		result <- s.executor.Execute(offer)
 		return
 	}
-	result <- ErrUserDeniedOffer
+	result <- TxResult{
+		Err: ErrUserDeniedOffer,
+	}
 }
 
 // Start a background routine which can be shutdown by sending a channel to the closing channel
@@ -712,14 +747,8 @@ func (s sessionWorker) Start() {
 	go func() {
 		// Offers are queued in this slice
 		var q []deal.Offer
-		var execDone chan error
+		var execDone chan TxResult
 		for {
-			var updates chan error
-			if len(q) > 0 {
-				// We only want to receive updates when we have some offers in the queue
-				// otherwise we have no way to pick up execution with the next offer
-				updates = execDone
-			}
 			select {
 			case resc := <-s.closing:
 				resc <- q
@@ -729,7 +758,7 @@ func (s sessionWorker) Start() {
 					continue
 				}
 				if s.numThreshold < 0 && s.timeThreshold < 0 && execDone == nil {
-					execDone = make(chan error, 1)
+					execDone = make(chan TxResult, 1)
 					go s.exec(of, execDone)
 					continue
 				}
@@ -741,7 +770,7 @@ func (s sessionWorker) Start() {
 				}
 				// If after this one we've reached the threshold let's execute the cheapest offer
 				if len(q) == s.numThreshold {
-					execDone = make(chan error, 1)
+					execDone = make(chan TxResult, 1)
 					sortOffers(q)
 					go s.exec(q[0], execDone)
 					q = q[1:]
@@ -751,20 +780,20 @@ func (s sessionWorker) Start() {
 				if execDone != nil {
 					continue
 				}
-				execDone = make(chan error, 1)
+				execDone = make(chan TxResult, 1)
 				sortOffers(q)
 				go s.exec(q[0], execDone)
 				q = q[1:]
-			case err := <-updates:
+			case res := <-execDone:
 				// If the execution returns an error we assume it is not fixable
 				// and automatically try the next offer
-				if err != nil && len(q) > 0 {
-					execDone = make(chan error, 1)
+				if res.Err != nil && len(q) > 0 {
+					execDone = make(chan TxResult, 1)
 					go s.exec(q[0], execDone)
 					q = q[1:]
 				}
-				if err != nil && len(q) == 0 {
-					s.executor.Finish(err)
+				if res.Err == nil || len(q) == 0 {
+					s.executor.Finish(res)
 				}
 			}
 		}
