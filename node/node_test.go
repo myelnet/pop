@@ -484,7 +484,7 @@ func TestMultipleGet(t *testing.T) {
 
 	pn := newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
-	cn2 := newTestNode(bgCtx, mn, t)
+	// cn2 := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
