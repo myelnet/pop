@@ -49,24 +49,10 @@ func recordError(ds *deal.ProviderState, err error) error {
 var FSMEvents = fsm.Events{
 	// receiving new deal
 	fsm.Event(EventOpen).
-		From(deal.StatusNew).ToNoChange().
-		Action(
-			func(ds *deal.ProviderState) error {
-				ds.TotalSent = 0
-				ds.FundsReceived = abi.NewTokenAmount(0)
-				ds.CurrentInterval = ds.PaymentInterval
-				return nil
-			},
-		),
-
+		From(deal.StatusNew).ToNoChange(),
 	// accepting
 	fsm.Event(EventDealAccepted).
-		From(deal.StatusNew).To(deal.StatusOngoing).
-		Action(func(ds *deal.ProviderState, channelID datatransfer.ChannelID) error {
-			ds.ChannelID = channelID
-			return nil
-		}),
-
+		From(deal.StatusNew).To(deal.StatusOngoing),
 	// sending blocks
 	fsm.Event(EventBlockSent).
 		FromMany(deal.StatusOngoing).ToNoChange().
@@ -143,7 +129,7 @@ var FSMEvents = fsm.Events{
 
 // StateEntryFuncs are the handlers for different states in a retrieval provider
 var StateEntryFuncs = fsm.StateEntryFuncs{
-	deal.StatusOngoing:    TrackTransfer,
+	// deal.StatusOngoing:    TrackTransfer,
 	deal.StatusFailing:    CancelDeal,
 	deal.StatusCancelling: CancelDeal,
 	deal.StatusCompleting: CleanupDeal,

@@ -21,7 +21,7 @@ const noProviderEvent = Event(math.MaxUint64)
 func eventFromDataTransfer(event datatransfer.Event, channelState datatransfer.ChannelState) (Event, []interface{}) {
 	switch event.Code {
 	case datatransfer.Accept:
-		return EventDealAccepted, []interface{}{channelState.ChannelID()}
+		return EventDealAccepted, nil
 	case datatransfer.Disconnected:
 		return EventDataTransferError, []interface{}{fmt.Errorf("deal data transfer stalled (peer hungup)")}
 	case datatransfer.Error:

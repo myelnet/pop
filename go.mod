@@ -12,7 +12,7 @@ require (
 	github.com/filecoin-project/go-cbor-util v0.0.0-20201016124514-d0bbec7bfcc4
 	github.com/filecoin-project/go-commp-utils v0.1.1-0.20210427191551-70bf140d31c7
 	github.com/filecoin-project/go-crypto v0.0.0-20191218222705-effae4ea9f03
-	github.com/filecoin-project/go-data-transfer v1.6.0
+	github.com/filecoin-project/go-data-transfer v1.6.2-0.20210609094630-b870378df1d1
 	github.com/filecoin-project/go-fil-markets v1.4.0
 	github.com/filecoin-project/go-hamt-ipld/v3 v3.0.1
 	github.com/filecoin-project/go-jsonrpc v0.1.2
