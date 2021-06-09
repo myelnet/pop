@@ -1,3 +1,5 @@
 testground/data
 dist/
 *DS_Store
+exchange.test
+node.test
