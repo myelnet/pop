@@ -110,19 +110,24 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err != nil {
 			return err
 		}
+		tx := exch.Tx(ctx)
 
-		storeID := ms.Next()
-		store, err := ms.Get(storeID)
-
-		fid, err := importFile(ctx, file.Name(), store.DAG)
+		fid, err := importFile(ctx, file.Name(), tx.Store().DAG)
 		if err != nil {
 			return err
 		}
-		if err := exch.Index().SetRef(&ex.DataRef{
-			PayloadCID:  fid,
-			StoreID:     storeID,
-			PayloadSize: int64(len(data)),
-		}); err != nil {
+		if err := tx.Put(ex.KeyFromPath(file.Name()), fid, int64(len(data))); err != nil {
+			return err
+		}
+		// Only cache the content locally
+		tx.SetCacheRF(0)
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		if err := exch.Index().SetRef(tx.Ref()); err != nil {
+			return err
+		}
+		if err := tx.Close(); err != nil {
 			return err
 		}
 
