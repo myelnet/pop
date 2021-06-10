@@ -625,7 +625,7 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		}
 		// When initiating both FetchIndex and Dispatch transfers we've already assigned a store
 		// with the root CID so we just need to get it
-		if request.Method == FetchIndex && channelID.Initiator == pid || request.Method == Dispatch {
+		if (request.Method == FetchIndex && channelID.Initiator == pid) || request.Method == Dispatch {
 			// When we're fetching a new index we store it in a new store
 			store := isg.GetStore(request.PayloadCID)
 			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
