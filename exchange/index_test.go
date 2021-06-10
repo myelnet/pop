@@ -287,8 +287,21 @@ func TestIndexListRefs(t *testing.T) {
 
 	list, err := idx.ListRefs()
 	require.NoError(t, err)
+
+	count := len(list)
 	// we only have room for 41 packets = 984
-	require.Greater(t, len(list), 36)
+	require.Greater(t, count, 36)
+
+	// set a ref that already exists
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  list[4].PayloadCID,
+		PayloadSize: list[4].PayloadSize,
+	}))
+
+	// length should be the same size
+	list, err = idx.ListRefs()
+	require.NoError(t, err)
+	require.Equal(t, count, len(list))
 }
 
 func BenchmarkFlush(b *testing.B) {
