@@ -9,7 +9,6 @@ import (
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
-	"github.com/rs/zerolog/log"
 )
 
 var getArgs struct {
@@ -72,25 +71,25 @@ func runGet(ctx context.Context, args []string) error {
 				return errors.New(gr.Err)
 			}
 			if gr.DealID != "" && gr.TotalPrice == "0" {
-				log.Info().Msg("==> Started free transfer")
+				fmt.Printf("==> Started free transfer\n")
 				continue
 			}
 			if gr.DealID != "" {
-				log.Info().Msgf("==> Started retrieval deal %s for a total of %s (%s/b)", gr.DealID, gr.TotalPrice, gr.PricePerByte)
+				fmt.Printf("==> Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalPrice, gr.PricePerByte)
 				continue
 			}
 			if gr.Local {
-				log.Info().Msg("Blocks already in store")
+				fmt.Printf("Blocks already in store\n")
 				return nil
 			}
 
-			log.Info().Msg("==> Completed")
+			fmt.Printf("==> Completed\n")
 			if gr.TotalPrice != "0" {
-				log.Info().Msgf("Routing: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
+				fmt.Printf("Routing: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
 			}
 
 			if getArgs.output != "" {
-				log.Info().Msg("==> Exported content to disk")
+				fmt.Printf("==> Exported content to disk\n")
 			}
 			return nil
 		case <-ctx.Done():
