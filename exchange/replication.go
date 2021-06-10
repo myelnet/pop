@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 
