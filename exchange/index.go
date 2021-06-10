@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/filecoin-project/go-hamt-ipld/v3"
@@ -278,6 +279,26 @@ func (idx *Index) SetRef(ref *DataRef) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 	k := ref.PayloadCID.String()
+
+	// TODO: this is kind of hacky. Might want to error out saying it already exist
+	// and create an UpdateRef method
+	if curef, ok := idx.Refs[k]; ok {
+		// If the ref is already there we merge the keys without duplicating them
+		seen := make(map[string]bool, len(curef.Keys))
+		for _, k := range curef.Keys {
+			seen[string(k)] = true
+		}
+		for _, k := range ref.Keys {
+			if !seen[string(k)] {
+				curef.Keys = append(curef.Keys, k)
+			}
+		}
+		if err := idx.root.Set(context.TODO(), k, ref); err != nil {
+			return err
+		}
+		return idx.Flush()
+	}
+
 	idx.Refs[k] = ref
 	idx.size += uint64(ref.PayloadSize)
 	if idx.ub > 0 && idx.lb > 0 {
@@ -329,6 +350,10 @@ func (idx *Index) ListRefs() ([]*DataRef, error) {
 	i := 0
 	for e := idx.blist.Front(); e != nil; e = e.Next() {
 		for k := range e.Value.(*bucket).entries {
+			if i > len(idx.Refs) {
+				// We have some duplicate refs. This is a bug and should never happen.
+				return refs, fmt.Errorf("found duplicate ref in the linked list")
+			}
 			refs[i] = k
 			i++
 		}
