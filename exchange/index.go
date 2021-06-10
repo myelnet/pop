@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-hamt-ipld/v3"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -33,7 +32,6 @@ const KIndex = "idx"
 // bounds inspired by https://github.com/dgrijalva/lfu-go.
 // Content is garbage collected during eviction.
 type Index struct {
-	ms     *multistore.MultiStore
 	ds     datastore.Batching
 	root   *hamt.Node
 	bstore blockstore.Blockstore
@@ -67,7 +65,6 @@ type Index struct {
 type DataRef struct {
 	PayloadCID  cid.Cid
 	PayloadSize int64
-	StoreID     multistore.StoreID
 	Keys        [][]byte
 	Freq        int64
 	BucketID    int64
@@ -107,12 +104,11 @@ func WithUpdateFunc(fn func()) IndexOption {
 }
 
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
-func NewIndex(ds datastore.Batching, ms *multistore.MultiStore, opts ...IndexOption) (*Index, error) {
+func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
 		blist:    list.New(),
 		freqs:    list.New(),
 		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
-		ms:       ms,
 		Refs:     make(map[string]*DataRef),
 		interest: make(map[string]*DataRef),
 		rootCID:  cid.Undef,
@@ -202,24 +198,6 @@ func (idx *Index) LoadRoot(r cid.Cid, store cbor.IpldStore) (*hamt.Node, error) 
 	return hamt.LoadNode(context.TODO(), store, r, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 }
 
-// GetStoreID returns the StoreID of the store which has the given content
-func (idx *Index) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
-	ref, err := idx.GetRef(id)
-	if err != nil {
-		return 0, err
-	}
-	return ref.StoreID, nil
-}
-
-// GetStore returns the store associated with a data CID
-func (idx *Index) GetStore(id cid.Cid) (*multistore.Store, error) {
-	storeID, err := idx.GetStoreID(id)
-	if err != nil {
-		return nil, err
-	}
-	return idx.ms.Get(storeID)
-}
-
 // Root returns the HAMT root CID
 func (idx *Index) Root() cid.Cid {
 	idx.mu.Lock()
@@ -254,6 +232,7 @@ func (idx *Index) Flush() error {
 }
 
 // DropRef removes all content linked to a root CID and associated Refs
+// TODO: garbage collect
 func (idx *Index) DropRef(k cid.Cid) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -264,11 +243,6 @@ func (idx *Index) DropRef(k cid.Cid) error {
 	}
 	ref := idx.Refs[k.String()]
 	idx.remBlistEntry(ref.bucketNode, ref)
-
-	err := idx.ms.Delete(ref.StoreID)
-	if err != nil {
-		return err
-	}
 
 	delete(idx.Refs, k.String())
 	return idx.Flush()
@@ -450,11 +424,7 @@ func (idx *Index) evict(size uint64) uint64 {
 	for place := idx.blist.Front(); place != nil; place = place.Next() {
 		for entry := range place.Value.(*bucket).entries {
 			delete(idx.Refs, entry.PayloadCID.String())
-
-			err := idx.ms.Delete(entry.StoreID)
-			if err != nil {
-				continue
-			}
+			// TODO: figure out when to trigger garbage collection
 
 			idx.remBlistEntry(place, entry)
 			evicted += uint64(entry.PayloadSize)

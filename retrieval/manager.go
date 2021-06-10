@@ -82,7 +82,6 @@ type Provider struct {
 	revalidator      *ProviderRevalidator
 	pay              payments.Manager
 	askStore         *AskStore
-	storeIDGetter    StoreIDGetter
 }
 
 // GetAsk returns the current deal parameters this provider accepts for a given content ID
@@ -120,7 +119,6 @@ func New(
 	ds datastore.Batching,
 	pay payments.Manager,
 	dt datatransfer.Manager,
-	sg StoreIDGetter,
 	self peer.ID,
 ) (Manager, error) {
 	var err error
@@ -152,7 +150,6 @@ func New(
 		askStore: &AskStore{
 			asks: make(map[cid.Cid]deal.QueryResponse),
 		},
-		storeIDGetter: sg,
 	}
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{
 		Environment:     &providerDealEnvironment{p},

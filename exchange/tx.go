@@ -13,9 +13,14 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-blockservice"
 	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-graphsync/storeutil"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
+	"github.com/ipfs/go-merkledag"
 	unixfile "github.com/ipfs/go-unixfs/file"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -25,6 +30,7 @@ import (
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval"
+	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 )
 
@@ -56,8 +62,9 @@ type TxResult struct {
 type Tx struct {
 	ctx       context.Context
 	cancelCtx context.CancelFunc
-	// multistore is used to get a different store if this transaction is for content located in a
-	// different store
+	// global blockstore to dump the content to when the work is over
+	bs blockstore.Blockstore
+	// MultiStore creates an isolated store for this transaction before it is migrated over to the main store
 	ms *multistore.MultiStore
 	// storeID is the ID of the store used to read or write the content of this session
 	storeID multistore.StoreID
@@ -103,6 +110,8 @@ type Tx struct {
 	triage chan DealSelection
 	// dispatching is a stream of peer confirmations when dispatching updates
 	dispatching chan PRecord
+	// committed indicates whether this transaction was committed or not
+	committed bool
 	// Err exposes any error reported by the session during use
 	Err error
 }
@@ -136,6 +145,7 @@ func WithTriage() TxOption {
 
 // SetCacheRF sets the cache replication factor before committing
 // we don't set it as an option as the value may only be known when committing
+// Setting a replication factor of 0 will not trigger any network requests when committing
 func (tx *Tx) SetCacheRF(rf int) {
 	tx.cacheRF = rf
 }
@@ -287,7 +297,6 @@ func (tx *Tx) Ref() *DataRef {
 
 	return &DataRef{
 		PayloadCID:  tx.root,
-		StoreID:     tx.storeID,
 		PayloadSize: tx.size,
 		Keys:        keys,
 	}
@@ -299,30 +308,17 @@ func (tx *Tx) Commit() error {
 		return tx.Err
 	}
 
-	ref := &DataRef{
-		PayloadCID:  tx.root,
-		StoreID:     tx.storeID,
-		PayloadSize: tx.size,
-	}
-
-	entries, err := tx.GetEntries()
-	if err != nil {
-		return err
-	}
-
-	for _, key := range entries {
-		ref.Keys = append(ref.Keys, []byte(key))
-	}
-
-	err = tx.index.SetRef(ref)
-	if err != nil {
-		return err
-	}
+	tx.committed = true
 
 	opts := DefaultDispatchOptions
 	if tx.cacheRF > 0 {
 		opts.RF = tx.cacheRF
-		tx.dispatching = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
+		opts.StoreID = tx.storeID
+		var err error
+		tx.dispatching, err = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
+		if err != nil {
+			return err
+		}
 	} else {
 		// Do not block WatchDispatch
 		tx.dispatching = make(chan PRecord)
@@ -347,13 +343,11 @@ func (tx *Tx) GetFile(k string) (files.Node, error) {
 		return tx.getUnixDAG(e.Value, tx.store.DAG)
 	}
 	// Check the index if we may already have it from a different transaction
-	if ref, err := tx.index.GetRef(tx.root); err == nil {
-		// In this case we need to access a different store
-		store, err := tx.ms.Get(ref.StoreID)
-		if err != nil {
-			return nil, err
-		}
-		return tx.loadFileEntry(k, store)
+	if _, err := tx.index.GetRef(tx.root); err == nil {
+		return tx.loadFileEntry(k, &multistore.Store{
+			Loader: storeutil.LoaderForBlockstore(tx.bs),
+			DAG:    merkledag.NewDAGService(blockservice.New(tx.bs, offline.Exchange(tx.bs))),
+		})
 	}
 	return tx.loadFileEntry(k, tx.store)
 }
@@ -391,12 +385,11 @@ func (tx *Tx) GetEntries() ([]string, error) {
 	}
 
 	if ref, err := tx.index.GetRef(tx.root); err == nil {
-		store, err := tx.ms.Get(ref.StoreID)
-		if err != nil {
-			return nil, err
-		}
-
-		return utils.MapKeys(tx.ctx, ref.PayloadCID, store.Loader)
+		return utils.MapKeys(
+			tx.ctx,
+			ref.PayloadCID,
+			storeutil.LoaderForBlockstore(tx.bs),
+		)
 	}
 	return nil, fmt.Errorf("failed to get entried")
 }
@@ -494,7 +487,30 @@ func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
-func (tx *Tx) Execute(of deal.Offer) error {
+func (tx *Tx) Execute(of deal.Offer) TxResult {
+	result := make(chan TxResult, 1)
+	tx.unsub = tx.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
+		switch state.Status {
+		case deal.StatusCompleted:
+			select {
+			case result <- TxResult{
+				Size:  state.TotalReceived,
+				Spent: state.FundsSpent,
+			}:
+			default:
+			}
+			return
+		case deal.StatusCancelled, deal.StatusErrored:
+			select {
+			case result <- TxResult{
+				Err: errors.New(deal.Statuses[state.Status]),
+			}:
+			default:
+			}
+			return
+		}
+	})
+
 	// Make sure our provider is in our peerstore
 	tx.rou.AddAddrs(of.Provider.ID, of.Provider.Addrs)
 	params, err := deal.NewParams(
@@ -506,7 +522,9 @@ func (tx *Tx) Execute(of deal.Offer) error {
 		of.Response.UnsealPrice,
 	)
 	if err != nil {
-		return err
+		return TxResult{
+			Err: err,
+		}
 	}
 
 	id, err := tx.retriever.Retrieve(
@@ -520,19 +538,26 @@ func (tx *Tx) Execute(of deal.Offer) error {
 		&tx.storeID,
 	)
 	if err != nil {
-		return err
+		return TxResult{
+			Err: err,
+		}
 	}
 	tx.ongoing <- DealRef{
 		ID:    id,
 		Offer: of,
 	}
 	select {
-	case status := <-tx.errs:
+	case res := <-result:
+		if res.Err == nil {
+			tx.committed = true
+		}
 		// For now we just return the error and assume the transfer is failed
 		// we do have access to the status in order to try and restart the deal or something else
-		return errors.New(deal.Statuses[status])
+		return res
 	case <-tx.ctx.Done():
-		return tx.ctx.Err()
+		return TxResult{
+			Err: tx.ctx.Err(),
+		}
 	}
 }
 
@@ -565,10 +590,8 @@ func (tx *Tx) Triage() (DealSelection, error) {
 }
 
 // Finish tells the tx all operations have been completed
-func (tx *Tx) Finish(err error) {
-	tx.done <- TxResult{
-		Err: err,
-	}
+func (tx *Tx) Finish(res TxResult) {
+	tx.done <- res
 }
 
 // Done returns a channel that receives any resulting error from the latest operation
@@ -582,18 +605,38 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 }
 
 // Close removes any listeners and stream handlers related to a session
-// TODO: cleanup further in case we close before committing
-func (tx *Tx) Close() {
+// If the transaction was not committed, any staged content will be deleted
+func (tx *Tx) Close() error {
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}
-	tx.unsub()
+	if tx.unsub != nil {
+		tx.unsub()
+	}
+	err := tx.dumpStore()
+	if err != nil {
+		return err
+	}
 	tx.cancelCtx()
+	return nil
 }
 
 // SetAddress to use for funding the retriebal
 func (tx *Tx) SetAddress(addr address.Address) {
 	tx.clientAddr = addr
+}
+
+// dumpStore transfers all the content from the tx store to the global blockstore
+// then deletes the store
+func (tx *Tx) dumpStore() error {
+	// If we dump before the transaction is committed all the content is lost
+	if tx.committed {
+		err := utils.MigrateBlocks(tx.ctx, tx.store.Bstore, tx.bs)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.ms.Delete(tx.storeID)
 }
 
 // ErrUserDeniedOffer is returned when a user denies an offer
@@ -608,9 +651,9 @@ type OfferWorker interface {
 
 // OfferExecutor exposes the methods required to execute offers
 type OfferExecutor interface {
-	Execute(deal.Offer) error
+	Execute(deal.Offer) TxResult
 	Confirm(deal.Offer) bool
-	Finish(error)
+	Finish(TxResult)
 }
 
 // SelectionStrategy is a function that returns an OfferWorker with a defined strategy
@@ -677,7 +720,7 @@ type sessionWorker struct {
 	priceCeiling abi.TokenAmount
 }
 
-func (s sessionWorker) exec(offer deal.Offer, result chan error) {
+func (s sessionWorker) exec(offer deal.Offer, result chan TxResult) {
 	// Confirm may block until user sends a response
 	// if we are blocking for a while the worker acts as if we'd started the transfer and will continue
 	// buffering offers according to the given rules
@@ -685,7 +728,9 @@ func (s sessionWorker) exec(offer deal.Offer, result chan error) {
 		result <- s.executor.Execute(offer)
 		return
 	}
-	result <- ErrUserDeniedOffer
+	result <- TxResult{
+		Err: ErrUserDeniedOffer,
+	}
 }
 
 // Start a background routine which can be shutdown by sending a channel to the closing channel
@@ -702,14 +747,8 @@ func (s sessionWorker) Start() {
 	go func() {
 		// Offers are queued in this slice
 		var q []deal.Offer
-		var execDone chan error
+		var execDone chan TxResult
 		for {
-			var updates chan error
-			if len(q) > 0 {
-				// We only want to receive updates when we have some offers in the queue
-				// otherwise we have no way to pick up execution with the next offer
-				updates = execDone
-			}
 			select {
 			case resc := <-s.closing:
 				resc <- q
@@ -719,7 +758,7 @@ func (s sessionWorker) Start() {
 					continue
 				}
 				if s.numThreshold < 0 && s.timeThreshold < 0 && execDone == nil {
-					execDone = make(chan error, 1)
+					execDone = make(chan TxResult, 1)
 					go s.exec(of, execDone)
 					continue
 				}
@@ -731,7 +770,7 @@ func (s sessionWorker) Start() {
 				}
 				// If after this one we've reached the threshold let's execute the cheapest offer
 				if len(q) == s.numThreshold {
-					execDone = make(chan error, 1)
+					execDone = make(chan TxResult, 1)
 					sortOffers(q)
 					go s.exec(q[0], execDone)
 					q = q[1:]
@@ -741,20 +780,20 @@ func (s sessionWorker) Start() {
 				if execDone != nil {
 					continue
 				}
-				execDone = make(chan error, 1)
+				execDone = make(chan TxResult, 1)
 				sortOffers(q)
 				go s.exec(q[0], execDone)
 				q = q[1:]
-			case err := <-updates:
+			case res := <-execDone:
 				// If the execution returns an error we assume it is not fixable
 				// and automatically try the next offer
-				if err != nil && len(q) > 0 {
-					execDone = make(chan error, 1)
+				if res.Err != nil && len(q) > 0 {
+					execDone = make(chan TxResult, 1)
 					go s.exec(q[0], execDone)
 					q = q[1:]
 				}
-				if err != nil && len(q) == 0 {
-					s.executor.Finish(err)
+				if res.Err == nil || len(q) == 0 {
+					s.executor.Finish(res)
 				}
 			}
 		}
