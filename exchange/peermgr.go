@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"errors"
+	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 

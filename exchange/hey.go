@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"io"
 	"time"
 
