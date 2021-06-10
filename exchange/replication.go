@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
+	"github.com/rs/zerolog/log"
 )
 
 //go:generate cbor-gen-for Request

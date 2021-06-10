@@ -3,7 +3,6 @@ package exchange
 import (
 	"context"
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"io"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/rs/zerolog/log"
 )
 
 //go:generate cbor-gen-for Hey
