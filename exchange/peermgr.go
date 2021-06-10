@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"errors"
-	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/rs/zerolog/log"
 )
 
 // Peer contains information recorded while interacted with a peer
