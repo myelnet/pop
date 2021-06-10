@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +25,15 @@ var loggingLevels = map[string]zerolog.Level{
 	zerolog.TraceLevel.String(): zerolog.TraceLevel, // trace
 	zerolog.DebugLevel.String(): zerolog.DebugLevel, // debug
 	zerolog.InfoLevel.String():  zerolog.InfoLevel,  // info (default in prod)
+}
+
+// LoggerHook displays the file & line the log comes from
+type LoggerHook struct{}
+
+func (h LoggerHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
+	if _, file, line, ok := runtime.Caller(3); ok {
+		e.Str("file", path.Base(file)).Int("line", line)
+	}
 }
 
 // Run runs the CLI. The args do not include the binary name.
@@ -55,7 +66,7 @@ func Run(args []string) error {
 			return strings.ToUpper(fmt.Sprintf("| %-6s|", i))
 		}
 		output.FormatMessage = func(i interface{}) string {
-			return fmt.Sprintf("%s", i)
+			return fmt.Sprintf("%s |", i)
 		}
 		output.FormatFieldName = func(i interface{}) string {
 			return fmt.Sprintf("%s:", i)
@@ -63,7 +74,8 @@ func Run(args []string) error {
 		output.FormatFieldValue = func(i interface{}) string {
 			return strings.ToUpper(fmt.Sprintf("%s", i))
 		}
-		log.Logger = log.Output(output)
+
+		log.Logger = log.Hook(LoggerHook{}).Output(output)
 		log.Info().Msg(fmt.Sprintf("Running in %s mode", *logLevel))
 
 	} else {
