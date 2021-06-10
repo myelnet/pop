@@ -3,6 +3,7 @@ package exchange
 import (
 	"bytes"
 	"context"
+	"github.com/rs/zerolog/log"
 	"math/rand"
 	"runtime"
 	"testing"
@@ -321,6 +322,8 @@ func TestIndexSelector(t *testing.T) {
 	require.NoError(t, err)
 
 	idx, err := NewIndex(ds, ms)
+
+	log.Error().Err(err).Msg("failed to create emitter event")
 
 	lb := cidlink.LinkBuilder{
 		Prefix: cid.Prefix{

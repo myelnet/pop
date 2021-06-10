@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"io"
 	"time"
 
@@ -87,8 +88,11 @@ func (hs *HeyService) Run(ctx context.Context) error {
 func (hs *HeyService) HandleStream(s network.Stream) {
 	var hmsg Hey
 	if err := cborutil.ReadCborRPC(s, &hmsg); err != nil {
-		_ = s.Conn().Close()
-		fmt.Println("failed to read CBOR Hey msg", err)
+		connErr := s.Conn().Close()
+		if connErr != nil {
+			log.Error().Err(connErr).Msg("could not close stream connection")
+		}
+		log.Error().Err(err).Msg("failed to read CBOR Hey msg")
 		return
 	}
 	hs.pm.Receive(s.Conn().RemotePeer(), hmsg)
@@ -96,7 +100,11 @@ func (hs *HeyService) HandleStream(s network.Stream) {
 	go func() {
 		defer s.Close()
 		buf := make([]byte, 32)
-		s.Write(buf)
+
+		_, err := s.Write(buf)
+		if err != nil {
+			log.Error().Err(err).Msg("could not write bytes")
+		}
 	}()
 }
 
@@ -116,15 +124,23 @@ func (hs *HeyService) SendHey(ctx context.Context, pid peer.ID) error {
 	go func() {
 		defer s.Close()
 
-		_ = s.SetReadDeadline(time.Now().Add(10 * time.Second))
+		err = s.SetReadDeadline(time.Now().Add(10 * time.Second))
+		if err != nil {
+			log.Error().Err(err).Msg("failed to set read deadline")
+		}
+
 		buf := make([]byte, 32)
 		_, err := io.ReadFull(s, buf)
 		if err != nil {
-			fmt.Println("failed to read pong msg", err)
+			log.Error().Err(err).Msg("failed to read pong msg")
 		}
 		now := time.Now()
 		lat := now.Sub(start)
-		hs.pm.RecordLatency(pid, lat)
+
+		err = hs.pm.RecordLatency(pid, lat)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to record latency")
+		}
 	}()
 	return nil
 }

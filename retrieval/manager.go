@@ -296,6 +296,7 @@ func SettlePaymentChannels(ctx context.Context, pay payments.Manager, pro *Provi
 			if state.PayCh != nil {
 				err := pay.Settle(ctx, *state.PayCh)
 				if err != nil {
+
 					fmt.Printf("settling payment channel: %v\n", err)
 				}
 			}

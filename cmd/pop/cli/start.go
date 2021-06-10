@@ -17,8 +17,8 @@ import (
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
-	"github.com/peterbourgon/ff/v2"
-	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/peterbourgon/ff/v3"
+	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog/log"
 )
 
