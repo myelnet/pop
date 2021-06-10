@@ -3,3 +3,4 @@ dist/
 *DS_Store
 exchange.test
 node.test
+extern/filecoin-ffi/rust/target
