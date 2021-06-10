@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/myelnet/pop/node"
-	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
 var putArgs struct {

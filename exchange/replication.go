@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 
@@ -139,9 +140,22 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 	}
 	r.hs = NewHeyService(h, pm, r)
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
-	r.dt.RegisterVoucherType(&Request{}, r)
-	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
-	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
+
+	err := r.dt.RegisterVoucherType(&Request{}, r)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to register voucher type")
+	}
+
+	err = r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
+	if err != nil {
+		log.Error().Err(err).Msg("failed to register transport configurer")
+	}
+
+	emitter, err := h.EventBus().Emitter(new(IndexEvt))
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create emitter event")
+	}
+	r.emitter = emitter
 
 	return r
 }
@@ -194,7 +208,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 					store := r.GetStore(rt)
 					err := r.idx.LoadInterest(rt, cbor.NewCborStore(store.Bstore))
 					if err != nil {
-						fmt.Println("failed to load interest", err)
+						log.Error().Err(err).Msg("failed to load interest")
 						return
 					}
 				}(res.root)
