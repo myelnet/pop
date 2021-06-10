@@ -66,6 +66,7 @@ require (
 	github.com/onsi/ginkgo v1.16.1 // indirect
 	github.com/onsi/gomega v1.11.0 // indirect
 	github.com/peterbourgon/ff/v2 v2.0.0
+	github.com/peterbourgon/ff/v3 v3.0.0
 	github.com/rs/zerolog v1.20.0
 	github.com/stretchr/testify v1.7.0
 	github.com/supranational/blst v0.3.2

@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/myelnet/pop/node"
-	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/peterbourgon/ff/v3/ffcli"
+	"github.com/rs/zerolog/log"
 )
 
 var getArgs struct {
@@ -25,11 +26,9 @@ var getCmd = &ffcli.Command{
 	ShortUsage: "get <cid>",
 	ShortHelp:  "Retrieve content from the network",
 	LongHelp: strings.TrimSpace(`
-
 The 'pop get' command retrieves blocks with a given root cid and an optional selector
 (defaults retrieves all the linked blocks). Passing an output flag with a path will write the
 data to disk. Adding a miner flag will fallback to miner if content is not available on the secondary market.
-
 `),
 	Exec: runGet,
 	FlagSet: (func() *flag.FlagSet {
@@ -73,25 +72,25 @@ func runGet(ctx context.Context, args []string) error {
 				return errors.New(gr.Err)
 			}
 			if gr.DealID != "" && gr.TotalPrice == "0" {
-				fmt.Printf("==> Started free transfer\n")
+				log.Info().Msg("==> Started free transfer")
 				continue
 			}
 			if gr.DealID != "" {
-				fmt.Printf("==> Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalPrice, gr.PricePerByte)
+				log.Info().Msgf("==> Started retrieval deal %s for a total of %s (%s/b)", gr.DealID, gr.TotalPrice, gr.PricePerByte)
 				continue
 			}
 			if gr.Local {
-				fmt.Printf("Blocks already in store\n")
+				log.Info().Msg("Blocks already in store")
 				return nil
 			}
 
-			fmt.Printf("==> Completed\n")
+			log.Info().Msg("==> Completed")
 			if gr.TotalPrice != "0" {
-				fmt.Printf("Routing: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
+				log.Info().Msgf("Routing: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
 			}
 
 			if getArgs.output != "" {
-				fmt.Printf("==> Exported content to disk\n")
+				log.Info().Msg("==> Exported content to disk")
 			}
 			return nil
 		case <-ctx.Done():

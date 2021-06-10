@@ -9,23 +9,67 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/node"
-	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/peterbourgon/ff/v3"
+	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
+var loggingLevels = map[string]zerolog.Level{
+	zerolog.TraceLevel.String(): zerolog.TraceLevel, // trace
+	zerolog.DebugLevel.String(): zerolog.DebugLevel, // debug
+	zerolog.InfoLevel.String():  zerolog.InfoLevel,  // info (default in prod)
+}
+
 // Run runs the CLI. The args do not include the binary name.
 func Run(args []string) error {
-	if len(args) == 1 && (args[0] == "-V" || args[0] == "--version" || args[0] == "version") {
+	rootfs := flag.NewFlagSet("pop", flag.ExitOnError)
+	version := rootfs.Bool("version", false, "Display pop version")
+	logLevel := rootfs.String("log", zerolog.InfoLevel.String(), "Set logging mode")
+
+	// env vars can be used as program args, i.e : ENV LOG=debug go run . start
+	err := ff.Parse(rootfs, args, ff.WithEnvVarNoPrefix())
+	if err != nil {
+		return err
+	}
+
+	if *version {
 		fmt.Println(build.Version)
 		return nil
 	}
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	rootfs := flag.NewFlagSet("pop", flag.ExitOnError)
+	loggingLevel, ok := loggingLevels[*logLevel]
+	if !ok {
+		return fmt.Errorf("logging level [%s] does not exist", *logLevel)
+	}
+
+	zerolog.SetGlobalLevel(loggingLevel)
+
+	if loggingLevel < zerolog.InfoLevel {
+		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		output.FormatLevel = func(i interface{}) string {
+			return strings.ToUpper(fmt.Sprintf("| %-6s|", i))
+		}
+		output.FormatMessage = func(i interface{}) string {
+			return fmt.Sprintf("%s", i)
+		}
+		output.FormatFieldName = func(i interface{}) string {
+			return fmt.Sprintf("%s:", i)
+		}
+		output.FormatFieldValue = func(i interface{}) string {
+			return strings.ToUpper(fmt.Sprintf("%s", i))
+		}
+		log.Logger = log.Output(output)
+		log.Info().Msg(fmt.Sprintf("Running in %s mode", *logLevel))
+
+	} else {
+		output := zerolog.ConsoleWriter{Out: os.Stderr}
+		log.Logger = log.Output(output)
+	}
 
 	rootCmd := &ffcli.Command{
 		Name:       "pop",
@@ -52,7 +96,7 @@ change until a first stable release. To get started run 'pop start'.
 		return err
 	}
 
-	err := rootCmd.Run(context.Background())
+	err = rootCmd.Run(context.Background())
 	if err == flag.ErrHelp {
 		return nil
 	}
