@@ -119,9 +119,6 @@ func (m *mockStoreIDGetter) GetStoreID(c cid.Cid) (multistore.StoreID, error) {
 
 func TestRetrieval(t *testing.T) {
 
-	// Skipping this while we figure out the first block race situation
-	t.Skip()
-
 	testCases := []struct {
 		name            string
 		addFunds        bool
@@ -191,6 +188,11 @@ func TestRetrieval(t *testing.T) {
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
+			if i != 7 {
+				// Skipping this while we figure out the first block race situation
+				t.Skip()
+			}
+
 			bgCtx := context.Background()
 
 			mn := mocknet.New(bgCtx)
@@ -221,22 +223,17 @@ func TestRetrieval(t *testing.T) {
 				chAddr:     chAddr,
 				chFunds:    &chFunds,
 			}
-			// this is only needed on the provider side to find where content is stored
-			sidg1 := &mockStoreIDGetter{}
-			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, sidg1, n1.Host.ID())
+			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, n1.Host.ID())
 			require.NoError(t, err)
 
 			fname := n2.CreateRandomFile(t, testCase.filesize)
 			// n1 is our client and is retrieving a file n2 has so we add it first
-			link, storeID, origBytes := n2.LoadFileToNewStore(bgCtx, t, fname)
+			link, origBytes := n2.LoadFileToStore(bgCtx, t, &multistore.Store{DAG: n2.DAG}, fname)
 			rootCid := link.(cidlink.Link).Cid
-			providerStore, err := n2.Ms.Get(storeID)
-			require.NoError(t, err)
 
 			n2.SetupDataTransfer(bgCtx, t)
 			pay2 := &mockPayments{}
-			sidg2 := &mockStoreIDGetter{id: storeID}
-			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, sidg2, n2.Host.ID())
+			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, n2.Host.ID())
 			require.NoError(t, err)
 
 			clientAddr, err := address.NewIDAddress(uint64(10))
@@ -285,7 +282,7 @@ totalFunds: %s
 				}
 			})
 
-			stat, err := utils.Stat(ctx, providerStore, rootCid, selectors.All())
+			stat, err := utils.Stat(ctx, &multistore.Store{Bstore: n2.Bs}, rootCid, selectors.All())
 			require.NoError(t, err)
 			clientStoreID := n1.Ms.Next()
 			pricePerByte := abi.NewTokenAmount(100)
@@ -326,7 +323,9 @@ totalFunds: %s
 					require.Equal(t, deal.StatusRejected, clientDealState.Status)
 					return
 				}
-				require.Equal(t, deal.StatusCompleted, clientDealState.Status)
+				if clientDealState.Status != deal.StatusCompleted {
+					t.Errorf("transfer failed with status %s", deal.Statuses[clientDealState.Status])
+				}
 			}
 
 			store, err := n1.Ms.Get(clientStoreID)
@@ -334,9 +333,7 @@ totalFunds: %s
 			n1.VerifyFileTransferred(bgCtx, t, store.DAG, rootCid, origBytes)
 
 			// Check if the file is still intact in the provider blockstore
-			pstore, err := n2.Ms.Get(storeID)
-			require.NoError(t, err)
-			n2.VerifyFileTransferred(bgCtx, t, pstore.DAG, rootCid, origBytes)
+			n2.VerifyFileTransferred(bgCtx, t, n2.DAG, rootCid, origBytes)
 		})
 	}
 }

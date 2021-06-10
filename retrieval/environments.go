@@ -131,7 +131,7 @@ func (pve *providerValidationEnvironment) BeginTracking(pds deal.ProviderState) 
 
 // GetStoreID finds a store where our content is currently
 func (pve *providerValidationEnvironment) GetStoreID(c cid.Cid) (multistore.StoreID, error) {
-	return pve.p.storeIDGetter.GetStoreID(c)
+	return 0, nil
 }
 
 // NextStoreID allocates a store for this deal TODO: do we still need this?

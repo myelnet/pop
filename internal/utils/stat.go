@@ -123,3 +123,25 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, er
 	}
 	return KeyList(entries), nil
 }
+
+// MigrateBlocks transfers all blocks from a blockstore to another
+func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstore.Blockstore) error {
+	kchan, err := from.AllKeysChan(ctx)
+	if err != nil {
+		return err
+	}
+	for k := range kchan {
+		if err != nil {
+			return err
+		}
+		blk, err := from.Get(k)
+		if err != nil {
+			return err
+		}
+		err = to.Put(blk)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

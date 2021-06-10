@@ -56,13 +56,8 @@ type dualStoreGetter struct {
 // Our transport handles both client and provider as a result we need to try both states see which one works
 // TODO: figure out how to improve so we don't cause unnecessary reads on the client side
 func (dsg *dualStoreGetter) Get(pid peer.ID, did deal.ID) (*multistore.Store, error) {
-	var pstate deal.ProviderState
-	err := dsg.p.stateMachines.Get(deal.ProviderDealIdentifier{Receiver: pid, DealID: did}).Get(&pstate)
-	if err == nil {
-		return dsg.p.multiStore.Get(pstate.StoreID)
-	}
 	var cstate deal.ClientState
-	err = dsg.c.stateMachines.Get(did).Get(&cstate)
+	err := dsg.c.stateMachines.Get(did).Get(&cstate)
 	if err == nil {
 		return dsg.c.multiStore.Get(*cstate.StoreID)
 	}

@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	keystore "github.com/ipfs/go-ipfs-keystore"
+	"github.com/ipfs/go-merkledag"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-eventbus"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -32,13 +35,15 @@ func (te testExecutor) SetError(err error) {
 	te.err <- err
 }
 
-func (te testExecutor) Execute(o deal.Offer) error {
+func (te testExecutor) Execute(o deal.Offer) TxResult {
 	err := <-te.err
 	if err != nil {
-		return err
+		return TxResult{
+			Err: err,
+		}
 	}
 	te.done <- o
-	return nil
+	return TxResult{}
 }
 
 func (te testExecutor) Confirm(o deal.Offer) bool {
@@ -49,7 +54,7 @@ func (te testExecutor) Confirm(o deal.Offer) bool {
 	return true
 }
 
-func (te testExecutor) Finish(err error) {
+func (te testExecutor) Finish(res TxResult) {
 }
 
 func TestSelectionStrategies(t *testing.T) {
@@ -123,11 +128,12 @@ func TestSelectionStrategies(t *testing.T) {
 				}()
 			}
 
+			for i := 0; i < testCase.failures; i++ {
+				go exec.SetError(errors.New("failing"))
+			}
+
 			wq.Start()
 
-			for i := 0; i < testCase.failures; i++ {
-				exec.SetError(errors.New("failing"))
-			}
 			exec.SetError(nil)
 
 			select {
@@ -240,13 +246,15 @@ func TestExchangeE2E(t *testing.T) {
 			rootCid := link.(cidlink.Link).Cid
 			require.NoError(t, client.Index().SetRef(&DataRef{
 				PayloadCID:  rootCid,
-				StoreID:     storeID,
 				PayloadSize: int64(len(origBytes)),
 			}))
 
+			opts := DefaultDispatchOptions
+			opts.StoreID = storeID
 			// In this test we expect the maximum of providers to receive the content
 			// that may not be the case in the real world
-			res := client.R().Dispatch(rootCid, uint64(len(origBytes)), DefaultDispatchOptions)
+			res, err := client.R().Dispatch(rootCid, uint64(len(origBytes)), opts)
+			require.NoError(t, err)
 
 			var records []PRecord
 			for rec := range res {
@@ -259,21 +267,15 @@ func TestExchangeE2E(t *testing.T) {
 
 			// Gather and check all the recipients have a proper copy of the file
 			for _, r := range records {
-				store, err := providers[r.Provider].Index().GetStore(rootCid)
-				require.NoError(t, err)
-				pnodes[r.Provider].VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
+				p := pnodes[r.Provider]
+				p.VerifyFileTransferred(ctx, t, p.DAG, rootCid, origBytes)
 			}
 
-			err := client.Index().DropRef(rootCid)
+			err = client.Index().DropRef(rootCid)
 			require.NoError(t, err)
-
-			// Sanity check to make sure our client does not have a copy of our blocks
-			_, err = client.Index().GetStore(rootCid)
-			require.Error(t, err)
 
 			// Now we fetch it again from our providers
 			tx := client.Tx(ctx, WithRoot(rootCid), WithStrategy(SelectFirst), WithTriage())
-			defer tx.Close()
 
 			err = tx.Query(sel.All())
 			require.NoError(t, err)
@@ -293,11 +295,12 @@ func TestExchangeE2E(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("failed to finish sync")
 			}
+			require.NoError(t, tx.Close())
 
-			store, err := cnode.Ms.Get(tx.StoreID())
-			require.NoError(t, err)
+			bs := client.opts.Blockstore
+			dag := merkledag.NewDAGService(blockservice.New(bs, offline.Exchange(bs)))
 			// And we verify we got the file back
-			cnode.VerifyFileTransferred(ctx, t, store.DAG, rootCid, origBytes)
+			cnode.VerifyFileTransferred(ctx, t, dag, rootCid, origBytes)
 		})
 	}
 }

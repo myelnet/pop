@@ -17,7 +17,6 @@ import (
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval"
-	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/selectors"
 	sel "github.com/myelnet/pop/selectors"
@@ -53,7 +52,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	}
 	idx, err := NewIndex(
 		ds,
-		opts.MultiStore,
 		// leave a 20% lower bound so we don't evict too frequently
 		WithBounds(opts.Capacity, opts.Capacity-uint64(math.Round(float64(opts.Capacity)*0.2))),
 	)
@@ -83,7 +81,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		payments.New(ctx, opts.FilecoinAPI, exch.w, ds, opts.Blockstore),
 		opts.DataTransfer,
-		idx,
 		h.ID(),
 	)
 	if err != nil {
@@ -99,7 +96,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 }
 
 func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
-	store, err := e.idx.GetStore(q.PayloadCID)
+	_, err := e.idx.GetRef(q.PayloadCID)
 	if err != nil {
 		return deal.QueryResponse{}, err
 	}
@@ -112,7 +109,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
 	// TODO: support selector in Query
-	stats, err := utils.Stat(ctx, store, q.PayloadCID, sel)
+	stats, err := utils.Stat(ctx, &multistore.Store{Bstore: e.opts.Blockstore}, q.PayloadCID, sel)
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
@@ -132,56 +129,32 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	return resp, nil
 }
 
-// Tx returns a new transaction
+// Tx returns a new transaction. The caller must also call tx.Close to cleanup and perist the new blocks
+// retrieved or created by the transaction.
 func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	// This cancel allows us to shutdown the retrieval process with the session if needed
 	ctx, cancel := context.WithCancel(ctx)
-	// Track when the session is completed
-	done := make(chan TxResult, 1)
-	// Track any issues with the transfer
-	errs := make(chan deal.Status)
-	// Subscribe to client events to send to the channel
-	cl := e.rtv.Client()
-	unsubscribe := cl.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
-		switch state.Status {
-		case deal.StatusCompleted:
-			select {
-			case done <- TxResult{
-				Size:  state.TotalReceived,
-				Spent: state.FundsSpent,
-			}:
-			default:
-			}
-			return
-		case deal.StatusCancelled, deal.StatusErrored:
-			select {
-			case errs <- state.Status:
-			default:
-			}
-			return
-		}
-	})
 	ms := e.opts.MultiStore
 	storeID := ms.Next()
 	store, err := ms.Get(storeID)
 	tx := &Tx{
 		ctx:        ctx,
 		cancelCtx:  cancel,
+		bs:         e.opts.Blockstore,
 		ms:         e.opts.MultiStore,
 		rou:        e.rou,
-		retriever:  cl,
+		retriever:  e.rtv.Client(),
 		index:      e.idx,
 		repl:       e.rpl,
 		cacheRF:    6,
 		clientAddr: e.w.DefaultAddress(),
 		sel:        selectors.All(),
-		done:       done,
-		errs:       errs,
+		done:       make(chan TxResult, 1),
+		errs:       make(chan deal.Status),
 		ongoing:    make(chan DealRef),
 		// Triage should be manually activated with WithTriage option
 		// triage:  make(chan DealSelection),
 		entries: make(map[string]Entry),
-		unsub:   unsubscribe,
 		storeID: storeID,
 		store:   store,
 		Err:     err,
@@ -214,14 +187,11 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			return err
 		}
 
-		ref := &DataRef{
+		return e.idx.SetRef(&DataRef{
 			PayloadCID:  root,
-			StoreID:     tx.StoreID(),
 			PayloadSize: int64(res.Size),
 			Keys:        keys.AsBytes(),
-		}
-
-		return e.idx.SetRef(ref)
+		})
 
 	case <-ctx.Done():
 		return ctx.Err()
@@ -262,9 +232,4 @@ func (e *Exchange) R() *Replication {
 // Index returns the exchange data index
 func (e *Exchange) Index() *Index {
 	return e.idx
-}
-
-// GetStoreID exposes a method to get the store ID used by a given CID
-func (e *Exchange) GetStoreID(id cid.Cid) (multistore.StoreID, error) {
-	return e.idx.GetStoreID(id)
 }

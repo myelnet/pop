@@ -12,6 +12,7 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync/storeutil"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/jpillora/backoff"
@@ -99,6 +100,8 @@ type RoutedRetriever interface {
 type Replication struct {
 	h         host.Host
 	dt        datatransfer.Manager
+	ms        *multistore.MultiStore
+	bs        blockstore.Blockstore
 	pm        *PeerMgr
 	hs        *HeyService
 	idx       *Index
@@ -126,6 +129,8 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 		rgs:       opts.Regions,
 		idx:       idx,
 		rtv:       rtv,
+		ms:        opts.MultiStore,
+		bs:        opts.Blockstore,
 		interval:  opts.ReplInterval,
 		reqProtos: []protocol.ID{PopRequestProtocolID},
 		pulls:     make(map[cid.Cid]*peer.Set),
@@ -252,13 +257,9 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 		PayloadCID: rcid,
 	}
 
-	store, err := r.idx.ms.Get(r.idx.ms.Next())
-	if err != nil {
+	if err := r.AddStore(rcid, r.ms.Next()); err != nil {
 		return err
 	}
-	r.smu.Lock()
-	r.stores[rcid] = store
-	r.smu.Unlock()
 
 	chid, err := r.dt.OpenPullDataChannel(ctx, hvt.Peer, &req, rcid, sel.Hamt())
 	if err != nil {
@@ -281,11 +282,30 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	}
 }
 
+// AddStore assigns a store for a given root cid and store ID
+func (r *Replication) AddStore(k cid.Cid, sid multistore.StoreID) error {
+	store, err := r.ms.Get(sid)
+	if err != nil {
+		return err
+	}
+	r.smu.Lock()
+	r.stores[k] = store
+	r.smu.Unlock()
+	return nil
+}
+
 // GetStore returns the store used for a given root index
 func (r *Replication) GetStore(k cid.Cid) *multistore.Store {
 	r.smu.Lock()
 	defer r.smu.Unlock()
 	return r.stores[k]
+}
+
+// RmStore cleans up the store when it is not needed anymore
+func (r *Replication) RmStore(k cid.Cid) {
+	r.smu.Lock()
+	defer r.smu.Unlock()
+	delete(r.stores, k)
 }
 
 // balanceIndex checks if any content in the interest list is more popular than content in the supply
@@ -334,26 +354,20 @@ func (r *Replication) handleRequest(s network.Stream) {
 	switch req.Method {
 	case Dispatch:
 		// TODO: validate request
-		// Create a new store to receive our new blocks
-		// It will be automatically picked up in the TransportConfigurer
-		storeID := r.idx.ms.Next()
 
+		// Check if we may already have this content
 		_, err := r.idx.GetRef(req.PayloadCID)
 		if err == nil {
 			fmt.Printf("Payload CID %s already exists\n", req.PayloadCID.String())
 			return
 		}
 
-		ref := &DataRef{
-			PayloadCID:  req.PayloadCID,
-			PayloadSize: int64(req.Size),
-			StoreID:     storeID,
-			Keys:        [][]byte{},
-		}
-
-		err = r.idx.SetRef(ref)
-		if err != nil {
-			fmt.Println("error when setting ref before OpenPullDataChannel :", err)
+		// Create a new store to receive our new blocks
+		// It will be automatically picked up in the TransportConfigurer
+		sid := r.ms.Next()
+		if err := r.AddStore(req.PayloadCID, sid); err != nil {
+			fmt.Println("error when creating new store", err)
+			return
 		}
 
 		ctx := context.Background()
@@ -379,22 +393,27 @@ func (r *Replication) handleRequest(s network.Stream) {
 				return
 
 			case datatransfer.Completed:
-				store, err := r.idx.ms.Get(storeID)
-				if err != nil {
-					fmt.Println("error when fetching store :", err)
-					return
-				}
+				store := r.GetStore(req.PayloadCID)
 
-				keys, err := utils.MapKeys(ctx, ref.PayloadCID, store.Loader)
+				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
 					fmt.Println("error when fetching keys :", err)
-					return
 				}
-				ref.Keys = keys.AsBytes()
 
-				err = r.idx.SetRef(ref)
-				if err != nil {
+				if err := r.idx.SetRef(&DataRef{
+					PayloadCID:  req.PayloadCID,
+					PayloadSize: int64(req.Size),
+					Keys:        keys.AsBytes(),
+				}); err != nil {
 					fmt.Println("error when setting ref :", err)
+				}
+
+				if err := utils.MigrateBlocks(ctx, store.Bstore, r.bs); err != nil {
+					fmt.Println("error migrating blocks :", err)
+				}
+
+				if err := r.ms.Delete(sid); err != nil {
+					fmt.Println("error deleting store :", err)
 				}
 				return
 			}
@@ -413,6 +432,7 @@ type DispatchOptions struct {
 	BackoffMin     time.Duration
 	BackoffAttemps int
 	RF             int
+	StoreID        multistore.StoreID
 }
 
 // DefaultDispatchOptions provides useful defaults
@@ -424,7 +444,11 @@ var DefaultDispatchOptions = DispatchOptions{
 }
 
 // Dispatch to the network until we have propagated the content to enough peers
-func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) chan PRecord {
+func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (chan PRecord, error) {
+	if err := r.AddStore(root, opt.StoreID); err != nil {
+		return nil, err
+	}
+
 	req := Request{
 		Method:     Dispatch,
 		PayloadCID: root,
@@ -451,6 +475,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) c
 		defer func() {
 			unsub()
 			close(out)
+
 		}()
 		// The peers we already sent requests to
 		rcv := make(map[peer.ID]bool)
@@ -501,7 +526,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) c
 			}
 		}
 	}()
-	return out
+	return out, nil
 }
 
 func (r *Replication) sendAllRequests(req Request, peers []peer.ID) {
@@ -598,7 +623,9 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		if !ok {
 			return
 		}
-		if request.Method == FetchIndex && channelID.Initiator == pid {
+		// When initiating both FetchIndex and Dispatch transfers we've already assigned a store
+		// with the root CID so we just need to get it
+		if (request.Method == FetchIndex && channelID.Initiator == pid) || request.Method == Dispatch {
 			// When we're fetching a new index we store it in a new store
 			store := isg.GetStore(request.PayloadCID)
 			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
@@ -607,6 +634,7 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 			}
 			return
 		}
+		// Someone is retrieving our index, it should be loaded from the index's blockstore
 		if request.Method == FetchIndex {
 			loader := storeutil.LoaderForBlockstore(idx.Bstore())
 			storer := storeutil.StorerForBlockstore(idx.Bstore())
@@ -615,15 +643,6 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 				warn(err)
 			}
 			return
-		}
-		store, err := idx.GetStore(request.PayloadCID)
-		if err != nil {
-			warn(err)
-			return
-		}
-		err = gsTransport.UseStore(channelID, store.Loader, store.Storer)
-		if err != nil {
-			warn(err)
 		}
 	}
 }
