@@ -12,8 +12,8 @@ require (
 	github.com/filecoin-project/go-cbor-util v0.0.0-20201016124514-d0bbec7bfcc4
 	github.com/filecoin-project/go-commp-utils v0.1.1-0.20210427191551-70bf140d31c7
 	github.com/filecoin-project/go-crypto v0.0.0-20191218222705-effae4ea9f03
-	github.com/filecoin-project/go-data-transfer v1.6.0
-	github.com/filecoin-project/go-fil-markets v1.4.0
+	github.com/filecoin-project/go-data-transfer v1.7.0
+	github.com/filecoin-project/go-fil-markets v1.6.0-rc1
 	github.com/filecoin-project/go-hamt-ipld/v3 v3.0.1
 	github.com/filecoin-project/go-jsonrpc v0.1.2
 	github.com/filecoin-project/go-multistore v0.0.3
@@ -30,7 +30,7 @@ require (
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-datastore v0.4.5
 	github.com/ipfs/go-ds-badger v0.2.6
-	github.com/ipfs/go-graphsync v0.7.0
+	github.com/ipfs/go-graphsync v0.6.4
 	github.com/ipfs/go-ipfs-blockstore v1.0.3
 	github.com/ipfs/go-ipfs-blocksutil v0.0.1
 	github.com/ipfs/go-ipfs-chunker v0.0.5
@@ -44,8 +44,8 @@ require (
 	github.com/ipfs/go-path v0.0.9
 	github.com/ipfs/go-unixfs v0.2.4
 	github.com/ipld/go-car v0.1.1-0.20201119040415-11b6074b6d4d
-	github.com/ipld/go-ipld-prime v0.7.0
-	github.com/ipld/go-ipld-prime-proto v0.1.1
+	github.com/ipld/go-ipld-prime v0.5.1-0.20201021195245-109253e8a018
+	github.com/ipld/go-ipld-prime-proto v0.1.0
 	github.com/jpillora/backoff v1.0.0
 	github.com/libp2p/go-eventbus v0.2.1
 	github.com/libp2p/go-libp2p v0.13.0

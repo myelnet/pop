@@ -126,6 +126,7 @@ func (pve *providerValidationEnvironment) BeginTracking(pds deal.ProviderState) 
 		return err
 	}
 
+	pve.p.revalidator.TrackChannel(pds)
 	return pve.p.stateMachines.Send(pds.Identifier(), provider.EventOpen)
 }
 
