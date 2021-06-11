@@ -452,7 +452,7 @@ type DispatchOptions struct {
 // DefaultDispatchOptions provides useful defaults
 // We can change these if the content requires a long transfer time
 var DefaultDispatchOptions = DispatchOptions{
-	BackoffMin:     2 * time.Second,
+	BackoffMin:     5 * time.Second,
 	BackoffAttemps: 4,
 	RF:             6,
 }
@@ -472,11 +472,16 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 	out := make(chan PRecord, opt.RF)
 	// listen for datatransfer events to identify the peers who pulled the content
 	unsub := r.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+		root := chState.BaseCID()
+		if root != req.PayloadCID {
+			return
+		}
+
+		if chState.Status() == datatransfer.Failed || chState.Status() == datatransfer.Cancelled {
+			fmt.Println("transfer failed for content", root)
+		}
+
 		if chState.Status() == datatransfer.Completed {
-			root := chState.BaseCID()
-			if root != req.PayloadCID {
-				return
-			}
 			// The recipient is the provider who received our content
 			rec := chState.Recipient()
 			resChan <- PRecord{
@@ -522,7 +527,8 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 				r.sendAllRequests(req, providers)
 			}
 
-			timer := time.NewTimer(b.Duration())
+			delay := b.Duration()
+			timer := time.NewTimer(delay)
 			for {
 				select {
 				case <-timer.C:
