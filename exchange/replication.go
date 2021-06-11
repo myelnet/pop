@@ -461,11 +461,14 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 	out := make(chan PRecord, opt.RF)
 	// listen for datatransfer events to identify the peers who pulled the content
 	unsub := r.dt.SubscribeToEvents(func(event datatransfer.Event, chState datatransfer.ChannelState) {
+		root := chState.BaseCID()
+		if root != req.PayloadCID {
+			return
+		}
+
+		fmt.Println("status", datatransfer.Statuses[chState.Status()], datatransfer.Events[event.Code])
+
 		if chState.Status() == datatransfer.Completed {
-			root := chState.BaseCID()
-			if root != req.PayloadCID {
-				return
-			}
 			// The recipient is the provider who received our content
 			rec := chState.Recipient()
 			fmt.Println("publishing record")
@@ -638,10 +641,12 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		// with the root CID so we just need to get it
 		if (request.Method == FetchIndex && channelID.Initiator == pid) || request.Method == Dispatch {
 			// When we're fetching a new index we store it in a new store
-			if channelID.Initiator != pid {
-				fmt.Println("getting the store")
-			}
 			store := isg.GetStore(request.PayloadCID)
+
+			if channelID.Initiator != pid {
+				fmt.Println("got the store")
+			}
+
 			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
 			if err != nil {
 				warn(err)
