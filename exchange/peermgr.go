@@ -94,9 +94,12 @@ func (pm *PeerMgr) RecordLatency(p peer.ID, t time.Duration) error {
 
 // Peers returns n active peers for a given list of regions and peers to ignore
 func (pm *PeerMgr) Peers(n int, rl []Region, ignore map[peer.ID]bool) []peer.ID {
+	var peers []peer.ID
+	if n == 0 {
+		return peers
+	}
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	var peers []peer.ID
 	for _, r := range rl {
 		for p, v := range pm.peers {
 			if ignore[p] {
