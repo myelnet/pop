@@ -492,6 +492,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 
 	requests:
 		for {
+			fmt.Println("attempting")
 			// Give up after 6 attemps. Maybe should make this customizable for servers that can afford it
 			if int(b.Attempt()) > opt.BackoffAttemps {
 				return
