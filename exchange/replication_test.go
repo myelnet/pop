@@ -440,7 +440,7 @@ func TestConcurrentReplication(t *testing.T) {
 }
 
 func TestMultiDispatchStreams(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	mn := mocknet.New(ctx)

@@ -354,7 +354,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 	switch req.Method {
 	case Dispatch:
 		// TODO: validate request
-		fmt.Println("got a dispatch request")
 
 		// Check if we may already have this content
 		_, err := r.idx.GetRef(req.PayloadCID)
@@ -371,7 +370,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 			return
 		}
 
-		fmt.Println("opening pull")
 		ctx := context.Background()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
@@ -388,7 +386,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 			switch state.Status() {
 			case datatransfer.Failed, datatransfer.Cancelled:
-				fmt.Println("provider transfer failed")
 				err = r.idx.DropRef(state.BaseCID())
 				if err != nil {
 					fmt.Println("error when droping ref :", err)
@@ -396,7 +393,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 				return
 
 			case datatransfer.Completed:
-				fmt.Println("provider transfer completed")
 				store := r.GetStore(req.PayloadCID)
 
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
@@ -468,13 +464,12 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 		}
 
 		if chState.Status() == datatransfer.Failed || chState.Status() == datatransfer.Cancelled {
-			fmt.Println("cient transfer failed")
+			fmt.Println("transfer failed for content", root)
 		}
 
 		if chState.Status() == datatransfer.Completed {
 			// The recipient is the provider who received our content
 			rec := chState.Recipient()
-			fmt.Println("publishing record")
 			resChan <- PRecord{
 				Provider:   rec,
 				PayloadCID: root,
@@ -483,7 +478,6 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 	})
 	go func() {
 		defer func() {
-			fmt.Println("closing backoff")
 			unsub()
 			close(out)
 
@@ -501,7 +495,6 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 
 	requests:
 		for {
-			fmt.Println("attempting")
 			// Give up after 6 attemps. Maybe should make this customizable for servers that can afford it
 			if int(b.Attempt()) > opt.BackoffAttemps {
 				return
@@ -516,26 +509,22 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 				rcv[p] = true
 			}
 			if len(providers) > 0 {
-				fmt.Println("sending requests to providers", len(providers))
 				// sendAllRequests
 				r.sendAllRequests(req, providers)
 			}
 
 			delay := b.Duration()
 			timer := time.NewTimer(delay)
-			fmt.Println("timer", delay)
 			for {
 				select {
 				case <-timer.C:
 
 					continue requests
 				case r := <-resChan:
-					fmt.Println("result channel")
 					// forward the confirmations to the Response channel
 					out <- r
 					// increment our results count
 					n++
-					fmt.Println("incrementing n", n)
 					if n == opt.RF {
 						return
 					}
