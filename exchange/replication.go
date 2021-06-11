@@ -388,6 +388,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 			switch state.Status() {
 			case datatransfer.Failed, datatransfer.Cancelled:
+				fmt.Println("provider transfer failed")
 				err = r.idx.DropRef(state.BaseCID())
 				if err != nil {
 					fmt.Println("error when droping ref :", err)
@@ -466,7 +467,9 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 			return
 		}
 
-		fmt.Println("status", datatransfer.Statuses[chState.Status()], datatransfer.Events[event.Code])
+		if chState.Status() == datatransfer.Failed || chState.Status() == datatransfer.Cancelled {
+			fmt.Println("cient transfer failed")
+		}
 
 		if chState.Status() == datatransfer.Completed {
 			// The recipient is the provider who received our content
