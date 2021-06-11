@@ -417,7 +417,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 			case datatransfer.Completed:
 				store := r.GetStore(req.PayloadCID)
-
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
 					log.Error().Err(err).Msg("error when fetching keys")
@@ -437,6 +436,14 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				if err := r.ms.Delete(sid); err != nil {
 					log.Error().Err(err).Msg("error when deleting store")
+				}
+
+				if err := utils.MigrateBlocks(ctx, store.Bstore, r.bs); err != nil {
+					fmt.Println("error migrating blocks :", err)
+				}
+
+				if err := r.ms.Delete(sid); err != nil {
+					fmt.Println("error deleting store :", err)
 				}
 				return
 			}
