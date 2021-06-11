@@ -354,6 +354,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 	switch req.Method {
 	case Dispatch:
 		// TODO: validate request
+		fmt.Println("got a dispatch request")
 
 		// Check if we may already have this content
 		_, err := r.idx.GetRef(req.PayloadCID)
@@ -370,6 +371,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 			return
 		}
 
+		fmt.Println("opening pull")
 		ctx := context.Background()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
@@ -504,6 +506,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 				rcv[p] = true
 			}
 			if len(providers) > 0 {
+				fmt.Println("sending requests to providers", len(providers))
 				// sendAllRequests
 				r.sendAllRequests(req, providers)
 			}
