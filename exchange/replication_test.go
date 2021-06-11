@@ -693,7 +693,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	}
 	// get 5 requests and give up after 4 attemps
 	options := DispatchOptions{
-		BackoffMin:     5 * time.Second,
+		BackoffMin:     100 * time.Millisecond,
 		BackoffAttemps: 4,
 		RF:             7,
 		StoreID:        storeID,

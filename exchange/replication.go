@@ -528,6 +528,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 					out <- r
 					// increment our results count
 					n++
+					fmt.Println("incrementing n", n)
 					if n == opt.RF {
 						return
 					}
