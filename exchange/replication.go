@@ -467,6 +467,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 			}
 			// The recipient is the provider who received our content
 			rec := chState.Recipient()
+			fmt.Println("publishing record")
 			resChan <- PRecord{
 				Provider:   rec,
 				PayloadCID: root,
@@ -475,6 +476,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 	})
 	go func() {
 		defer func() {
+			fmt.Println("closing backoff")
 			unsub()
 			close(out)
 
@@ -512,13 +514,16 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 				r.sendAllRequests(req, providers)
 			}
 
-			timer := time.NewTimer(b.Duration())
+			delay := b.Duration()
+			timer := time.NewTimer(delay)
+			fmt.Println("timer", delay)
 			for {
 				select {
 				case <-timer.C:
 
 					continue requests
 				case r := <-resChan:
+					fmt.Println("result channel")
 					// forward the confirmations to the Response channel
 					out <- r
 					// increment our results count
