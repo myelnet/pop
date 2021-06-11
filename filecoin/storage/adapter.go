@@ -83,14 +83,10 @@ func (a *Adapter) AddFunds(ctx context.Context, addr address.Address, amount abi
 }
 
 // GetBalance returns locked/unlocked for a storage participant.
-func (a *Adapter) GetBalance(ctx context.Context, addr address.Address, tok shared.TipSetToken) (sm.Balance, error) {
+func (a *Adapter) GetBalance(ctx context.Context, addr address.Address) (sm.Balance, error) {
 	log.Info().Msg("GetBalance")
-	tsk, err := fil.TipSetKeyFromBytes(tok)
-	if err != nil {
-		return sm.Balance{}, err
-	}
 
-	bal, err := a.fAPI.StateMarketBalance(ctx, addr, tsk)
+	bal, err := a.fAPI.StateMarketBalance(ctx, addr, fil.EmptyTSK)
 	if err != nil {
 		log.Error().Msg("StateMarketBalance failed")
 		return sm.Balance{}, err

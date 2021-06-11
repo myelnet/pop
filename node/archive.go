@@ -6,10 +6,7 @@ import (
 
 	"github.com/filecoin-project/go-commp-utils/writer"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
-	offline "github.com/ipfs/go-ipfs-exchange-offline"
-	"github.com/ipfs/go-merkledag"
 	"github.com/ipld/go-car"
 )
 
@@ -41,13 +38,10 @@ func (nd *node) archive(ctx context.Context, root cid.Cid) (*PieceRef, error) {
 		return nil, err
 	}
 
-	bs := nd.ms.MultiReadBlockstore()
-	dag := merkledag.NewDAGService(blockservice.New(bs, offline.Exchange(bs)))
-
 	wr := &writer.Writer{}
 	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
 
-	err = car.WriteCar(ctx, dag, []cid.Cid{proot}, wr)
+	err = car.WriteCar(ctx, nd.dag, []cid.Cid{proot}, wr)
 	if err != nil {
 		return nil, err
 	}

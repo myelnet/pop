@@ -244,14 +244,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 // load HAMT from the datastore or create new one
 func (nd *node) loadPieceHAMT() error {
-	ms, err := nd.ms.Get(nd.ms.Next())
-	if err != nil {
-		return err
-	}
-
 	enc, err := nd.ds.Get(datastore.NewKey(KContentBatch))
 
-	nd.is = cbor.NewCborStore(ms.Bstore)
+	nd.is = cbor.NewCborStore(nd.bs)
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
 		hnd, err := hamt.NewNode(nd.is, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 		if err != nil {
