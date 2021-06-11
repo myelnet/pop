@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
+	"github.com/rs/zerolog/log"
 )
 
 // channel manages the lifecycle of a payment channel
@@ -93,7 +95,9 @@ func (ch *channel) getWaitReady(ctx context.Context, mcid cid.Cid) (address.Addr
 		}
 
 		if ci.Channel == nil {
-			panic(fmt.Sprintf("create / add funds message %s succeeded but channelInfo.Channel is nil", mcid))
+			log.Panic().
+				Str("cid", mcid.String()).
+				Msg("create / add funds message succeeded but channelInfo.Channel is nil")
 		}
 		return *ci.Channel, nil
 	}
@@ -359,7 +363,7 @@ func (ch *channel) mpoolPush(ctx context.Context, msg *filecoin.Message) (*filec
 		if strings.Contains(err.Error(), "already in mpool, increase GasPremium") {
 			// incGas picks up the suggested gas premium from the error message and tries to push
 			// a new message to the pool with that amount
-			fmt.Println("message already in pool, increasing gas")
+			log.Error().Msg("message already in pool, increasing gas")
 			return ch.increaseGas(ctx, msg, err.Error())
 		}
 		return nil, fmt.Errorf("MpoolPush failed with error: %v", err)
@@ -410,7 +414,7 @@ func (ch *channel) mutateChannelInfo(channelID string, mutate func(*ChannelInfo)
 	// we record to the store that we're going to send a message, send
 	// the message, and then record that the message was sent.
 	if err != nil {
-		fmt.Printf("Error reading channel info from store: %s\n", err)
+		log.Error().Err(err).Msg("error reading channel info from store")
 		return
 	}
 
@@ -418,7 +422,7 @@ func (ch *channel) mutateChannelInfo(channelID string, mutate func(*ChannelInfo)
 
 	err = ch.store.putChannelInfo(channelInfo)
 	if err != nil {
-		fmt.Printf("Error writing channel info to store: %s\n", err)
+		log.Error().Err(err).Msg("error writing channel info to store")
 	}
 }
 
@@ -444,12 +448,12 @@ func (ch *channel) waitPaychCreateMsg(channelID string, mcid cid.Cid) error {
 		// Channel creation failed, so remove the channel from the datastore
 		dserr := ch.store.RemoveChannel(channelID)
 		if dserr != nil {
-			fmt.Printf("failed to remove channel %s: %s", channelID, dserr)
+			log.Error().Err(dserr).Str("channelID", channelID).Msg("failed to remove channel")
 		}
 
 		// Exit code 7 means out of gas
 		err := fmt.Errorf("payment channel creation failed (exit code %d)", mwait.Receipt.ExitCode)
-		fmt.Printf("Error: %v", err)
+		log.Error().Err(err).Msg("error")
 		return err
 	}
 
@@ -459,7 +463,7 @@ func (ch *channel) waitPaychCreateMsg(channelID string, mcid cid.Cid) error {
 	var decodedReturn init2.ExecReturn
 	err = decodedReturn.UnmarshalCBOR(bytes.NewReader(mwait.Receipt.Return))
 	if err != nil {
-		fmt.Printf("Error decoding Receipt: %v", err)
+		log.Error().Err(err).Msg("error decoding Receipt")
 		return err
 	}
 
@@ -486,7 +490,7 @@ func (ch *channel) msgWaitComplete(mcid cid.Cid, err error) {
 	// Save the message result to the store
 	dserr := ch.store.SaveMessageResult(mcid, err)
 	if dserr != nil {
-		fmt.Printf("saving message result: %s", dserr)
+		log.Error().Err(dserr).Msg("saving message result")
 	}
 
 	// Inform listeners that the message has completed
@@ -524,7 +528,7 @@ func (ch *channel) addFunds(ctx context.Context, channelInfo *ChannelInfo, amt f
 	// look up the channel from the message CID
 	err = ch.store.SaveNewMessage(channelInfo.ChannelID, mcid)
 	if err != nil {
-		fmt.Printf("saving add funds message CID %s: %s", mcid, err)
+		log.Error().Err(err).Str("mcid", mcid.String()).Msg("saving add funds message CID")
 	}
 
 	go ch.waitForAddFundsMsg(channelInfo.ChannelID, mcid)
@@ -541,13 +545,13 @@ func (ch *channel) waitForAddFundsMsg(channelID string, mcid cid.Cid) {
 func (ch *channel) waitAddFundsMsg(channelID string, mcid cid.Cid) error {
 	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(5))
 	if err != nil {
-		fmt.Printf("Error waiting for chain message: %v", err)
+		log.Error().Err(err).Str("mcid", mcid.String()).Msg("error waiting for chain message")
 		return err
 	}
 
 	if mwait.Receipt.ExitCode != 0 {
 		err := fmt.Errorf("voucher channel creation failed: adding funds (exit code %d)", mwait.Receipt.ExitCode)
-		fmt.Printf("Error: %v", err)
+		log.Error().Err(err).Msg("error")
 
 		ch.lk.Lock()
 		defer ch.lk.Unlock()
@@ -681,7 +685,7 @@ func (ch *channel) addVoucherUnlocked(ctx context.Context, chAddr address.Addres
 		}
 		if eq {
 			// Ignore the duplicate voucher.
-			fmt.Println("AddVoucher: voucher re-added")
+			log.Info().Msg("AddVoucher: voucher re-added")
 			return filecoin.NewInt(0), nil
 		}
 
@@ -1132,7 +1136,7 @@ func (ch *channel) settle(ctx context.Context, chAddr address.Address) (cid.Cid,
 	ci.Settling = true
 	err = ch.store.putChannelInfo(ci)
 	if err != nil {
-		fmt.Printf("Error marking channel as settled: %s", err)
+		log.Error().Err(err).Msg("error marking channel as settled")
 	}
 
 	return smgs.Cid(), err
@@ -1492,11 +1496,11 @@ func newMsgListeners() msgListeners {
 	ps := pubsub.New(func(event pubsub.Event, subFn pubsub.SubscriberFn) error {
 		evt, ok := event.(msgCompleteEvt)
 		if !ok {
-			return fmt.Errorf("wrong type of event")
+			return errors.New("wrong type of event")
 		}
 		sub, ok := subFn.(subscriberFn)
 		if !ok {
-			return fmt.Errorf("wrong type of subscriber")
+			return errors.New("wrong type of subscriber")
 		}
 		sub(evt)
 		return nil
@@ -1520,7 +1524,7 @@ func (ml *msgListeners) fireMsgComplete(mcid cid.Cid, err error) {
 	e := ml.ps.Publish(msgCompleteEvt{mcid: mcid, err: err})
 	if e != nil {
 		// In theory we shouldn't ever get an error here
-		fmt.Printf("unexpected error publishing message complete: %s", e)
+		log.Error().Err(e).Msg("unexpected error publishing message complete")
 	}
 }
 

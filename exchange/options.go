@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/rs/zerolog/log"
 )
 
 // RequestTopic listens for peers looking for content blocks
@@ -116,7 +116,7 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 		opts.FilecoinAPI, err = filecoin.NewLotusRPC(ctx, opts.FilecoinRPCEndpoint, opts.FilecoinRPCHeader)
 		if err != nil {
 			// We don't fail the initialization and continue without it
-			fmt.Println("failed to connect with lotus RPC", err)
+			log.Error().Err(err).Msg("failed to connect with lotus RPC")
 			opts.FilecoinAPI = nil
 		}
 	}

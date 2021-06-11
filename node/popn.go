@@ -571,7 +571,7 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 			return
 		}
 
-		fmt.Println("getting quote for a piece")
+		log.Info().Msg("getting quote for a piece")
 
 		quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
 			PieceSize: uint64(piece.PieceSize),
@@ -586,7 +586,7 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 			return
 		}
 
-		fmt.Println("got a quote", quote.MinPieceSize, quote.Prices)
+		log.Info().Uint64("MinPieceSize", quote.MinPieceSize).Msg("got a quote")
 
 		if quote.MinPieceSize > uint64(piece.PieceSize) {
 			nd.send(Notify{

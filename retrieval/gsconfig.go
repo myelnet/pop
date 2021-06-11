@@ -1,13 +1,12 @@
 package retrieval
 
 import (
-	"fmt"
-
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipld/go-ipld-prime"
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/rs/zerolog/log"
 )
 
 // StoreGetter retrieves the store for a given proposal cid
@@ -35,7 +34,7 @@ func TransportConfigurer(thisPeer peer.ID, storeGetter StoreGetter) datatransfer
 		otherPeer := channelID.OtherParty(thisPeer)
 		store, err := storeGetter.Get(otherPeer, dealProposal.ID)
 		if err != nil {
-			fmt.Println("attempting to configure data store:", err)
+			log.Error().Err(err).Msg("attempting to configure data store")
 			return
 		}
 		if store == nil {
@@ -43,7 +42,7 @@ func TransportConfigurer(thisPeer peer.ID, storeGetter StoreGetter) datatransfer
 		}
 		err = gsTransport.UseStore(channelID, store.Loader, store.Storer)
 		if err != nil {
-			fmt.Println("attempting to configure data store:", err)
+			log.Error().Err(err).Msg("attempting to configure data store")
 		}
 	}
 }

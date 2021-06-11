@@ -8,6 +8,7 @@ import (
 	"github.com/filecoin-project/go-statemachine/fsm"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/rs/zerolog/log"
 )
 
 // EventReceiver is any thing that can receive FSM events
@@ -54,7 +55,8 @@ func eventFromDataTransfer(event datatransfer.Event, channelState datatransfer.C
 	case datatransfer.NewVoucherResult:
 		response, ok := deal.ResponseFromVoucherResult(channelState.LastVoucherResult())
 		if !ok {
-			fmt.Println("unexpected voucher result received:", channelState.LastVoucher().Type())
+			log.Error().Str("LastVoucherType", string(channelState.LastVoucher().Type())).
+				Msg("unexpected voucher result received")
 			return noEvent, nil
 		}
 
@@ -98,12 +100,10 @@ func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subs
 		// data transfer events for progress do not affect deal state
 		err := deals.Send(dealProposal.ID, retrievalEvent, params...)
 		if err != nil {
-			fmt.Printf(
-				"processing dt client event %s for state %s: %v\n",
-				datatransfer.Events[event.Code],
-				datatransfer.Statuses[channelState.Status()],
-				err,
-			)
+			log.Error().Err(err).
+				Str("event", datatransfer.Events[event.Code]).
+				Str("status", datatransfer.Statuses[channelState.Status()]).
+				Msg("processing dt client event for status")
 		}
 	}
 }
