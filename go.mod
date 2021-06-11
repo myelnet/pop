@@ -6,20 +6,20 @@ require (
 	github.com/AlecAivazis/survey/v2 v2.2.9
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/docker/go-units v0.4.0
-	github.com/filecoin-project/go-address v0.0.5-0.20201103152444-f2023ef3f5bb
+	github.com/filecoin-project/filecoin-ffi v0.30.4-0.20200910194244-f640612a1a1f
+	github.com/filecoin-project/go-address v0.0.5
 	github.com/filecoin-project/go-amt-ipld/v2 v2.1.1-0.20201006184820-924ee87a1349 // indirect
-	github.com/filecoin-project/go-bitfield v0.2.3-0.20201110211213-fe2c1862e816 // indirect
 	github.com/filecoin-project/go-cbor-util v0.0.0-20201016124514-d0bbec7bfcc4
-	github.com/filecoin-project/go-commp-utils v0.0.0-20201119054358-b88f7a96a434
+	github.com/filecoin-project/go-commp-utils v0.1.1-0.20210427191551-70bf140d31c7
 	github.com/filecoin-project/go-crypto v0.0.0-20191218222705-effae4ea9f03
 	github.com/filecoin-project/go-data-transfer v1.6.0
 	github.com/filecoin-project/go-fil-markets v1.4.0
-	github.com/filecoin-project/go-hamt-ipld/v3 v3.0.0
+	github.com/filecoin-project/go-hamt-ipld/v3 v3.0.1
 	github.com/filecoin-project/go-jsonrpc v0.1.2
 	github.com/filecoin-project/go-multistore v0.0.3
-	github.com/filecoin-project/go-state-types v0.0.0-20210119062722-4adba5aaea71
+	github.com/filecoin-project/go-state-types v0.1.1-0.20210506134452-99b279731c48
 	github.com/filecoin-project/go-statemachine v0.0.0-20200925024713-05bd7c71fbfe
-	github.com/filecoin-project/specs-actors/v3 v3.0.0
+	github.com/filecoin-project/specs-actors/v3 v3.1.0
 	github.com/gabriel-vasile/mimetype v1.1.2
 	github.com/google/uuid v1.2.0
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
@@ -69,7 +69,6 @@ require (
 	github.com/peterbourgon/ff/v3 v3.0.0
 	github.com/rs/zerolog v1.20.0
 	github.com/stretchr/testify v1.7.0
-	github.com/supranational/blst v0.3.2
 	github.com/tchardin/go-libp2p-blankhost v0.2.1-0.20210408134851-9396bc83e200
 	github.com/urfave/cli/v2 v2.2.0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210219115102-f37d292932f2

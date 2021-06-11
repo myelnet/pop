@@ -38,15 +38,13 @@ Install dependencies:
 brew install go bzr jq pkg-config rustup hwloc
 ```
 
-Clone the repo. You may need to include submodules:
-
-```commandline
-git submodule update --init --recursive
-```
+Clone the repo.
+If you are running on arm64 architecture, you will need to build filecoin-ffi from source.
+Simply do that by adding the env variable: `FFI_BUILD_FROM_SOURCE=1` 
 
 run:
 ```commandline
-$ make
+$ make all
 ```
 
 As a library:

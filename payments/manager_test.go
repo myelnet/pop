@@ -174,7 +174,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	initActorAddr := tutils.NewIDAddr(t, 100)
 	hasher := func(data []byte) [32]byte { return [32]byte{} }
 
-	builder := mock.NewBuilder(ctx, chAddr).
+	builder := mock.NewBuilder(chAddr).
 		WithBalance(createAmt, abi.NewTokenAmount(0)).
 		WithEpoch(abi.ChainEpoch(1)).
 		WithCaller(initActorAddr, builtin.InitActorCodeID).
@@ -286,7 +286,7 @@ func TestBestSpendable(t *testing.T) {
 	initActorAddr := tutils.NewIDAddr(t, 100)
 	hasher := func(data []byte) [32]byte { return [32]byte{} }
 
-	builder := mock.NewBuilder(ctx, chAddr).
+	builder := mock.NewBuilder(chAddr).
 		WithBalance(createAmt, abi.NewTokenAmount(0)).
 		WithEpoch(abi.ChainEpoch(1)).
 		WithCaller(initActorAddr, builtin.InitActorCodeID).
@@ -430,7 +430,7 @@ func TestCollectChannel(t *testing.T) {
 	initActorAddr := tutils.NewIDAddr(t, 100)
 	hasher := func(data []byte) [32]byte { return [32]byte{} }
 
-	builder := mock.NewBuilder(ctx, chAddr).
+	builder := mock.NewBuilder(chAddr).
 		WithBalance(createAmt, abi.NewTokenAmount(0)).
 		WithEpoch(abi.ChainEpoch(1)).
 		WithCaller(initActorAddr, builtin.InitActorCodeID).

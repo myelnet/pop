@@ -170,7 +170,7 @@ func TestChannel(t *testing.T) {
 	hasher := func(data []byte) [32]byte { return [32]byte{} }
 
 	// Build a payment channel actor straight from the fil actors package
-	builder := mock.NewBuilder(ctx, chAddr).
+	builder := mock.NewBuilder(chAddr).
 		WithBalance(payChBalance, abi.NewTokenAmount(0)).
 		WithEpoch(abi.ChainEpoch(1)).
 		WithCaller(initActorAddr, builtin.InitActorCodeID).
@@ -267,7 +267,7 @@ func TestLoadActorState(t *testing.T) {
 	hasher := func(data []byte) [32]byte { return [32]byte{} }
 
 	// Build a payment channel actor straight from the fil actors package
-	builder := mock.NewBuilder(ctx, chAddr).
+	builder := mock.NewBuilder(chAddr).
 		WithBalance(payChBalance, abi.NewTokenAmount(0)).
 		WithEpoch(abi.ChainEpoch(1)).
 		WithCaller(initActorAddr, builtin.InitActorCodeID).
@@ -303,7 +303,7 @@ func TestLoadActorState(t *testing.T) {
 	ch := &channel{
 		from:         payerAddr,
 		to:           payeeAddr,
-		ctx:          bgCtx,
+		ctx:          ctx,
 		api:          api,
 		wal:          w,
 		actStore:     cborstore,
