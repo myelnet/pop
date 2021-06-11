@@ -634,11 +634,6 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		if (request.Method == FetchIndex && channelID.Initiator == pid) || request.Method == Dispatch {
 			// When we're fetching a new index we store it in a new store
 			store := isg.GetStore(request.PayloadCID)
-
-			if channelID.Initiator != pid {
-				fmt.Println("got the store")
-			}
-
 			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
 			if err != nil {
 				warn(err)
