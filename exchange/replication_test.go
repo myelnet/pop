@@ -711,3 +711,69 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	}
 	require.Equal(t, 5, len(recipients))
 }
+
+func TestPeerMgr(t *testing.T) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	mn := mocknet.New(ctx)
+
+	regions := []Region{
+		{
+			Name: "TestRegion",
+			Code: CustomRegion,
+		},
+	}
+
+	tnds := make(map[peer.ID]*testutil.TestNode)
+	receivers := make([]*Replication, 11)
+
+	for i := 0; i < 11; i++ {
+		tnode := testutil.NewTestNode(mn, t)
+		tnode.SetupDataTransfer(ctx, t)
+		t.Cleanup(func() {
+			err := tnode.Dt.Stop(ctx)
+			require.NoError(t, err)
+		})
+		idx, err := NewIndex(tnode.Ds)
+		require.NoError(t, err)
+		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
+		hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
+		require.NoError(t, hn1.Start(ctx))
+		receivers[i] = hn1
+		tnds[tnode.Host.ID()] = tnode
+	}
+
+	require.NoError(t, mn.LinkAll())
+
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	time.Sleep(time.Second)
+
+	repl := receivers[0]
+	ignore := make(map[peer.ID]bool)
+
+	peers := repl.pm.Peers(6, regions, ignore)
+	require.Equal(t, 6, len(peers))
+
+	// Let's ignore a couple
+	ignore[peers[0]] = true
+	ignore[peers[1]] = true
+
+	peers2 := repl.pm.Peers(6, regions, ignore)
+	require.Equal(t, 6, len(peers2))
+	for _, pid := range peers2 {
+		if pid == peers[0] || pid == peers[1] {
+			t.Fatal("Peers did not ignore the right peers")
+		}
+	}
+
+	// Try to get more than available
+	peers3 := repl.pm.Peers(10, regions, ignore)
+	require.Equal(t, 8, len(peers3))
+
+	// 0 peers should return 0 peers
+	peers4 := repl.pm.Peers(0, regions, ignore)
+	require.Equal(t, 0, len(peers4))
+}

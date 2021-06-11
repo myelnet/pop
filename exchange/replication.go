@@ -440,7 +440,7 @@ type DispatchOptions struct {
 // DefaultDispatchOptions provides useful defaults
 // We can change these if the content requires a long transfer time
 var DefaultDispatchOptions = DispatchOptions{
-	BackoffMin:     2 * time.Second,
+	BackoffMin:     5 * time.Second,
 	BackoffAttemps: 4,
 	RF:             6,
 }
