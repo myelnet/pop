@@ -54,23 +54,23 @@ func (a *Adapter) AddFunds(ctx context.Context, addr address.Address, amount abi
 	}
 	msg, err = a.fAPI.GasEstimateMessageGas(ctx, msg, nil, fil.EmptyTSK)
 	if err != nil {
-		log.Info().Msg("GasEstimateMessageGas failed")
+		log.Error().Msg("GasEstimateMessageGas failed")
 		return cid.Undef, err
 	}
 	act, err := a.fAPI.StateGetActor(ctx, msg.From, fil.EmptyTSK)
 	if err != nil {
-		log.Info().Msg("StateGetActor failed")
+		log.Error().Msg("StateGetActor failed")
 		return cid.Undef, err
 	}
 	msg.Nonce = act.Nonce
 	mbl, err := msg.ToStorageBlock()
 	if err != nil {
-		log.Info().Msg("ToStorageBlock failed")
+		log.Error().Msg("ToStorageBlock failed")
 		return cid.Undef, err
 	}
 	sig, err := a.wallet.Sign(ctx, msg.From, mbl.Cid().Bytes())
 	if err != nil {
-		log.Info().Msg("wallet.Sign failed")
+		log.Error().Msg("wallet.Sign failed")
 		return cid.Undef, err
 	}
 
@@ -92,7 +92,7 @@ func (a *Adapter) GetBalance(ctx context.Context, addr address.Address, tok shar
 
 	bal, err := a.fAPI.StateMarketBalance(ctx, addr, tsk)
 	if err != nil {
-		log.Info().Msg("StateMarketBalance failed")
+		log.Error().Msg("StateMarketBalance failed")
 		return sm.Balance{}, err
 	}
 
@@ -130,7 +130,7 @@ func (a *Adapter) SignBytes(ctx context.Context, signer address.Address, b []byt
 	log.Info().Msg("SignBytes")
 	signer, err := a.fAPI.StateAccountKey(ctx, signer, fil.EmptyTSK)
 	if err != nil {
-		log.Info().Msg("StateAccountKey")
+		log.Error().Msg("StateAccountKey")
 		return nil, err
 	}
 
