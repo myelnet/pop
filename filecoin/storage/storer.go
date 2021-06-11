@@ -29,6 +29,7 @@ import (
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
+	"github.com/rs/zerolog/log"
 )
 
 const dealStartBufferHours uint64 = 49
@@ -466,26 +467,32 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		}
 		switch resp.Response.State {
 		case storagemarket.StorageDealError:
-			fmt.Println("StorageDealError", m.Info.Address, resp.Response.Message)
+			log.Error().Str("address", m.Info.Address.String()).
+				Str("responseMessage", resp.Response.Message).
+				Msg("StorageDealError")
+
 		case storagemarket.StorageDealProposalRejected:
-			fmt.Println("ProposalRejected", m.Info.Address, resp.Response.Message)
+			log.Error().Str("address", m.Info.Address.String()).
+				Str("responseMessage", resp.Response.Message).
+				Msg("ProposalRejected")
+
 		case storagemarket.StorageDealWaitingForData, storagemarket.StorageDealProposalAccepted:
-			fmt.Println("ProposalAccepted")
+			log.Info().Msg("ProposalAccepted")
 
 			msgcid, err := s.adapter.AddFunds(ctx, m.Info.Address, prop.ClientBalanceRequirement())
 			if err != nil {
-				fmt.Println("failed to add funds", err)
+				log.Error().Err(err).Msg("failed to add funds")
 				continue
 			}
 			_, err = s.fAPI.StateWaitMsg(ctx, msgcid, uint64(5))
 			if err != nil {
-				fmt.Println("failed to confirm message on chain", err)
+				log.Error().Err(err).Msg("failed to confirm message on chain")
 				continue
 			}
 
 			nd, err := cborutil.AsIpld(prop)
 			if err != nil {
-				fmt.Println("failed to encode proposal as ipld node", err)
+				log.Error().Err(err).Msg("failed to encode proposal as ipld node")
 				continue
 			}
 
@@ -493,7 +500,9 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 
 			_, err = s.dt.OpenPushDataChannel(ctx, m.Info.PeerID, &voucher, p.Payload.Root, selectors.All())
 			if err != nil {
-				fmt.Println("failed to open push data transfer for miner", m.Info.Address)
+				log.Error().Err(err).
+					Str("address", m.Info.Address.String()).
+					Msg("failed to open push data transfer for miner")
 				continue
 			}
 			// TODO: handle events

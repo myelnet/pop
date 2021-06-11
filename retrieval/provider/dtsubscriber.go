@@ -8,6 +8,7 @@ import (
 	"github.com/filecoin-project/go-statemachine/fsm"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/rs/zerolog/log"
 )
 
 // EventReceiver is any thing that can receive FSM events
@@ -54,7 +55,7 @@ func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subs
 		if channelState.Status() == datatransfer.Completed {
 			err := deals.Send(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}, EventComplete)
 			if err != nil {
-				fmt.Println("processing provider dt event:", err)
+				log.Error().Err(err).Str("event", datatransfer.Events[event.Code]).Msg("processing provider dt event")
 			}
 		}
 
@@ -65,7 +66,7 @@ func DataTransferSubscriber(deals EventReceiver, host peer.ID) datatransfer.Subs
 
 		err := deals.Send(deal.ProviderDealIdentifier{DealID: dealProposal.ID, Receiver: channelState.Recipient()}, retrievalEvent, params...)
 		if err != nil {
-			fmt.Printf("processing provider dt event %s: %v\n", datatransfer.Events[event.Code], err)
+			log.Error().Err(err).Str("event", datatransfer.Events[event.Code]).Msg("processing provider dt event")
 		}
 
 	}

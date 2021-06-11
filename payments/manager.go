@@ -16,6 +16,7 @@ import (
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
+	"github.com/rs/zerolog/log"
 )
 
 // Manager is the interface required to handle payments for the pop exchange
@@ -220,11 +221,16 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 		defer wg.Done()
 		lookup, err := p.api.StateWaitMsg(ctx, sc, uint64(5))
 		if err != nil {
-			fmt.Printf("settling payment channel %s failed: %v\n", addr, err)
+			log.Error().Err(err).
+				Str("channel", addr.String()).
+				Msg("settling payment failed")
 			return
 		}
 		if lookup.Receipt.ExitCode != 0 {
-			fmt.Printf("payment channel %s execution failed with code: %d\n", addr, lookup.Receipt.ExitCode)
+			log.Error().Err(err).
+				Str("channel", addr.String()).
+				Str("code", lookup.Receipt.ExitCode.String()).
+				Msg("payment execution failed")
 		}
 	}(mcid)
 
@@ -233,18 +239,23 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 	for _, voucher := range best {
 		mcid, err := ch.submitVoucher(ctx, addr, voucher, nil)
 		if err != nil {
-			fmt.Printf("unable to submit voucher: %v\n", err)
+			log.Error().Err(err).Msg("unable to submit voucher")
 			continue
 		}
 		go func(vouch *paych.SignedVoucher, mcid cid.Cid) {
 			defer wg.Done()
 			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
 			if err != nil {
-				fmt.Printf("waiting for voucher to submit on channel %s: %v\n", addr, err)
+				log.Error().Err(err).
+					Str("channel", addr.String()).
+					Msg("waiting for voucher to submit")
 				return
 			}
 			if lookup.Receipt.ExitCode != 0 {
-				fmt.Printf("voucher update execution failed for channel %s with code %d\n", addr, lookup.Receipt.ExitCode)
+				log.Error().Err(err).
+					Str("channel", addr.String()).
+					Str("code", lookup.Receipt.ExitCode.String()).
+					Msg("voucher update execution failed")
 			}
 		}(voucher, mcid)
 	}
@@ -253,7 +264,7 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 		wg.Wait()
 		state, err := ch.loadActorState(addr)
 		if err != nil {
-			fmt.Printf("loading actor state: %v\n", err)
+			log.Error().Err(err).Msg("error loading actor state")
 			return
 		}
 		ci, err := p.store.ByAddress(addr)
@@ -304,7 +315,7 @@ func (p *Payments) collectLoop(ctx context.Context) {
 			head, err := p.api.ChainHead(ctx)
 			// no need to fail the whole routine if the request fails once in a while
 			if err != nil {
-				fmt.Printf("%v\n", err)
+				log.Error().Err(err)
 				continue
 			}
 			epoch = head.Height()
