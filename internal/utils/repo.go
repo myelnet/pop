@@ -20,6 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/rs/zerolog/log"
 )
 
 // Dumping a bunch of shared stuff here. We can reorganize once we have a clearer idea
@@ -105,7 +106,7 @@ func Bootstrap(ctx context.Context, h host.Host, bpeers []string) error {
 			defer wg.Done()
 			err := h.Connect(ctx, *peerInfo)
 			if err != nil {
-				fmt.Printf("failed to connect to %s: %s\n", peerInfo.ID, err)
+				log.Error().Err(err).Str("peerId", peerInfo.ID.String()).Msg("failed to connect to peer")
 			}
 		}(peerInfo)
 	}
