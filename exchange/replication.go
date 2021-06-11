@@ -395,6 +395,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 				return
 
 			case datatransfer.Completed:
+				fmt.Println("provider transfer completed")
 				store := r.GetStore(req.PayloadCID)
 
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
@@ -637,6 +638,9 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		// with the root CID so we just need to get it
 		if (request.Method == FetchIndex && channelID.Initiator == pid) || request.Method == Dispatch {
 			// When we're fetching a new index we store it in a new store
+			if channelID.Initiator != pid {
+				fmt.Println("getting the store")
+			}
 			store := isg.GetStore(request.PayloadCID)
 			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
 			if err != nil {
