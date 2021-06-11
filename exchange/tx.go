@@ -199,7 +199,7 @@ func (tx *Tx) Status() (Status, error) {
 func (tx *Tx) assembleEntries() (ipld.Node, error) {
 	// We need a single root CID so we make a list with the roots of all dagpb roots
 	nb := basicnode.Prototype.Map.NewBuilder()
-	as, err := nb.BeginMap(int64(len(tx.entries)))
+	as, err := nb.BeginMap(len(tx.entries))
 	if err != nil {
 		return nil, err
 	}

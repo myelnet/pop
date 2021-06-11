@@ -333,7 +333,7 @@ func TestIndexSelector(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		nd := basicnode.NewInt(int64(i))
+		nd := basicnode.NewInt(i)
 		lnk, err := lb.Build(
 			context.TODO(),
 			ipld.LinkContext{},
