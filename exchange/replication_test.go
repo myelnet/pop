@@ -102,7 +102,7 @@ func TestReplication(t *testing.T) {
 		idx, err := NewIndex(n.Ds, WithBounds(2000000, 1800000))
 		require.NoError(t, err)
 		rtv := NewMockRetriever(n.Dt, idx)
-		repl := NewReplication(
+		repl, err := NewReplication(
 			n.Host,
 			idx,
 			n.Dt,
@@ -114,6 +114,7 @@ func TestReplication(t *testing.T) {
 				Blockstore:   n.Bs,
 			},
 		)
+		require.NoError(t, err)
 		require.NoError(t, repl.Start(ctx))
 		return n, repl, rtv
 	}
@@ -339,7 +340,7 @@ func TestConcurrentReplication(t *testing.T) {
 				idx, err := NewIndex(n.Ds, WithBounds(8000000, 7800000))
 				require.NoError(t, err)
 				rtv := NewMockRetriever(n.Dt, idx)
-				repl := NewReplication(
+				repl, err := NewReplication(
 					n.Host,
 					idx,
 					n.Dt,
@@ -351,6 +352,7 @@ func TestConcurrentReplication(t *testing.T) {
 						Blockstore:   n.Bs,
 					},
 				)
+				require.NoError(t, err)
 				require.NoError(t, repl.Start(ctx))
 				return n, repl, rtv
 			}
@@ -467,11 +469,12 @@ func TestMultiDispatchStreams(t *testing.T) {
 
 	idx, err := NewIndex(n1.Ds)
 	require.NoError(t, err)
-	hn := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
+	hn, err := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID:  rootCid,
 		PayloadSize: int64(256000),
 	}))
+	require.NoError(t, err)
 	sub, err := hn.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, hn.Start(ctx))
@@ -489,7 +492,8 @@ func TestMultiDispatchStreams(t *testing.T) {
 		idx, err := NewIndex(tnode.Ds)
 		require.NoError(t, err)
 		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
-		hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
+		hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
+		require.NoError(t, err)
 		require.NoError(t, hn1.Start(ctx))
 		receivers[tnode.Host.ID()] = hn1
 		tnds[tnode.Host.ID()] = tnode
@@ -555,11 +559,12 @@ func TestSendDispatchNoPeers(t *testing.T) {
 
 	idx, err := NewIndex(n1.Ds)
 	require.NoError(t, err)
-	supply := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
+	supply, err := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID:  rootCid,
 		PayloadSize: int64(256000),
 	}))
+	require.NoError(t, err)
 	require.NoError(t, supply.Start(bgCtx))
 
 	options := DispatchOptions{
@@ -602,13 +607,14 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 
 	idx, err := NewIndex(n1.Ds)
 	require.NoError(t, err)
-	supply := NewReplication(
+	supply, err := NewReplication(
 		n1.Host,
 		idx,
 		n1.Dt,
 		NewMockRetriever(n1.Dt, idx),
 		Options{Regions: asia, MultiStore: n1.Ms, Blockstore: n1.Bs},
 	)
+	require.NoError(t, err)
 	sub, err := n1.Host.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 	require.NoError(t, supply.Start(ctx))
@@ -626,13 +632,14 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 
 		idx, err := NewIndex(n.Ds)
 		require.NoError(t, err)
-		s := NewReplication(
+		s, err := NewReplication(
 			n.Host,
 			idx,
 			n.Dt,
 			NewMockRetriever(n1.Dt, idx),
 			Options{Regions: asia, MultiStore: n.Ms, Blockstore: n.Bs},
 		)
+		require.NoError(t, err)
 		require.NoError(t, s.Start(ctx))
 
 		asiaNodes[n.Host.ID()] = n
@@ -657,13 +664,14 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		idx, err := NewIndex(n.Ds)
 		require.NoError(t, err)
 
-		s := NewReplication(
+		s, err := NewReplication(
 			n.Host,
 			idx,
 			n.Dt,
 			NewMockRetriever(n.Dt, idx),
 			Options{Regions: africa, MultiStore: n.Ms, Blockstore: n.Bs},
 		)
+		require.NoError(t, err)
 		require.NoError(t, s.Start(ctx))
 
 		africaNodes[n.Host.ID()] = n
@@ -739,7 +747,8 @@ func TestPeerMgr(t *testing.T) {
 		idx, err := NewIndex(tnode.Ds)
 		require.NoError(t, err)
 		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
-		hn1 := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
+		hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
+		require.NoError(t, err)
 		require.NoError(t, hn1.Start(ctx))
 		receivers[i] = hn1
 		tnds[tnode.Host.ID()] = tnode

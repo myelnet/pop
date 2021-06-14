@@ -2,7 +2,6 @@ package retrieval
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -15,6 +14,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/rs/zerolog/log"
 
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval/client"
@@ -92,9 +92,8 @@ func (p *Provider) GetAsk(k cid.Cid) deal.QueryResponse {
 // SetAsk sets the deal parameters this provider accepts
 func (p *Provider) SetAsk(k cid.Cid, ask deal.QueryResponse) {
 	err := p.askStore.SetAsk(k, ask)
-
 	if err != nil {
-		fmt.Printf("Error setting retrieval ask: %v\v", err)
+		log.Error().Err(err).Msg("error setting retrieval ask")
 	}
 }
 
@@ -293,7 +292,7 @@ func SettlePaymentChannels(ctx context.Context, pay payments.Manager, pro *Provi
 			if state.PayCh != nil {
 				err := pay.Settle(ctx, *state.PayCh)
 				if err != nil {
-					fmt.Printf("settling payment channel: %v\n", err)
+					log.Error().Err(err).Msg("settling payment channel")
 				}
 			}
 			return

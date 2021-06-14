@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/rs/zerolog/log"
 )
 
 // Peer contains information recorded while interacted with a peer
@@ -41,12 +42,18 @@ func NewPeerMgr(h host.Host, regions []Region) *PeerMgr {
 		reg[r.Code] = r
 	}
 
+	emitter, err := h.EventBus().Emitter(new(HeyEvt))
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create emitter event")
+	}
+
 	pm := &PeerMgr{
 		h:       h,
 		regions: reg,
 		peers:   make(map[peer.ID]Peer),
+		emitter: emitter,
 	}
-	pm.emitter, _ = h.EventBus().Emitter(new(HeyEvt))
+
 	h.Network().Notify(&network.NotifyBundle{
 		DisconnectedF: func(_ network.Network, c network.Conn) {
 			pm.mu.Lock()
@@ -64,10 +71,14 @@ func (pm *PeerMgr) Receive(p peer.ID, h Hey) {
 	for _, r := range h.Regions {
 		// We only save peers who are in the same region as us
 		if reg, ok := pm.regions[r]; ok {
-			pm.emitter.Emit(HeyEvt{
+			err := pm.emitter.Emit(HeyEvt{
 				Peer:      p,
 				IndexRoot: h.IndexRoot,
 			})
+			if err != nil {
+				log.Error().Err(err).Msg("failed to emit event")
+			}
+
 			// These peers should be trimmed last when the number of connections overflows
 			pm.h.ConnManager().TagPeer(p, reg.Name, 10)
 			pm.mu.Lock()

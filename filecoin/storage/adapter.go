@@ -21,6 +21,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
+	"github.com/rs/zerolog/log"
 )
 
 // Adapter implements the interface required by the Filecoin storage market client
@@ -31,10 +32,10 @@ type Adapter struct {
 
 // GetChainHead returns a tipset token for the current chain head
 func (a *Adapter) GetChainHead(ctx context.Context) (shared.TipSetToken, abi.ChainEpoch, error) {
-	fmt.Println("GetChainHead")
+	log.Info().Msg("GetChainHead")
 	head, err := a.fAPI.ChainHead(ctx)
 	if err != nil {
-		fmt.Println("GetChainHead failed")
+		log.Error().Err(err).Msg("GetChainHead failed")
 		return nil, 0, err
 	}
 
@@ -43,7 +44,7 @@ func (a *Adapter) GetChainHead(ctx context.Context) (shared.TipSetToken, abi.Cha
 
 // AddFunds with the StorageMinerActor for a storage participant.  Used by both providers and clients.
 func (a *Adapter) AddFunds(ctx context.Context, addr address.Address, amount abi.TokenAmount) (cid.Cid, error) {
-	fmt.Println("AddFunds")
+	log.Info().Msg("AddFunds")
 	var err error
 	msg := &fil.Message{
 		To:     miner3.StorageMarketActorAddr,
@@ -53,23 +54,23 @@ func (a *Adapter) AddFunds(ctx context.Context, addr address.Address, amount abi
 	}
 	msg, err = a.fAPI.GasEstimateMessageGas(ctx, msg, nil, fil.EmptyTSK)
 	if err != nil {
-		fmt.Println("GasEstimateMessageGas failed")
+		log.Error().Msg("GasEstimateMessageGas failed")
 		return cid.Undef, err
 	}
 	act, err := a.fAPI.StateGetActor(ctx, msg.From, fil.EmptyTSK)
 	if err != nil {
-		fmt.Println("StateGetActor failed")
+		log.Error().Msg("StateGetActor failed")
 		return cid.Undef, err
 	}
 	msg.Nonce = act.Nonce
 	mbl, err := msg.ToStorageBlock()
 	if err != nil {
-		fmt.Println("ToStorageBlock failed")
+		log.Error().Msg("ToStorageBlock failed")
 		return cid.Undef, err
 	}
 	sig, err := a.wallet.Sign(ctx, msg.From, mbl.Cid().Bytes())
 	if err != nil {
-		fmt.Println("wallet.Sign failed")
+		log.Error().Msg("wallet.Sign failed")
 		return cid.Undef, err
 	}
 
@@ -77,13 +78,13 @@ func (a *Adapter) AddFunds(ctx context.Context, addr address.Address, amount abi
 		Message:   *msg,
 		Signature: *sig,
 	}
-	fmt.Println("MpoolPush")
+	log.Info().Msg("MpoolPush")
 	return a.fAPI.MpoolPush(ctx, smsg)
 }
 
 // GetBalance returns locked/unlocked for a storage participant.
 func (a *Adapter) GetBalance(ctx context.Context, addr address.Address, tok shared.TipSetToken) (sm.Balance, error) {
-	fmt.Println("GetBalance")
+	log.Info().Msg("GetBalance")
 	tsk, err := fil.TipSetKeyFromBytes(tok)
 	if err != nil {
 		return sm.Balance{}, err
@@ -91,7 +92,7 @@ func (a *Adapter) GetBalance(ctx context.Context, addr address.Address, tok shar
 
 	bal, err := a.fAPI.StateMarketBalance(ctx, addr, tsk)
 	if err != nil {
-		fmt.Println("StateMarketBalance failed")
+		log.Error().Msg("StateMarketBalance failed")
 		return sm.Balance{}, err
 	}
 
@@ -103,10 +104,10 @@ func (a *Adapter) GetBalance(ctx context.Context, addr address.Address, tok shar
 
 // VerifySignature verifies a given set of data was signed properly by a given address's private key
 func (a *Adapter) VerifySignature(ctx context.Context, sig crypto.Signature, signer address.Address, plaintext []byte, tok shared.TipSetToken) (bool, error) {
-	fmt.Println("VerifySignature")
+	log.Info().Msg("VerifySignature")
 	addr, err := a.fAPI.StateAccountKey(ctx, signer, fil.EmptyTSK)
 	if err != nil {
-		fmt.Println("StateAccountKey failed", err)
+		log.Error().Err(err).Msg("StateAccountKey failed")
 		return false, err
 	}
 
@@ -115,10 +116,10 @@ func (a *Adapter) VerifySignature(ctx context.Context, sig crypto.Signature, sig
 
 // WaitForMessage waits until a message appears on chain. If it is already on chain, the callback is called immediately
 func (a *Adapter) WaitForMessage(ctx context.Context, mcid cid.Cid, cb func(exitcode.ExitCode, []byte, cid.Cid, error) error) error {
-	fmt.Println("WaitForMessage")
+	log.Info().Msg("WaitForMessage")
 	receipt, err := a.fAPI.StateWaitMsg(ctx, mcid, uint64(5))
 	if err != nil {
-		fmt.Println("StateWaitMsg failed", err)
+		log.Error().Err(err).Msg("StateWaitMsg failed")
 		return cb(0, nil, cid.Undef, err)
 	}
 	return cb(receipt.Receipt.ExitCode, receipt.Receipt.Return, receipt.Message, nil)
@@ -126,10 +127,10 @@ func (a *Adapter) WaitForMessage(ctx context.Context, mcid cid.Cid, cb func(exit
 
 // SignBytes signs the given data with the given address's private key
 func (a *Adapter) SignBytes(ctx context.Context, signer address.Address, b []byte) (*crypto.Signature, error) {
-	fmt.Println("SignBytes")
+	log.Info().Msg("SignBytes")
 	signer, err := a.fAPI.StateAccountKey(ctx, signer, fil.EmptyTSK)
 	if err != nil {
-		fmt.Println("StateAccountKey")
+		log.Error().Msg("StateAccountKey")
 		return nil, err
 	}
 
@@ -144,10 +145,10 @@ const clientOverestimation = 2
 
 // DealProviderCollateralBounds returns the min and max collateral a storage provider can issue.
 func (a *Adapter) DealProviderCollateralBounds(ctx context.Context, size abi.PaddedPieceSize, isVerified bool) (abi.TokenAmount, abi.TokenAmount, error) {
-	fmt.Println("DealProviderCollateralBounds")
+	log.Info().Msg("DealProviderCollateralBounds")
 	bounds, err := a.fAPI.StateDealProviderCollateralBounds(ctx, size, isVerified, fil.EmptyTSK)
 	if err != nil {
-		fmt.Println("StateDealProviderCollateralBounds failed")
+		log.Error().Err(err).Msg("StateDealProviderCollateralBounds failed")
 		return big.Zero(), big.Zero(), err
 	}
 
@@ -156,7 +157,7 @@ func (a *Adapter) DealProviderCollateralBounds(ctx context.Context, size abi.Pad
 
 // ValidatePublishedDeal verifies a deal is published on chain and returns the dealID
 func (a *Adapter) ValidatePublishedDeal(ctx context.Context, deal sm.ClientDeal) (abi.DealID, error) {
-	fmt.Println("ValidatePublishedDeal")
+	log.Info().Msg("ValidatePublishedDeal")
 	pubmsg, err := a.fAPI.ChainGetMessage(ctx, *deal.PublishMessage)
 	if err != nil {
 		return 0, fmt.Errorf("getting deal publish message: %w", err)
@@ -226,23 +227,23 @@ func (a *Adapter) ValidatePublishedDeal(ctx context.Context, deal sm.ClientDeal)
 
 // SignProposal signs a DealProposal
 func (a *Adapter) SignProposal(ctx context.Context, signer address.Address, proposal market3.DealProposal) (*market3.ClientDealProposal, error) {
-	fmt.Println("SignProposal")
+	log.Info().Msg("SignProposal")
 	// TODO: output spec signed proposal
 	buf, err := cborutil.Dump(&proposal)
 	if err != nil {
-		fmt.Println("Dump proposal failed")
+		log.Error().Err(err).Msg("Dump proposal failed")
 		return nil, err
 	}
 
 	signer, err = a.fAPI.StateAccountKey(ctx, signer, fil.EmptyTSK)
 	if err != nil {
-		fmt.Println("StateAccountKey failed")
+		log.Error().Err(err).Msg("StateAccountKey failed")
 		return nil, err
 	}
 
 	sig, err := a.wallet.Sign(ctx, signer, buf)
 	if err != nil {
-		fmt.Println("wallet.Sign failed")
+		log.Error().Err(err).Msg("wallet.Sign failed")
 		return nil, err
 	}
 
@@ -259,7 +260,7 @@ func (a *Adapter) GetDefaultWalletAddress(ctx context.Context) (address.Address,
 
 // GetMinerInfo returns info for a single miner with the given address
 func (a *Adapter) GetMinerInfo(ctx context.Context, maddr address.Address, tok shared.TipSetToken) (*sm.StorageProviderInfo, error) {
-	fmt.Println("GetMinerInfo")
+	log.Info().Msg("GetMinerInfo")
 	tsk, err := fil.TipSetKeyFromBytes(tok)
 	if err != nil {
 		return nil, err

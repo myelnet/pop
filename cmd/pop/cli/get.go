@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/myelnet/pop/node"
-	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
 var getArgs struct {
@@ -25,11 +25,9 @@ var getCmd = &ffcli.Command{
 	ShortUsage: "get <cid>",
 	ShortHelp:  "Retrieve content from the network",
 	LongHelp: strings.TrimSpace(`
-
 The 'pop get' command retrieves blocks with a given root cid and an optional selector
 (defaults retrieves all the linked blocks). Passing an output flag with a path will write the
 data to disk. Adding a miner flag will fallback to miner if content is not available on the secondary market.
-
 `),
 	Exec: runGet,
 	FlagSet: (func() *flag.FlagSet {

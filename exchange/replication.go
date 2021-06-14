@@ -25,6 +25,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
+	"github.com/rs/zerolog/log"
 )
 
 //go:generate cbor-gen-for Request
@@ -120,7 +121,7 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) *Replication {
+func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) (*Replication, error) {
 	pm := NewPeerMgr(h, opts.Regions)
 	r := &Replication{
 		h:         h,
@@ -139,11 +140,24 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 	}
 	r.hs = NewHeyService(h, pm, r)
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
-	r.dt.RegisterVoucherType(&Request{}, r)
-	r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
-	r.emitter, _ = h.EventBus().Emitter(new(IndexEvt))
 
-	return r
+	err := r.dt.RegisterVoucherType(&Request{}, r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register voucher type: %v", err)
+	}
+
+	err = r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to register transport configurer: %v", err)
+	}
+
+	emitter, err := h.EventBus().Emitter(new(IndexEvt))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create emitter event: %v", err)
+	}
+	r.emitter = emitter
+
+	return r, nil
 }
 
 // Start initiates listeners to update our scheme if new peers join
@@ -194,7 +208,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 					store := r.GetStore(rt)
 					err := r.idx.LoadInterest(rt, cbor.NewCborStore(store.Bstore))
 					if err != nil {
-						fmt.Println("failed to load interest", err)
+						log.Error().Err(err).Msg("failed to load interest")
 						return
 					}
 				}(res.root)
@@ -223,7 +237,7 @@ func (r *Replication) refreshIndex(ctx context.Context) {
 			if err != nil || len(refs) == 0 {
 				continue
 			}
-			fmt.Println("tick", r.h.ID(), len(refs))
+			log.Info().Str("hostId", r.h.ID().String()).Int("refs", len(refs)).Msg("tick")
 
 			for ref := range refs {
 				// let's get it
@@ -232,9 +246,16 @@ func (r *Replication) refreshIndex(ctx context.Context) {
 					continue
 				}
 				err = r.idx.DropInterest(ref.PayloadCID)
-				r.emitter.Emit(IndexEvt{
+				if err != nil {
+					log.Debug().Err(err).Str("RefPayloadCID", ref.PayloadCID.String()).Msg("DropInterest error")
+				}
+
+				err = r.emitter.Emit(IndexEvt{
 					Root: ref.PayloadCID,
 				})
+				if err != nil {
+					log.Error().Err(err).Str("RefPayloadCID", ref.PayloadCID.String()).Msg("emitter error")
+				}
 			}
 		case <-ctx.Done():
 			return
@@ -346,7 +367,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 	defer rs.Close()
 	req, err := rs.ReadRequest()
 	if err != nil {
-		fmt.Println("error when reading stream request :", err)
+		log.Error().Err(err).Msg("error when reading stream request")
 		return
 	}
 
@@ -358,7 +379,9 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// Check if we may already have this content
 		_, err := r.idx.GetRef(req.PayloadCID)
 		if err == nil {
-			fmt.Printf("Payload CID %s already exists\n", req.PayloadCID.String())
+			log.Error().
+				Str("PayloadCID", req.PayloadCID.String()).
+				Msg("payload CID already exists")
 			return
 		}
 
@@ -366,21 +389,21 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// It will be automatically picked up in the TransportConfigurer
 		sid := r.ms.Next()
 		if err := r.AddStore(req.PayloadCID, sid); err != nil {
-			fmt.Println("error when creating new store", err)
+			log.Error().Err(err).Msg("error when creating new store")
 			return
 		}
 
 		ctx := context.Background()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
-			fmt.Println("error when opening channel data channel :", err)
+			log.Error().Err(err).Msg("error when opening channel data channel")
 			return
 		}
 
 		for {
 			state, err := r.dt.ChannelState(ctx, chid)
 			if err != nil {
-				fmt.Println("error when fetching channel state :", err)
+				log.Error().Err(err).Msg("error when fetching channel state")
 				return
 			}
 
@@ -388,7 +411,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 			case datatransfer.Failed, datatransfer.Cancelled:
 				err = r.idx.DropRef(state.BaseCID())
 				if err != nil {
-					fmt.Println("error when droping ref :", err)
+					log.Error().Err(err).Msg("error when droping ref")
 				}
 				return
 
@@ -397,7 +420,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
-					fmt.Println("error when fetching keys :", err)
+					log.Error().Err(err).Msg("error when fetching keys")
 				}
 
 				if err := r.idx.SetRef(&DataRef{
@@ -405,15 +428,15 @@ func (r *Replication) handleRequest(s network.Stream) {
 					PayloadSize: int64(req.Size),
 					Keys:        keys.AsBytes(),
 				}); err != nil {
-					fmt.Println("error when setting ref :", err)
+					log.Error().Err(err).Msg("error when setting ref")
 				}
 
 				if err := utils.MigrateBlocks(ctx, store.Bstore, r.bs); err != nil {
-					fmt.Println("error migrating blocks :", err)
+					log.Error().Err(err).Msg("error when migrating blocks")
 				}
 
 				if err := r.ms.Delete(sid); err != nil {
-					fmt.Println("error deleting store :", err)
+					log.Error().Err(err).Msg("error when deleting store")
 				}
 				return
 			}
@@ -464,7 +487,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 		}
 
 		if chState.Status() == datatransfer.Failed || chState.Status() == datatransfer.Cancelled {
-			fmt.Println("transfer failed for content", root)
+			log.Error().Str("root", root.String()).Msg("transfer failed for content")
 		}
 
 		if chState.Status() == datatransfer.Completed {
@@ -621,7 +644,7 @@ type IdxStoreGetter interface {
 func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransfer.TransportConfigurer {
 	return func(channelID datatransfer.ChannelID, voucher datatransfer.Voucher, transport datatransfer.Transport) {
 		warn := func(err error) {
-			fmt.Println("attempting to configure data store:", err)
+			log.Error().Err(err).Msg("attempting to configure data store")
 		}
 		request, ok := voucher.(*Request)
 		if !ok {

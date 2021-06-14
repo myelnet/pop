@@ -19,6 +19,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/minio/blake2b-simd"
+	"github.com/rs/zerolog/log"
 )
 
 //go:generate cbor-gen-for  Ticket ElectionProof ExpTipSet BeaconEntry BlockHeader Message Actor SignedMessage MessageReceipt
@@ -78,7 +79,10 @@ func tipsetSortFunc(blks []*BlockHeader) func(i, j int) bool {
 		tj := blks[j].LastTicket()
 
 		if ti.Equals(tj) {
-			fmt.Printf("blocks have same ticket (%s %s)\n", blks[i].Miner, blks[j].Miner)
+			log.Error().
+				Str("miner1", blks[i].Miner.String()).
+				Str("miner2", blks[j].Miner.String()).
+				Msg("blocks have same ticket")
 			return bytes.Compare(blks[i].Cid().Bytes(), blks[j].Cid().Bytes()) < 0
 		}
 

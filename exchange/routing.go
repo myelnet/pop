@@ -25,6 +25,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/rs/zerolog/log"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -61,11 +62,11 @@ func OpenStream(ctx context.Context, h host.Host, p peer.ID, protos []protocol.I
 		if err == nil {
 			return s, err
 		}
-		fmt.Println("trying again", err)
+		log.Error().Err(err).Msg("trying again")
 
 		nAttempts := b.Attempt()
 		if nAttempts == MaxStreamOpenAttempts {
-			return nil, fmt.Errorf("exhausted %d attempts but failed to open stream, err: %w", int(MaxStreamOpenAttempts), err)
+			return nil, fmt.Errorf("exhausted %d attempts but failed to open stream, err: %w", MaxStreamOpenAttempts, err)
 		}
 		d := b.Duration()
 		time.Sleep(d)
@@ -208,7 +209,7 @@ func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn 
 
 		qs, err := gr.NewQueryStream(msg.ReceivedFrom)
 		if err != nil {
-			fmt.Println("failed to create response query stream", err)
+			log.Error().Err(err).Msg("failed to create response query stream")
 			continue
 		}
 		resp.Message, err = gr.ResponseMsg(msg.Message)
@@ -216,7 +217,7 @@ func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn 
 			continue
 		}
 		if err := qs.WriteQueryResponse(resp); err != nil {
-			fmt.Printf("retrieval query: WriteCborRPC: %s\n", err)
+			log.Error().Err(err).Msg("retrieval query: WriteCborRPC")
 			continue
 		}
 
@@ -318,7 +319,7 @@ func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 	buf := new(bytes.Buffer)
 	msg, err := PeekResponseMsg(buffered, buf)
 	if err != nil {
-		fmt.Println("failed to peek message", err)
+		log.Error().Err(err).Msg("failed to peek message")
 		return
 	}
 	// Here we handle messages from Filecoin miners
@@ -326,12 +327,12 @@ func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 		gr.rmu.Lock()
 		defer gr.rmu.Unlock()
 		if gr.receiveResp == nil {
-			fmt.Println("received resp")
+			log.Error().Msg("received resp")
 			return
 		}
 		var resp deal.QueryResponse
 		if err := resp.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
-			fmt.Println("failed to read query response", err)
+			log.Error().Err(err).Msg("failed to read query response")
 			return
 		}
 		gr.receiveResp(gr.h.Peerstore().PeerInfo(s.Conn().RemotePeer()), resp)
@@ -340,7 +341,7 @@ func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 	// Get the index where to split
 	is, err := strconv.ParseInt(msg[:2], 10, 64)
 	if err != nil {
-		fmt.Println("failed to parse index", err)
+		log.Error().Err(err).Msg("failed to parse index")
 		return
 	}
 	msgID := msg[2 : is+2]
@@ -349,16 +350,16 @@ func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 	if !gr.meta.Published(msgID) {
 		to, err := gr.meta.Sender(msgID)
 		if err != nil {
-			fmt.Println("failed to find message recipient", err)
+			log.Error().Err(err).Msg("failed to find message recipient")
 			return
 		}
 		w, err := OpenStream(context.Background(), gr.h, to, gr.queryProtocols)
 		if err != nil {
-			fmt.Println("failed to open stream", err)
+			log.Error().Err(err).Msg("failed to open stream")
 			return
 		}
 		if _, err := io.Copy(w, buf); err != nil {
-			fmt.Println("failed to forward buffer", err)
+			log.Error().Err(err).Msg("failed to forward buffer")
 		}
 		return
 	}
@@ -371,13 +372,13 @@ func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 
 	rec, err := utils.AddrBytesToAddrInfo([]byte(msg[is+2:]))
 	if err != nil {
-		fmt.Println("failed to parse addr bytes", err)
+		log.Error().Err(err).Msg("failed to parse addr bytes")
 		return
 	}
 
 	var resp deal.QueryResponse
 	if err := resp.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
-		fmt.Println("failed to read query response", err)
+		log.Error().Err(err).Msg("failed to read query response")
 		return
 	}
 
