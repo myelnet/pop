@@ -143,17 +143,17 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 
 	err := r.dt.RegisterVoucherType(&Request{}, r)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to register voucher type")
+		log.Fatal().Err(err).Msg("failed to register voucher type")
 	}
 
 	err = r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
 	if err != nil {
-		log.Error().Err(err).Msg("failed to register transport configurer")
+		log.Fatal().Err(err).Msg("failed to register transport configurer")
 	}
 
 	emitter, err := h.EventBus().Emitter(new(IndexEvt))
 	if err != nil {
-		log.Error().Err(err).Msg("failed to create emitter event")
+		log.Fatal().Err(err).Msg("failed to create emitter event")
 	}
 	r.emitter = emitter
 

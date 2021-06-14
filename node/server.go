@@ -164,7 +164,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	// try to retrieve the blocks
 	err = s.node.get(r.Context(), root, &GetArgs{Key: key, Strategy: "SelectFirst"})
 	if err != nil {
-		log.Error().Err(err).Msg("error")
+		log.Error().Err(err).Msg("failed to get blocks")
 		// TODO: give better feedback into what went wrong
 		http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
 		return

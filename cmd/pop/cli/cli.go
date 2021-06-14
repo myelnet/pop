@@ -24,7 +24,7 @@ import (
 var loggingLevels = map[string]zerolog.Level{
 	zerolog.TraceLevel.String(): zerolog.TraceLevel, // trace
 	zerolog.DebugLevel.String(): zerolog.DebugLevel, // debug
-	zerolog.InfoLevel.String():  zerolog.InfoLevel,  // info (default in prod)
+	zerolog.InfoLevel.String():  zerolog.InfoLevel,  // info (default)
 }
 
 // LoggerHook displays the file & line the log comes from
@@ -38,19 +38,18 @@ func (h LoggerHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
 
 // Run runs the CLI. The args do not include the binary name.
 func Run(args []string) error {
+	if len(args) == 1 && (args[0] == "-V" || args[0] == "--version" || args[0] == "version") {
+		fmt.Println(build.Version)
+		return nil
+	}
+
 	rootfs := flag.NewFlagSet("pop", flag.ExitOnError)
-	version := rootfs.Bool("version", false, "Display pop version")
 	logLevel := rootfs.String("log", zerolog.InfoLevel.String(), "Set logging mode")
 
 	// env vars can be used as program args, i.e : ENV LOG=debug go run . start
 	err := ff.Parse(rootfs, args, ff.WithEnvVarNoPrefix())
 	if err != nil {
 		return err
-	}
-
-	if *version {
-		fmt.Println(build.Version)
-		return nil
 	}
 
 	loggingLevel, ok := loggingLevels[*logLevel]
