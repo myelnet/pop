@@ -417,7 +417,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 			case datatransfer.Completed:
 				store := r.GetStore(req.PayloadCID)
-
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
 					log.Error().Err(err).Msg("error when fetching keys")
