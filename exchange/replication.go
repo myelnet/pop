@@ -121,7 +121,7 @@ type Replication struct {
 }
 
 // NewReplication starts the exchange replication management system
-func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) *Replication {
+func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) (*Replication, error) {
 	pm := NewPeerMgr(h, opts.Regions)
 	r := &Replication{
 		h:         h,
@@ -143,21 +143,21 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 
 	err := r.dt.RegisterVoucherType(&Request{}, r)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to register voucher type")
+		return nil, fmt.Errorf("failed to register voucher type: %v", err)
 	}
 
 	err = r.dt.RegisterTransportConfigurer(&Request{}, TransportConfigurer(r.idx, r, h.ID()))
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to register transport configurer")
+		return nil, fmt.Errorf("failed to register transport configurer: %v", err)
 	}
 
 	emitter, err := h.EventBus().Emitter(new(IndexEvt))
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create emitter event")
+		return nil, fmt.Errorf("failed to create emitter event: %v", err)
 	}
 	r.emitter = emitter
 
-	return r
+	return r, nil
 }
 
 // Start initiates listeners to update our scheme if new peers join

@@ -67,7 +67,12 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 		w:    wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
-	exch.rpl = NewReplication(h, idx, opts.DataTransfer, exch, opts)
+
+	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
+	if err != nil {
+		return nil, err
+	}
+
 	// Make a new default key to be sure we have an address where to receive our payments
 	if exch.w.DefaultAddress() == address.Undef {
 		_, err = exch.w.NewKey(ctx, wallet.KTSecp256k1)
