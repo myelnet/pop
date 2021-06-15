@@ -485,7 +485,7 @@ func TestMultipleGet(t *testing.T) {
 
 	pn := newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
-	// cn2 := newTestNode(bgCtx, mn, t)
+	cn2 := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -495,16 +495,18 @@ func TestMultipleGet(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Create file data1 & add it to pn
+	// create data1
 	data1 := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
 	p1 := filepath.Join(dir, "data1")
 	err := os.WriteFile(p1, data1, 0666)
 	require.NoError(t, err)
 
+	// add data1
 	added1 := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
+		fmt.Println("pn added data1", n.PutResult.Cid, n.PutResult.Root)
 
 		added1 <- n.PutResult.Cid
 	}
@@ -514,25 +516,8 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added1
 
-	// Create file data2 & add it to pn
-	data2 := make([]byte, 124000)
-	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
-	p2 := filepath.Join(dir, "data2")
-	err = os.WriteFile(p2, data2, 0666)
-	require.NoError(t, err)
-
-	added2 := make(chan string, 1)
-	pn.notify = func(n Notify) {
-		require.Equal(t, n.PutResult.Err, "")
-		added2 <- n.PutResult.Cid
-	}
-	pn.Put(ctx, &PutArgs{
-		Path:      p2,
-		ChunkSize: 1024,
-	})
-	<-added2
-
-	ref, err := pn.getRef("")
+	// commit data1
+	ref1, err := pn.getRef("")
 	require.NoError(t, err)
 	committed := make(chan struct{}, 1)
 	pn.notify = func(n Notify) {
@@ -545,14 +530,48 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-committed
 
-	// cn fetches data1 file
+	// create data2
+	data2 := make([]byte, 124000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	p2 := filepath.Join(dir, "data2")
+	err = os.WriteFile(p2, data2, 0666)
+	require.NoError(t, err)
+
+	// add data2
+	added2 := make(chan string, 1)
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.PutResult.Err, "")
+		fmt.Println("pn added data2", n.PutResult.Cid, n.PutResult.Root)
+		added2 <- n.PutResult.Cid
+	}
+	pn.Put(ctx, &PutArgs{
+		Path:      p2,
+		ChunkSize: 1024,
+	})
+	<-added2
+
+	// commit data2
+	ref2, err := pn.getRef("")
+	require.NoError(t, err)
+	committed = make(chan struct{}, 1)
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.CommResult.Err, "")
+		committed <- struct{}{}
+	}
+	pn.Commit(ctx, &CommArgs{
+		CacheRF:   0,
+		StorageRF: 0,
+	})
+	<-committed
+
+	// check cn received data1
 	got1 := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 		got1 <- n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data1", ref1.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
@@ -562,14 +581,14 @@ func TestMultipleGet(t *testing.T) {
 	res = <-got1
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	//Now let's try to request the second file
+	// check cn received data2
 	got2 := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 		got2 <- n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data2", ref2.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
@@ -579,22 +598,21 @@ func TestMultipleGet(t *testing.T) {
 	res = <-got2
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	// @BUG: not entirely sure why this doesn't work if data2 isn't fetched first
-	// got3 := make(chan *GetResult, 2)
-	// cn2.notify = func(n Notify) {
-	// 	require.Equal(t, "", n.GetResult.Err)
-	// 	got3 <- n.GetResult
-	// }
-	// cn2.Get(ctx, &GetArgs{
-	// 	Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
-	// 	Strategy: "SelectFirst",
-	// 	Timeout:  1,
-	// })
-	// res = <-got3
-	// require.NotEqual(t, "", res.DealID)
+	got3 := make(chan *GetResult, 2)
+	cn2.notify = func(n Notify) {
+		require.Equal(t, "", n.GetResult.Err)
+		got3 <- n.GetResult
+	}
+	cn2.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data2", ref2.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res = <-got3
+	require.NotEqual(t, "", res.DealID)
 
-	// res = <-got3
-	// require.Greater(t, res.TransLatSeconds, 0.0)
+	res = <-got3
+	require.Greater(t, res.TransLatSeconds, 0.0)
 }
 
 func TestImportKey(t *testing.T) {
