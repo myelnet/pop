@@ -94,6 +94,7 @@ type PingResult struct {
 
 // PutResult gives us feedback on the result of the Put request
 type PutResult struct {
+	Key       string
 	Cid       string
 	Size      string
 	NumBlocks int

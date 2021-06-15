@@ -385,37 +385,43 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 		nd.tx = nd.exch.Tx(ctx)
 	}
 
-	file, err := os.Open(args.Path)
+	fstat, err := os.Stat(args.Path)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	froot, err := nd.Add(ctx, nd.tx.Store().DAG, file)
+	fnd, err := files.NewSerialFile(args.Path, false, fstat)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	stats, err := utils.Stat(ctx, nd.tx.Store(), froot, sel.All())
-	if err != nil {
-		log.Error().Err(err).Msg("record not found")
-	}
-
-	fname := exchange.KeyFromPath(args.Path)
-	err = nd.tx.Put(fname, froot, int64(stats.Size))
+	added := make(map[string]bool)
+	err = nd.addRecursive(ctx, args.Path, fnd, added)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	nd.send(Notify{
-		PutResult: &PutResult{
-			Cid:       froot.String(),
-			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
-			NumBlocks: stats.NumBlocks,
-			Root:      nd.tx.Root().String(),
-		}})
+	entries, err := nd.tx.Status()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	// only notify about entries added by this operation
+	for k := range added {
+		e := entries[k]
+		nd.send(Notify{
+			PutResult: &PutResult{
+				Key:  k,
+				Cid:  e.Value.String(),
+				Size: filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
+				// NumBlocks: stats.NumBlocks, TODO: should Entry contain the number of blocks?
+				Root: nd.tx.Root().String(),
+			}})
+	}
 }
 
 // Status prints the current transaction status. It shows which files have been added but not yet committed
@@ -963,6 +969,43 @@ func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.Reade
 	}
 
 	return n.Cid(), nil
+}
+
+// addRecursive adds entire file trees into a single transaction
+// it assumes the caller is holding the tx lock until it returns
+// it currently flattens the keys though we may want to maintain the full keys to keep the structure
+func (nd *node) addRecursive(ctx context.Context, name string, file files.Node, added map[string]bool) error {
+	switch f := file.(type) {
+	case files.Directory:
+		it := f.Entries()
+		for it.Next() {
+			err := nd.addRecursive(ctx, it.Name(), it.Node(), added)
+			if err != nil {
+				return err
+			}
+		}
+		return it.Err()
+	case files.File:
+		froot, err := nd.Add(ctx, nd.tx.Store().DAG, f)
+		if err != nil {
+			return err
+		}
+
+		size, err := file.Size()
+		if err != nil {
+			return err
+		}
+
+		key := exchange.KeyFromPath(name)
+		err = nd.tx.Put(key, froot, size)
+		if err != nil {
+			return err
+		}
+		added[key] = true
+		return nil
+	default:
+		return errors.New("unknown file type")
+	}
 }
 
 // connPeers returns a list of connected peer IDs
