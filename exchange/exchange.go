@@ -128,7 +128,6 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	// We need to remember the offer we made so we can validate against it once
 	// clients start the retrieval
 	e.rtv.Provider().SetAsk(q.PayloadCID, resp)
-	fmt.Println("provider response", p)
 	return resp, nil
 }
 

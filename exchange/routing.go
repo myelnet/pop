@@ -204,7 +204,6 @@ func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn 
 		}
 		resp, err := fn(ctx, msg.ReceivedFrom, r, *m)
 		if err != nil {
-			fmt.Println("recived query", err)
 			continue
 		}
 

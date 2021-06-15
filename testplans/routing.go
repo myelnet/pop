@@ -122,7 +122,8 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		if err := exch.Index().SetRef(tx.Ref()); err != nil {
+		ref := tx.Ref()
+		if err := exch.Index().SetRef(ref); err != nil {
 			return err
 		}
 		if err := tx.Close(); err != nil {
@@ -132,11 +133,11 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		// Only the first one in the group needs to publish the CID as it's the same file
 		if int(initCtx.GroupSeq) == 1 {
 			initCtx.SyncClient.MustPublish(ctx, contentTopic, &ex.PRecord{
-				PayloadCID: fid,
+				PayloadCID: ref.PayloadCID,
 				Provider:   h.ID(),
 			})
 		}
-		runenv.RecordMessage("imported content %s", fid)
+		runenv.RecordMessage("imported content %s", ref.PayloadCID)
 		initCtx.SyncClient.MustSignalEntry(ctx, imported)
 	}
 
