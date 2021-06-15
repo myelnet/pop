@@ -495,6 +495,7 @@ func TestMultipleGet(t *testing.T) {
 
 	dir := t.TempDir()
 
+	// Create file data1 & add it to pn
 	data1 := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
 	p1 := filepath.Join(dir, "data1")
@@ -513,6 +514,7 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added1
 
+	// Create file data2 & add it to pn
 	data2 := make([]byte, 124000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
 	p2 := filepath.Join(dir, "data2")
@@ -522,7 +524,6 @@ func TestMultipleGet(t *testing.T) {
 	added2 := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-
 		added2 <- n.PutResult.Cid
 	}
 	pn.Put(ctx, &PutArgs{
@@ -544,6 +545,7 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-committed
 
+	// cn fetches data1 file
 	got1 := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")

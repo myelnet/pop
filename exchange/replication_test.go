@@ -482,7 +482,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 	tnds := make(map[peer.ID]*testutil.TestNode)
 	receivers := make(map[peer.ID]*Replication)
 
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 6; i++ {
 		tnode := testutil.NewTestNode(mn, t)
 		tnode.SetupDataTransfer(ctx, t)
 		t.Cleanup(func() {
@@ -498,6 +498,34 @@ func TestMultiDispatchStreams(t *testing.T) {
 		receivers[tnode.Host.ID()] = hn1
 		tnds[tnode.Host.ID()] = tnode
 	}
+
+	// Create a provider that already has the file
+	tnode := testutil.NewTestNode(mn, t)
+	tnode.SetupDataTransfer(ctx, t)
+	t.Cleanup(func() {
+		err := tnode.Dt.Stop(ctx)
+		require.NoError(t, err)
+	})
+	tnode.LoadFileToNewStore(ctx, t, fname)
+	idx2, err := NewIndex(tnode.Ds)
+	require.NoError(t, err)
+	opts2 := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
+	hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx2), opts2)
+	require.NoError(t, err)
+	ref := &DataRef{
+		PayloadCID:  rootCid,
+		PayloadSize: int64(256000),
+	}
+
+	// the file is already in the node so setRef should return ErrRefAlreadyExists
+	require.Error(t, idx.SetRef(ref), ErrRefAlreadyExists)
+
+	// we update the ref instead of adding it
+	require.NoError(t, idx.UpdateRef(ref))
+
+	require.NoError(t, hn1.Start(ctx))
+	receivers[tnode.Host.ID()] = hn1
+	tnds[tnode.Host.ID()] = tnode
 
 	err = mn.LinkAll()
 	require.NoError(t, err)
@@ -532,6 +560,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 		p := tnds[r.Provider]
 		p.VerifyFileTransferred(ctx, t, p.DAG, rootCid, origBytes)
 	}
+
 }
 
 // In some rare cases where our node isn't connected to any peer we should still

@@ -284,10 +284,10 @@ func TestIndexListRefs(t *testing.T) {
 	require.Greater(t, count, 36)
 
 	// set a ref that already exists
-	require.NoError(t, idx.SetRef(&DataRef{
+	require.Error(t, idx.SetRef(&DataRef{
 		PayloadCID:  list[4].PayloadCID,
 		PayloadSize: list[4].PayloadSize,
-	}))
+	}), ErrRefAlreadyExists)
 
 	// length should be the same size
 	list, err = idx.ListRefs()
