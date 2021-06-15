@@ -474,7 +474,7 @@ func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
 	return nil, ErrNoTx
 }
 
-// Quote returns an estimation of market price for storing a commit on Filecoin
+// Quote returns an estimation of market price for storing a list of transactions on Filecoin
 func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
@@ -487,12 +487,38 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(ErrFilecoinRPCOffline)
 		return
 	}
-	com, err := nd.getRef(args.Ref)
+
+	cbs := cbor.NewCborStore(nd.bs)
+	hnd, err := hamt.NewNode(cbs, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	piece, err := nd.archive(ctx, com.PayloadCID)
+	for _, ref := range args.Refs {
+		ccid, err := cid.Parse(ref)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+
+		cref := CommitRef{ccid}
+		if err := hnd.Set(ctx, ref, &cref); err != nil {
+			sendErr(err)
+			return
+		}
+		if err := hnd.Flush(ctx); err != nil {
+			sendErr(err)
+			return
+		}
+	}
+
+	proot, err := cbs.Put(ctx, hnd)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	piece, err := nd.archive(ctx, proot)
 	if err != nil {
 		sendErr(err)
 		return
@@ -516,7 +542,7 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 
 	nd.send(Notify{
 		QuoteResult: &QuoteResult{
-			Ref:         com.PayloadCID.String(),
+			Ref:         piece.CID.String(),
 			Quotes:      quotes,
 			PayloadSize: uint64(piece.PayloadSize),
 			PieceSize:   uint64(piece.PieceSize),
@@ -562,73 +588,102 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	nd.tx.Close()
 	nd.tx = nil
 	nd.txmu.Unlock()
+	nd.send(Notify{CommResult: &CommResult{
+		Ref: ref.PayloadCID.String(),
+	}})
+}
 
-	if !args.CacheOnly && args.StorageRF > 0 {
-		if !nd.exch.IsFilecoinOnline() {
-			sendErr(ErrFilecoinRPCOffline)
-			return
-		}
-
-		piece, err := nd.archive(ctx, ref.PayloadCID)
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		log.Info().Msg("getting quote for a piece")
-
-		quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
-			PieceSize: uint64(piece.PieceSize),
-			Duration:  args.Duration,
-			RF:        args.StorageRF,
-			MaxPrice:  args.MaxPrice,
-			Region:    "Europe",
-			Verified:  args.Verified,
-		})
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		log.Info().Uint64("MinPieceSize", quote.MinPieceSize).Msg("got a quote")
-
-		if quote.MinPieceSize > uint64(piece.PieceSize) {
-			nd.send(Notify{
-				CommResult: &CommResult{
-					Capacity: quote.MinPieceSize - uint64(piece.PieceSize),
-				},
-			})
-			return
-		}
-
-		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-			ref.PayloadCID,
-			args.Duration,
-			nd.exch.Wallet().DefaultAddress(),
-			quote.Miners,
-			args.Verified,
-		))
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		if len(rcpt.DealRefs) == 0 {
-			sendErr(ErrAllDealsFailed)
-			return
-		}
-		var cr CommResult
-		for _, m := range rcpt.Miners {
-			cr.Miners = append(cr.Miners, m.String())
-		}
-		for _, d := range rcpt.DealRefs {
-			cr.Deals = append(cr.Deals, d.String())
-		}
+// Store aggregates multiple transactions together into a storage deal if the piece is large enough
+// the method may need to be called until there is enough content to reach the minimum storage size
+func (nd *node) Store(ctx context.Context, args *StoreArgs) {
+	sendErr := func(err error) {
 		nd.send(Notify{
-			CommResult: &cr,
+			StoreResult: &StoreResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	if !nd.exch.IsFilecoinOnline() {
+		sendErr(ErrFilecoinRPCOffline)
+		return
+	}
+	ref, err := nd.getRef(args.Ref)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	cref := CommitRef{ref.PayloadCID}
+	if err := nd.pieceHAMT.Set(ctx, ref.PayloadCID.String(), &cref); err != nil {
+		sendErr(err)
+		return
+	}
+	if err := nd.pieceHAMT.Flush(ctx); err != nil {
+		sendErr(err)
+		return
+	}
+	proot, err := nd.is.Put(ctx, nd.pieceHAMT)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	piece, err := nd.archive(ctx, proot)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	log.Info().Msg("getting quote for a piece")
+
+	quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
+		PieceSize: uint64(piece.PieceSize),
+		Duration:  args.Duration,
+		RF:        args.StorageRF,
+		MaxPrice:  args.MaxPrice,
+		Region:    "Europe",
+		Verified:  args.Verified,
+	})
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	log.Info().Uint64("MinPieceSize", quote.MinPieceSize).Msg("got a quote")
+
+	if quote.MinPieceSize > uint64(piece.PieceSize) {
+		nd.send(Notify{
+			StoreResult: &StoreResult{
+				Capacity: quote.MinPieceSize - uint64(piece.PieceSize),
+			},
 		})
 		return
 	}
-	nd.send(Notify{CommResult: &CommResult{}})
+
+	rcpt, err := nd.rs.Store(ctx, storage.NewParams(
+		ref.PayloadCID,
+		args.Duration,
+		nd.exch.Wallet().DefaultAddress(),
+		quote.Miners,
+		args.Verified,
+	))
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	if len(rcpt.DealRefs) == 0 {
+		sendErr(ErrAllDealsFailed)
+		return
+	}
+	var sr StoreResult
+	for _, m := range rcpt.Miners {
+		sr.Miners = append(sr.Miners, m.String())
+	}
+	for _, d := range rcpt.DealRefs {
+		sr.Deals = append(sr.Deals, d.String())
+	}
+	nd.send(Notify{
+		StoreResult: &sr,
+	})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli

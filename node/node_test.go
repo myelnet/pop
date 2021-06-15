@@ -299,6 +299,16 @@ func TestQuote(t *testing.T) {
 	})
 	<-added
 
+	committed := make(chan CommResult, 1)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.CommResult.Err, "")
+		committed <- *n.CommResult
+	}
+	cn.Commit(ctx, &CommArgs{
+		CacheRF: 0,
+	})
+	com := <-committed
+
 	quoted := make(chan QuoteResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, "", n.QuoteResult.Err)
@@ -306,6 +316,7 @@ func TestQuote(t *testing.T) {
 		quoted <- *n.QuoteResult
 	}
 	cn.Quote(ctx, &QuoteArgs{
+		Refs:      []string{com.Ref},
 		Duration:  24 * time.Hour * time.Duration(180),
 		StorageRF: 6,
 		MaxPrice:  uint64(20000000000),
@@ -354,8 +365,7 @@ func TestCommit(t *testing.T) {
 		committed <- n.CommResult.Caches
 	}
 	cn.Commit(ctx, &CommArgs{
-		CacheOnly: true,
-		CacheRF:   2,
+		CacheRF: 2,
 	})
 	close(committed)
 	for range committed {
@@ -406,8 +416,7 @@ func TestGet(t *testing.T) {
 		committed <- struct{}{}
 	}
 	pn.Commit(ctx, &CommArgs{
-		CacheRF:   0,
-		StorageRF: 0,
+		CacheRF: 0,
 	})
 	<-committed
 
@@ -539,8 +548,7 @@ func TestMultipleGet(t *testing.T) {
 		committed <- struct{}{}
 	}
 	pn.Commit(ctx, &CommArgs{
-		CacheRF:   0,
-		StorageRF: 0,
+		CacheRF: 0,
 	})
 	<-committed
 

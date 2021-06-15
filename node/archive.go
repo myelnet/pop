@@ -26,22 +26,10 @@ type PieceRef struct {
 
 // archive a DAG into a CAR
 func (nd *node) archive(ctx context.Context, root cid.Cid) (*PieceRef, error) {
-	ref := CommitRef{root}
-	if err := nd.pieceHAMT.Set(ctx, root.String(), &ref); err != nil {
-		return nil, err
-	}
-	if err := nd.pieceHAMT.Flush(ctx); err != nil {
-		return nil, err
-	}
-	proot, err := nd.is.Put(ctx, nd.pieceHAMT)
-	if err != nil {
-		return nil, err
-	}
-
 	wr := &writer.Writer{}
 	bw := bufio.NewWriterSize(wr, int(writer.CommPBuf))
 
-	err = car.WriteCar(ctx, nd.dag, []cid.Cid{proot}, wr)
+	err := car.WriteCar(ctx, nd.dag, []cid.Cid{root}, wr)
 	if err != nil {
 		return nil, err
 	}
