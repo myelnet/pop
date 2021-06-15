@@ -95,6 +95,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err := exch.rou.StartProviding(ctx, exch.handleQuery); err != nil {
 		return nil, err
 	}
+	log.Info().Msg("started exchange")
 	return exch, nil
 }
 
