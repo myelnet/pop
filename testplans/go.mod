@@ -20,6 +20,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
 	github.com/myelnet/pop v0.0.0-20210615103345-179d81ac672a
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
+	github.com/rs/zerolog v1.20.0
 	github.com/testground/sdk-go v0.2.7
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
