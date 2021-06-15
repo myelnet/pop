@@ -1,8 +1,16 @@
 package main
 
-import "github.com/testground/sdk-go/run"
+import (
+	"log"
+	"os"
+
+	"github.com/rs/zerolog"
+	"github.com/testground/sdk-go/run"
+)
 
 func main() {
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	run.InvokeMap(testcases)
 }
 

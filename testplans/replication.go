@@ -82,11 +82,17 @@ func runBootstrapSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error 
 			}
 
 			tx := exch.Tx(ctx)
-			tx.SetCacheRF(0)
-			err = tx.PutFile(fpath)
+
+			fid, err := importFile(ctx, fpath, tx.Store().DAG)
 			if err != nil {
 				return err
 			}
+			err = tx.Put(ex.KeyFromPath(fpath), fid, int64(256000))
+			if err != nil {
+				return err
+			}
+
+			tx.SetCacheRF(0)
 			err = tx.Commit()
 			if err != nil {
 				return err
@@ -196,7 +202,13 @@ func runDispatch(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		}
 
 		tx := exch.Tx(ctx)
-		err = tx.PutFile(fpath)
+
+		fid, err := importFile(ctx, fpath, tx.Store().DAG)
+		if err != nil {
+			return err
+		}
+
+		err = tx.Put(ex.KeyFromPath(fpath), fid, int64(256000))
 		if err != nil {
 			return err
 		}
@@ -245,9 +257,9 @@ func newNode(ctx context.Context, rpath string, ip net.IP, low, hi int) (*ex.Exc
 	}
 
 	opts := ex.Options{
-		RepoPath:    rpath,
-		Regions:     []ex.Region{ex.Regions["Global"]},
-		RepInterval: 3 * time.Second, // accelerate replication for testing purposes
+		RepoPath:     rpath,
+		Regions:      []ex.Region{ex.Regions["Global"]},
+		ReplInterval: 3 * time.Second, // accelerate replication for testing purposes
 	}
 	e, err := ex.New(ctx, h, ds, opts)
 	if err != nil {

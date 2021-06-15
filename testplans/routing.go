@@ -20,7 +20,6 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
-	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
@@ -208,8 +207,6 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		return ex.Options{}, nil, nil, err
 	}
 
-	ks := keystore.NewMemKeystore()
-
 	// create a new libp2p Host that listens on a random TCP port
 	h, err := libp2p.New(ctx,
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
@@ -247,7 +244,6 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		PubSub:       ps,
 		GraphSync:    gs,
 		RepoPath:     rpath,
-		Keystore:     ks,
 		GossipTracer: tracer,
 		Regions:      []ex.Region{ex.Regions["Global"]},
 	}, h, ds, nil
