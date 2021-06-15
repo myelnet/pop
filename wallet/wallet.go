@@ -128,7 +128,7 @@ func NewKeyFromKeyInfo(ki KeyInfo) (*Key, error) {
 }
 
 // NewKeyFromLibp2p converts a libp2p crypto private key interface into a Key
-func NewKeyFromLibp2p(pk ci.PrivKey) (*Key, error) {
+func NewKeyFromLibp2p(pk ci.PrivKey, sigs map[KeyType]Signer) (*Key, error) {
 	var tp KeyType
 	switch pk.Type() {
 	case pb.KeyType_Secp256k1:
@@ -142,7 +142,7 @@ func NewKeyFromLibp2p(pk ci.PrivKey) (*Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	sig, err := KeyTypeSig(tp)
+	sig, err := KeyTypeSig(tp, sigs)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +174,7 @@ type Driver interface {
 	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
 	Balance(context.Context, address.Address) (fil.BigInt, error)
 	Transfer(ctx context.Context, from address.Address, to address.Address, amount string) error
+	Signers() map[KeyType]Signer
 }
 
 // KeystoreWallet wraps an IPFS keystore
@@ -181,19 +182,43 @@ type KeystoreWallet struct {
 	keystore keystore.Keystore
 	// API to interact with Filecoin chain
 	fAPI fil.API
+	sigs map[KeyType]Signer
 
 	mu          sync.Mutex
 	keys        map[address.Address]*Key // cache so we don't read from the Keystore too much
 	defaultAddr address.Address
 }
 
+// Option is an optional configuration of the wallet
+type Option func(kw *KeystoreWallet)
+
+// WithBLSSig adds a signer for the BLS key type
+func WithBLSSig(sig Signer) Option {
+	return func(kw *KeystoreWallet) {
+		kw.sigs[KTBLS] = sig
+	}
+}
+
+// WithFilAPI sets the filecoin API client
+func WithFilAPI(f fil.API) Option {
+	return func(kw *KeystoreWallet) {
+		kw.fAPI = f
+	}
+}
+
 // NewFromKeystore creates a new IPFS keystore based wallet implementing the Driver methods
-func NewFromKeystore(ks keystore.Keystore, f fil.API) Driver {
+func NewFromKeystore(ks keystore.Keystore, opts ...Option) Driver {
 	w := &KeystoreWallet{
 		keystore:    ks,
 		keys:        make(map[address.Address]*Key),
-		fAPI:        f,
+		sigs:        make(map[KeyType]Signer),
 		defaultAddr: address.Undef,
+	}
+	// Add Secp256k1 by default
+	w.sigs[KTSecp256k1] = secp{}
+
+	for _, opt := range opts {
+		opt(w)
 	}
 
 	// cache the default address if we have any
@@ -211,7 +236,7 @@ func (w *KeystoreWallet) NewKey(ctx context.Context, kt KeyType) (address.Addres
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	sig, err := KeyTypeSig(kt)
+	sig, err := KeyTypeSig(kt, w.sigs)
 	if err != nil {
 		return address.Undef, err
 	}
@@ -251,7 +276,7 @@ func (w *KeystoreWallet) getDefaultAddress() (address.Address, error) {
 		return address.Undef, err
 	}
 
-	key, err := NewKeyFromLibp2p(k)
+	key, err := NewKeyFromLibp2p(k, w.sigs)
 	if err != nil {
 		return address.Undef, err
 	}
@@ -320,7 +345,7 @@ func (w *KeystoreWallet) ImportKey(ctx context.Context, k *KeyInfo) (address.Add
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	sig, err := KeyTypeSig(k.KType)
+	sig, err := KeyTypeSig(k.KType, w.sigs)
 	if err != nil {
 		return address.Undef, err
 	}
@@ -355,7 +380,7 @@ func (w *KeystoreWallet) Sign(ctx context.Context, addr address.Address, msg []b
 
 // Verify a signature for the given bytes
 func (w *KeystoreWallet) Verify(ctx context.Context, k address.Address, msg []byte, sig *crypto.Signature) (bool, error) {
-	signer, err := SigTypeSig(sig.Type)
+	signer, err := SigTypeSig(sig.Type, w.sigs)
 	if err != nil {
 		return false, err
 	}
@@ -379,7 +404,7 @@ func (w *KeystoreWallet) getKey(addr address.Address) (*Key, error) {
 		return nil, err
 	}
 
-	k, err = NewKeyFromLibp2p(ki)
+	k, err = NewKeyFromLibp2p(ki, w.sigs)
 	if err != nil {
 		return nil, err
 	}
@@ -388,25 +413,27 @@ func (w *KeystoreWallet) getKey(addr address.Address) (*Key, error) {
 	return k, nil
 }
 
+// Signers returns all the signers registered for this wallet
+func (w *KeystoreWallet) Signers() map[KeyType]Signer {
+	return w.sigs
+}
+
 // KeyTypeSig selects the signer based on key type
-func KeyTypeSig(typ KeyType) (Signer, error) {
-	switch typ {
-	case KTSecp256k1:
-		return secp{}, nil
-	case KTBLS:
-		return bls{}, nil
-	default:
-		return nil, fmt.Errorf("key type not supported")
+func KeyTypeSig(typ KeyType, sigs map[KeyType]Signer) (Signer, error) {
+	sig, ok := sigs[typ]
+	if !ok {
+		return nil, fmt.Errorf("key type not supported: %s", typ)
 	}
+	return sig, nil
 }
 
 // SigTypeSig selects the signer based on sig type
-func SigTypeSig(st crypto.SigType) (Signer, error) {
+func SigTypeSig(st crypto.SigType, sigs map[KeyType]Signer) (Signer, error) {
 	switch st {
 	case crypto.SigTypeSecp256k1:
-		return secp{}, nil
+		return KeyTypeSig(KTSecp256k1, sigs)
 	case crypto.SigTypeBLS:
-		return bls{}, nil
+		return KeyTypeSig(KTBLS, sigs)
 	default:
 		return nil, fmt.Errorf("sig type not supported")
 	}

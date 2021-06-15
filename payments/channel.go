@@ -757,7 +757,7 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 		return nil, err
 	}
 
-	sig, err := wallet.SigTypeSig(sv.Signature.Type)
+	sig, err := wallet.SigTypeSig(sv.Signature.Type, ch.wal.Signers())
 	if err != nil {
 		return nil, err
 	}

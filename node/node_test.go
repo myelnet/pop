@@ -23,6 +23,7 @@ import (
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/filecoin/storage"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,9 +64,9 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 		Blockstore:  nd.bs,
 		MultiStore:  nd.ms,
 		RepoPath:    t.TempDir(),
-		Keystore:    keystore.NewMemKeystore(),
 		FilecoinAPI: filecoin.NewMockLotusAPI(),
 	}
+	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, opts)
 	require.NoError(t, err)
 
@@ -592,4 +593,17 @@ func TestMultipleGet(t *testing.T) {
 
 	// res = <-got3
 	// require.Greater(t, res.TransLatSeconds, 0.0)
+}
+
+func TestImportKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+	n := newTestNode(ctx, mn, t)
+
+	h := "7b2254797065223a22626c73222c22507269766174654b6579223a226a6b55704e6a53493749664a4632434f6f505169344f79477a475241532b766b616c314e5a616f7a3853633d227d"
+	n.importAddress(h)
+
+	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
+	require.Equal(t, expected, n.exch.Wallet().DefaultAddress())
 }

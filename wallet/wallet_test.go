@@ -2,8 +2,6 @@ package wallet
 
 import (
 	"context"
-	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -25,7 +23,7 @@ func TestSecpSignature(t *testing.T) {
 	ctx := context.Background()
 	ks := keystore.NewMemKeystore()
 
-	w := NewFromKeystore(ks, nil)
+	w := NewFromKeystore(ks)
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	if err != nil {
@@ -74,7 +72,7 @@ func TestDefaultAddress(t *testing.T) {
 	ctx := context.Background()
 	ks := keystore.NewMemKeystore()
 
-	w := NewFromKeystore(ks, nil)
+	w := NewFromKeystore(ks)
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	require.NoError(t, err)
@@ -104,28 +102,6 @@ func TestDefaultAddress(t *testing.T) {
 	list, err := w.List()
 	require.NoError(t, err)
 	require.Equal(t, expected, list)
-}
-
-func TestImportKey(t *testing.T) {
-	ctx := context.Background()
-	ks := keystore.NewMemKeystore()
-
-	w := NewFromKeystore(ks, nil)
-
-	h := "7b2254797065223a22626c73222c22507269766174654b6579223a226a6b55704e6a53493749664a4632434f6f505169344f79477a475241532b766b616c314e5a616f7a3853633d227d"
-	decoded, _ := hex.DecodeString(h)
-
-	var ki KeyInfo
-	if err := json.Unmarshal(decoded, &ki); err != nil {
-		t.Fatal(err)
-	}
-
-	addr, err := w.ImportKey(ctx, &ki)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
-	require.Equal(t, expected, addr)
 }
 
 type testLotusNode struct{}
@@ -180,7 +156,7 @@ func TestTransfer(t *testing.T) {
 	defer api.Close()
 	ks := keystore.NewMemKeystore()
 
-	w := NewFromKeystore(ks, api)
+	w := NewFromKeystore(ks, WithFilAPI(api))
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	if err != nil {
