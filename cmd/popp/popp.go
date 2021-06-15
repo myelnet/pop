@@ -22,7 +22,10 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/myelnet/pop/exchange"
+	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
+	"github.com/myelnet/pop/wallet"
+	"github.com/rs/zerolog/log"
 )
 
 // pop provider is a lightweight daemon only focused on serving content for retrievals
@@ -133,13 +136,21 @@ func run() error {
 		Blockstore:          bs,
 		MultiStore:          ms,
 		RepoPath:            rpath,
-		Keystore:            ks,
 		FilecoinRPCEndpoint: args.filEndpoint,
 		FilecoinRPCHeader: http.Header{
 			"Authorization": []string{filToken},
 		},
 		Regions: regions,
 	}
+
+	opts.FilecoinAPI, err = filecoin.NewLotusRPC(ctx, opts.FilecoinRPCEndpoint, opts.FilecoinRPCHeader)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to connect with Lotus RPC")
+	}
+	opts.Wallet = wallet.NewFromKeystore(
+		ks,
+		wallet.WithFilAPI(opts.FilecoinAPI),
+	)
 
 	exch, err := exchange.New(ctx, host, ds, opts)
 	if err != nil {
