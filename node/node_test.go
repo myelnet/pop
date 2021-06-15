@@ -506,8 +506,6 @@ func TestMultipleGet(t *testing.T) {
 	added1 := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-		fmt.Println("pn added data1", n.PutResult.Cid, n.PutResult.Root)
-
 		added1 <- n.PutResult.Cid
 	}
 	pn.Put(ctx, &PutArgs{
@@ -541,7 +539,6 @@ func TestMultipleGet(t *testing.T) {
 	added2 := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-		fmt.Println("pn added data2", n.PutResult.Cid, n.PutResult.Root)
 		added2 <- n.PutResult.Cid
 	}
 	pn.Put(ctx, &PutArgs{
