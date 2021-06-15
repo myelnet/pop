@@ -50,7 +50,6 @@ func runCommit(ctx context.Context, args []string) error {
 	cc.Commit(&node.CommArgs{
 		CacheRF: commArgs.cacheRF,
 	})
-	received := 0
 	for {
 		select {
 		case cr := <-crc:
@@ -59,9 +58,9 @@ func runCommit(ctx context.Context, args []string) error {
 			}
 			if len(cr.Caches) > 0 {
 				fmt.Printf("Cached by %s\n", cr.Caches)
-				received += len(cr.Caches)
 			}
-			if received == commArgs.cacheRF {
+			if cr.Ref != "" {
+				fmt.Printf("==> Committed transaction %s (%s)\n", cr.Ref, cr.Size)
 				return nil
 			}
 		case <-ctx.Done():

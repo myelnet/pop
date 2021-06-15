@@ -43,7 +43,7 @@ func runList(ctx context.Context, args []string) error {
 		if ref.Err != "" {
 			return errors.New(ref.Err)
 		}
-		fmt.Printf("==> %s %s %d\n", ref.Root, filecoin.SizeStr(filecoin.NewInt(uint64(ref.Size))), ref.Freq)
+		fmt.Printf("Tx %s %s %d\n", ref.Root, filecoin.SizeStr(filecoin.NewInt(uint64(ref.Size))), ref.Freq)
 	}
 	return nil
 }

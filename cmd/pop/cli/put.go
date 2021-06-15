@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -49,15 +51,39 @@ func runPut(ctx context.Context, args []string) error {
 		Path:      args[0],
 		ChunkSize: putArgs.chunkSize,
 	})
-	select {
-	case pr := <-prc:
-		if pr.Err != "" {
-			return errors.New(pr.Err)
+
+	buf := bytes.NewBuffer(nil)
+	w := new(tabwriter.Writer)
+	w.Init(buf, 0, 4, 2, ' ', 0)
+
+	i := 1
+
+loop:
+	for {
+		select {
+		case pr := <-prc:
+			if pr.Err != "" {
+				return errors.New(pr.Err)
+			}
+
+			if i == 1 {
+				fmt.Printf("==> Put in transaction with root %s\n", pr.RootCid)
+				fmt.Printf("--\n")
+			}
+
+			fmt.Fprintf(w, "%s\t%s\n", pr.Key, pr.Size)
+
+			if i == pr.Len {
+				fmt.Fprintf(w, "--\t\n")
+				fmt.Fprintf(w, "Total size\t%s\n", pr.TotalSize)
+				break loop
+			}
+			i++
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		fmt.Printf("==> Put new file in tx with root %s\n", pr.Root)
-		fmt.Printf("%s  %s  %s  %d blk\n", args[0], pr.Cid, pr.Size, pr.NumBlocks)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	w.Flush()
+	fmt.Printf("%s\n", buf.String())
+	return nil
 }

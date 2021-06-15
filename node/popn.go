@@ -410,16 +410,20 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 		return
 	}
 
+	var totalSize int64
 	// only notify about entries added by this operation
 	for k := range added {
 		e := entries[k]
+		totalSize += e.Size
 		nd.send(Notify{
 			PutResult: &PutResult{
 				Key:  k,
 				Cid:  e.Value.String(),
 				Size: filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
 				// NumBlocks: stats.NumBlocks, TODO: should Entry contain the number of blocks?
-				Root: nd.tx.Root().String(),
+				RootCid:   nd.tx.Root().String(),
+				TotalSize: filecoin.SizeStr(filecoin.NewInt(uint64(totalSize))),
+				Len:       len(added),
 			}})
 	}
 }
@@ -594,8 +598,10 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	nd.tx.Close()
 	nd.tx = nil
 	nd.txmu.Unlock()
+
 	nd.send(Notify{CommResult: &CommResult{
-		Ref: ref.PayloadCID.String(),
+		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),
+		Ref:  ref.PayloadCID.String(),
 	}})
 }
 
@@ -683,16 +689,6 @@ func (nd *node) Store(ctx context.Context, args *StoreArgs) {
 		sendErr(ErrAllDealsFailed)
 		return
 	}
-	var sr StoreResult
-	for _, m := range rcpt.Miners {
-		sr.Miners = append(sr.Miners, m.String())
-	}
-	for _, d := range rcpt.DealRefs {
-		sr.Deals = append(sr.Deals, d.String())
-	}
-	nd.send(Notify{
-		StoreResult: &sr,
-	})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli

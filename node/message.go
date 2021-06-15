@@ -94,11 +94,12 @@ type PingResult struct {
 
 // PutResult gives us feedback on the result of the Put request
 type PutResult struct {
+	RootCid   string
 	Key       string
 	Cid       string
 	Size      string
-	NumBlocks int
-	Root      string
+	TotalSize string
+	Len       int
 	Err       string
 }
 
@@ -122,6 +123,7 @@ type QuoteResult struct {
 type CommResult struct {
 	Ref    string
 	Caches []string
+	Size   string
 	Err    string
 }
 

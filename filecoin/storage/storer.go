@@ -457,7 +457,7 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		return nil, err
 	}
 	epochs := calcEpochs(p.Duration)
-	var proposals []*market.DealProposal
+	proposals := make(map[peer.ID]*market.DealProposal)
 	total := abi.NewTokenAmount(0)
 	for _, m := range p.Miners {
 		prop, resp, err := s.ProposeDeal(ctx, StartDealParams{
@@ -487,7 +487,7 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		case storagemarket.StorageDealWaitingForData, storagemarket.StorageDealProposalAccepted:
 			log.Info().Msg("ProposalAccepted")
 
-			proposals = append(proposals, prop)
+			proposals[m.Info.PeerID] = prop
 			total = fil.BigAdd(prop.ClientBalanceRequirement(), total)
 		}
 	}
