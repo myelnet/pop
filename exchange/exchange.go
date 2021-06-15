@@ -21,7 +21,6 @@ import (
 	"github.com/myelnet/pop/selectors"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
-	"github.com/rs/zerolog/log"
 )
 
 // Exchange is a financially incentivized IPLD  block exchange
@@ -95,7 +94,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err := exch.rou.StartProviding(ctx, exch.handleQuery); err != nil {
 		return nil, err
 	}
-	log.Info().Msg("started exchange")
 	return exch, nil
 }
 
@@ -130,7 +128,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	// We need to remember the offer we made so we can validate against it once
 	// clients start the retrieval
 	e.rtv.Provider().SetAsk(q.PayloadCID, resp)
-	log.Info().Str("peerID", p.String()).Msg("provider response")
+	fmt.Println("provider response", p)
 	return resp, nil
 }
 
