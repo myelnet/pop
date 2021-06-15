@@ -4,19 +4,19 @@
 [global]
   plan = "testplans"
   case = "routing_gossip"
-  total_instances = 40
+  total_instances = 10
   builder = "docker:go"
   runner = "local:docker"
 
 [global.run.test_params]
   regions = '["Global"]'
-  bootstrap = "10"
+  bootstrap = "9"
   providers = "1"
 
 [[groups]]
   id = "bystanders"
     [groups.instances]
-    count = 38
+    count = 8
 
 [[groups]]
   id = "providers"

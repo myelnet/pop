@@ -20,7 +20,6 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
-	keystore "github.com/ipfs/go-ipfs-keystore"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
@@ -123,7 +122,8 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		if err := exch.Index().SetRef(tx.Ref()); err != nil {
+		ref := tx.Ref()
+		if err := exch.Index().SetRef(ref); err != nil {
 			return err
 		}
 		if err := tx.Close(); err != nil {
@@ -133,11 +133,11 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 		// Only the first one in the group needs to publish the CID as it's the same file
 		if int(initCtx.GroupSeq) == 1 {
 			initCtx.SyncClient.MustPublish(ctx, contentTopic, &ex.PRecord{
-				PayloadCID: fid,
+				PayloadCID: ref.PayloadCID,
 				Provider:   h.ID(),
 			})
 		}
-		runenv.RecordMessage("imported content %s", fid)
+		runenv.RecordMessage("imported content %s", ref.PayloadCID)
 		initCtx.SyncClient.MustSignalEntry(ctx, imported)
 	}
 
@@ -208,8 +208,6 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		return ex.Options{}, nil, nil, err
 	}
 
-	ks := keystore.NewMemKeystore()
-
 	// create a new libp2p Host that listens on a random TCP port
 	h, err := libp2p.New(ctx,
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/0", ip)),
@@ -247,7 +245,6 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 		PubSub:       ps,
 		GraphSync:    gs,
 		RepoPath:     rpath,
-		Keystore:     ks,
 		GossipTracer: tracer,
 		Regions:      []ex.Region{ex.Regions["Global"]},
 	}, h, ds, nil

@@ -14,11 +14,10 @@ cd testground
 make install
 ```
 
-Testground will use `~/testground` as directory to look for plans
-you can either import the plans in this repo:
+To import the plans in this repo:
 
 ```commandline
-testground plan import --from ~/pop/testplans/routing
+testground plan import --from ~/pop/testplans
 ```
 
 Make sure you have docker installed and running then in a different terminal run:
@@ -70,3 +69,6 @@ Clean up docker cache by running:
 ```commandline
 docker system prune
 ```
+
+If testground command is not found make sure you have `$HOME/go/bin` in your path.
+For have it in sudo you can do `sudo env "PATH=$PATH" testground ...`
