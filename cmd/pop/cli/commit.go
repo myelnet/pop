@@ -36,11 +36,6 @@ with a given level of cashing. By default it will attempt multiple storage deals
 }
 
 func runCommit(ctx context.Context, args []string) error {
-	ref := ""
-	if len(args) > 0 {
-		ref = args[0]
-	}
-
 	c, cc, ctx, cancel := connect(ctx)
 	defer cancel()
 

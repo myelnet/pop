@@ -608,20 +608,23 @@ func (nd *node) Store(ctx context.Context, args *StoreArgs) {
 		sendErr(ErrFilecoinRPCOffline)
 		return
 	}
-	ref, err := nd.getRef(args.Ref)
-	if err != nil {
-		sendErr(err)
-		return
-	}
 
-	cref := CommitRef{ref.PayloadCID}
-	if err := nd.pieceHAMT.Set(ctx, ref.PayloadCID.String(), &cref); err != nil {
-		sendErr(err)
-		return
-	}
-	if err := nd.pieceHAMT.Flush(ctx); err != nil {
-		sendErr(err)
-		return
+	for _, c := range args.Refs {
+		ref, err := nd.getRef(c)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+
+		cref := CommitRef{ref.PayloadCID}
+		if err := nd.pieceHAMT.Set(ctx, ref.PayloadCID.String(), &cref); err != nil {
+			sendErr(err)
+			return
+		}
+		if err := nd.pieceHAMT.Flush(ctx); err != nil {
+			sendErr(err)
+			return
+		}
 	}
 	proot, err := nd.is.Put(ctx, nd.pieceHAMT)
 	if err != nil {
@@ -660,7 +663,7 @@ func (nd *node) Store(ctx context.Context, args *StoreArgs) {
 	}
 
 	rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-		ref.PayloadCID,
+		proot,
 		args.Duration,
 		nd.exch.Wallet().DefaultAddress(),
 		quote.Miners,

@@ -12,7 +12,7 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/node"
-	"github.com/peterbourgon/ff/v2/ffcli"
+	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
 var storeArgs struct {
@@ -34,11 +34,11 @@ The 'pop store' command attempts to store the given transaction(s) in a Filecoin
 	Exec: runStore,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("store", flag.ExitOnError)
-		fs.IntVar(&commArgs.RF, "storage-rf", 2, "number of storage providers to start deals with")
-		fs.DurationVar(&commArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
+		fs.IntVar(&storeArgs.RF, "storage-rf", 2, "number of storage providers to start deals with")
+		fs.DurationVar(&storeArgs.duration, "duration", 24*time.Hour*time.Duration(180), "duration we need the content stored for")
 		// MaxStoragePrice is our price ceiling to filter out bad storage miners who charge too much
-		fs.Uint64Var(&commArgs.maxPrice, "max-storage-price", uint64(20_000_000_000), "maximum price per byte our node is willing to pay for storage")
-		fs.BoolVar(&commArgs.verified, "verified", false, "verified deals should be cheaper but require a data cap associated with the client address used")
+		fs.Uint64Var(&storeArgs.maxPrice, "max-storage-price", uint64(20_000_000_000), "maximum price per byte our node is willing to pay for storage")
+		fs.BoolVar(&storeArgs.verified, "verified", false, "verified deals should be cheaper but require a data cap associated with the client address used")
 		return fs
 	})(),
 }
@@ -68,12 +68,12 @@ func runStore(ctx context.Context, args []string) error {
 		if sr.Err != "" {
 			return errors.New(sr.Err)
 		}
-		if cr.Capacity > 0 {
-			fmt.Printf("%s left before batch can be stored\n", filecoin.SizeStr(filecoin.NewInt(cr.Capacity)))
+		if sr.Capacity > 0 {
+			fmt.Printf("%s left before batch can be stored\n", filecoin.SizeStr(filecoin.NewInt(sr.Capacity)))
 			return nil
 		}
-		if len(cr.Miners) > 0 {
-			fmt.Printf("Started storage deals with %s\n", cr.Miners)
+		if len(sr.Miners) > 0 {
+			fmt.Printf("Started storage deals with %s\n", sr.Miners)
 		}
 	case <-ctx.Done():
 		return ctx.Err()
@@ -120,24 +120,24 @@ func runQuote(ctx context.Context, c net.Conn, cc *node.CommandClient, refs []st
 		if len(selectn) == 0 {
 			return nil, errors.New("push aborted")
 		}
-		total := fil.NewInt(0)
+		total := filecoin.NewInt(0)
 
 		for _, k := range selectn {
 			sp := strings.Split(k, " - ")
 			miners[sp[0]] = true
-			f, err := fil.ParseFIL(sp[1])
+			f, err := filecoin.ParseFIL(sp[1])
 			if err != nil {
 				return nil, err
 			}
-			total = fil.BigAdd(fil.BigInt(f), total)
+			total = filecoin.BigAdd(filecoin.BigInt(f), total)
 		}
 		exec := false
 		conf := &survey.Confirm{
 			Message: fmt.Sprintf(
 				"Store %s during %s for %s?",
 				qr.Ref,
-				commArgs.duration,
-				fil.FIL(total).String(),
+				storeArgs.duration,
+				filecoin.FIL(total).String(),
 			),
 		}
 		survey.AskOne(conf, &exec)

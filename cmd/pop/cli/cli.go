@@ -96,6 +96,7 @@ change until a first stable release. To get started run 'pop start'.
 			putCmd,
 			statusCmd,
 			commCmd,
+			storeCmd,
 			getCmd,
 			listCmd,
 		},
