@@ -13,7 +13,6 @@ import (
 
 	"github.com/filecoin-project/go-multistore"
 	files "github.com/ipfs/go-ipfs-files"
-	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/ipfs/go-path"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -29,7 +28,6 @@ func TestTx(t *testing.T) {
 		n := testutil.NewTestNode(mn, t)
 		opts := Options{
 			RepoPath:     n.DTTmpDir,
-			Keystore:     keystore.NewMemKeystore(),
 			ReplInterval: -1,
 		}
 		exch, err := New(ctx, n.Host, n.Ds, opts)
@@ -151,7 +149,6 @@ func TestTxPutGet(t *testing.T) {
 	n := testutil.NewTestNode(mn, t)
 	opts := Options{
 		RepoPath: n.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	}
 	exch, err := New(ctx, n.Host, n.Ds, opts)
 	require.NoError(t, err)
@@ -214,7 +211,6 @@ func BenchmarkAdd(b *testing.B) {
 	n := testutil.NewTestNode(mn, b)
 	opts := Options{
 		RepoPath: n.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	}
 	exch, err := New(ctx, n.Host, n.Ds, opts)
 	require.NoError(b, err)
@@ -243,7 +239,6 @@ func TestTxRace(t *testing.T) {
 	n := testutil.NewTestNode(mn, t)
 	opts := Options{
 		RepoPath: n.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	}
 	exch, err := New(ctx, n.Host, n.Ds, opts)
 	require.NoError(t, err)
@@ -280,7 +275,6 @@ func TestMapFieldSelector(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	opts := Options{
 		RepoPath: n1.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	}
 	pn, err := New(ctx, n1.Host, n1.Ds, opts)
 	require.NoError(t, err)
@@ -288,7 +282,6 @@ func TestMapFieldSelector(t *testing.T) {
 	n2 := testutil.NewTestNode(mn, t)
 	cn, err := New(ctx, n2.Host, n2.Ds, Options{
 		RepoPath: n2.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	})
 	require.NoError(t, err)
 
@@ -327,7 +320,7 @@ func TestMapFieldSelector(t *testing.T) {
 	resp := deal.QueryResponse{
 		Status:                     deal.QueryResponseAvailable,
 		Size:                       uint64(tx.Size()),
-		PaymentAddress:             cn.w.DefaultAddress(),
+		PaymentAddress:             cn.opts.Wallet.DefaultAddress(),
 		MinPricePerByte:            global.PPB,
 		MaxPaymentInterval:         deal.DefaultPaymentInterval,
 		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
@@ -365,7 +358,6 @@ func TestMultiTx(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	opts := Options{
 		RepoPath: n1.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	}
 	pn, err := New(ctx, n1.Host, n1.Ds, opts)
 	require.NoError(t, err)
@@ -373,14 +365,12 @@ func TestMultiTx(t *testing.T) {
 	n2 := testutil.NewTestNode(mn, t)
 	cn1, err := New(ctx, n2.Host, n2.Ds, Options{
 		RepoPath: n2.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	})
 	require.NoError(t, err)
 
 	n3 := testutil.NewTestNode(mn, t)
 	_, err = New(ctx, n3.Host, n3.Ds, Options{
 		RepoPath: n3.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	})
 	require.NoError(t, err)
 
@@ -446,7 +436,6 @@ func TestTxGetEntries(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	opts := Options{
 		RepoPath: n1.DTTmpDir,
-		Keystore: keystore.NewMemKeystore(),
 	}
 	pn, err := New(ctx, n1.Host, n1.Ds, opts)
 	require.NoError(t, err)

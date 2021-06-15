@@ -13,7 +13,6 @@ import (
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
-	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/ipfs/go-merkledag"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-eventbus"
@@ -221,7 +220,6 @@ func TestExchangeE2E(t *testing.T) {
 					Blockstore: n.Bs,
 					MultiStore: n.Ms,
 					RepoPath:   n.DTTmpDir,
-					Keystore:   keystore.NewMemKeystore(),
 				}
 				exch, err := New(bgCtx, n.Host, n.Ds, opts)
 				require.NoError(t, err)
@@ -346,7 +344,6 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 					Blockstore:   n.Bs,
 					MultiStore:   n.Ms,
 					RepoPath:     n.DTTmpDir,
-					Keystore:     keystore.NewMemKeystore(),
 					ReplInterval: 2 * time.Second,
 				}
 				exch, err := New(bgCtx, n.Host, n.Ds, opts)

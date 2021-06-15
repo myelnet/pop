@@ -92,6 +92,10 @@ func runBootstrapSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error 
 				return err
 			}
 			roots[i] = tx.Root()
+			err = tx.Close()
+			if err != nil {
+				return err
+			}
 		}
 
 		// Add few random reads
@@ -206,6 +210,10 @@ func runDispatch(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			runenv.RecordMessage("sent to peer %s", rec.Provider)
 		})
 
+		err = tx.Close()
+		if err != nil {
+			return err
+		}
 	}
 
 	_, err = initCtx.SyncClient.SignalAndWait(ctx, "completed", runenv.TestInstanceCount)

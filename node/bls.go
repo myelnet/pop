@@ -1,4 +1,4 @@
-package wallet
+package node
 
 import (
 	"crypto/rand"

@@ -31,8 +31,6 @@ type Exchange struct {
 	opts Options
 	// pubsub topics
 	tops []*pubsub.Topic
-	// wallet interface
-	w wallet.Driver
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
 	// Routing service
@@ -65,7 +63,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		opts: opts,
 		idx:  idx,
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
-		w:    wallet.NewFromKeystore(opts.Keystore, opts.FilecoinAPI),
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
@@ -74,8 +71,8 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	}
 
 	// Make a new default key to be sure we have an address where to receive our payments
-	if exch.w.DefaultAddress() == address.Undef {
-		_, err = exch.w.NewKey(ctx, wallet.KTSecp256k1)
+	if opts.Wallet.DefaultAddress() == address.Undef {
+		_, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +81,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ctx,
 		opts.MultiStore,
 		ds,
-		payments.New(ctx, opts.FilecoinAPI, exch.w, ds, opts.Blockstore),
+		payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
 		opts.DataTransfer,
 		h.ID(),
 	)
@@ -123,7 +120,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	resp := deal.QueryResponse{
 		Status:                     deal.QueryResponseAvailable,
 		Size:                       uint64(stats.Size),
-		PaymentAddress:             e.w.DefaultAddress(),
+		PaymentAddress:             e.opts.Wallet.DefaultAddress(),
 		MinPricePerByte:            r.PPB, // TODO: dynamic pricing
 		MaxPaymentInterval:         deal.DefaultPaymentInterval,
 		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
@@ -152,7 +149,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		index:      e.idx,
 		repl:       e.rpl,
 		cacheRF:    6,
-		clientAddr: e.w.DefaultAddress(),
+		clientAddr: e.opts.Wallet.DefaultAddress(),
 		sel:        selectors.All(),
 		done:       make(chan TxResult, 1),
 		errs:       make(chan deal.Status),
@@ -205,7 +202,7 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 
 // Wallet returns the wallet API
 func (e *Exchange) Wallet() wallet.Driver {
-	return e.w
+	return e.opts.Wallet
 }
 
 // DataTransfer returns the data transfer manager instance for this exchange

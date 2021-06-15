@@ -198,7 +198,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	eopts := exchange.Options{
 		Blockstore:          nd.bs,
 		MultiStore:          nd.ms,
-		Keystore:            ks,
 		RepoPath:            opts.RepoPath,
 		FilecoinRPCEndpoint: opts.FilEndpoint,
 		FilecoinRPCHeader: http.Header{
@@ -208,6 +207,16 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Capacity:     opts.Capacity,
 		ReplInterval: opts.ReplInterval,
 	}
+
+	eopts.FilecoinAPI, err = filecoin.NewLotusRPC(ctx, eopts.FilecoinRPCEndpoint, eopts.FilecoinRPCHeader)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to connect with Lotus RPC")
+	}
+	eopts.Wallet = wallet.NewFromKeystore(
+		ks,
+		wallet.WithFilAPI(eopts.FilecoinAPI),
+		wallet.WithBLSSig(bls{}),
+	)
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
 )
 
@@ -45,8 +46,8 @@ type Options struct {
 	GraphSync graphsync.GraphExchange
 	// DataTransfer is a single manager instance used across every retrieval operation.
 	DataTransfer datatransfer.Manager
-	// Keystore is the interface for storing secrets.
-	Keystore keystore.Keystore
+	// Wallet is a minimal interface for signing things
+	Wallet wallet.Driver
 	// RepoPath is where to persist any file to disk. It's actually only used for the DataTransfer CID list
 	// recommend passing the same path as the datastore.
 	RepoPath string
@@ -103,12 +104,6 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 			return opts, err
 		}
 	}
-	if opts.Keystore == nil {
-		opts.Keystore, err = keystore.NewFSKeystore(filepath.Join(opts.RepoPath, "keystore"))
-		if err != nil {
-			return opts, err
-		}
-	}
 	if opts.Regions == nil {
 		opts.Regions = []Region{global}
 	}
@@ -120,6 +115,16 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 			opts.FilecoinAPI = nil
 		}
 	}
+
+	// Default wallet only supports secp256k1
+	if opts.Wallet == nil {
+		ks, err := keystore.NewFSKeystore(filepath.Join(opts.RepoPath, "keystore"))
+		if err != nil {
+			return opts, err
+		}
+		opts.Wallet = wallet.NewFromKeystore(ks, wallet.WithFilAPI(opts.FilecoinAPI))
+	}
+
 	if opts.Capacity == 0 {
 		// Default is 10GB
 		opts.Capacity = 10737418240

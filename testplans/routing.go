@@ -66,7 +66,6 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 	if err != nil {
 		return err
 	}
-	ms := settings.MultiStore
 
 	settings.Regions = ex.ParseRegions(runenv.StringArrayParam("regions"))
 
