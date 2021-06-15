@@ -505,7 +505,7 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		}
 	}
 
-	for _, prop := range proposals {
+	for pid, prop := range proposals {
 		nd, err := cborutil.AsIpld(prop)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to encode proposal as ipld node")
@@ -514,7 +514,7 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 
 		voucher := requestvalidation.StorageDataTransferVoucher{Proposal: nd.Cid()}
 
-		_, err = s.dt.OpenPushDataChannel(ctx, info[prop.Provider].PeerID, &voucher, p.Payload.Root, selectors.All())
+		_, err = s.dt.OpenPushDataChannel(ctx, pid, &voucher, p.Payload.Root, selectors.All())
 		if err != nil {
 			log.Error().Err(err).Str("miner", prop.Provider.String()).Msg("failed to open push data transfer")
 			continue
