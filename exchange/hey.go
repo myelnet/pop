@@ -124,10 +124,7 @@ func (hs *HeyService) SendHey(ctx context.Context, pid peer.ID) error {
 	go func() {
 		defer s.Close()
 
-		err = s.SetReadDeadline(time.Now().Add(10 * time.Second))
-		if err != nil {
-			log.Error().Err(err).Msg("failed to set read deadline")
-		}
+		s.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 		buf := make([]byte, 32)
 		_, err := io.ReadFull(s, buf)
@@ -137,10 +134,7 @@ func (hs *HeyService) SendHey(ctx context.Context, pid peer.ID) error {
 		now := time.Now()
 		lat := now.Sub(start)
 
-		err = hs.pm.RecordLatency(pid, lat)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to record latency")
-		}
+		hs.pm.RecordLatency(pid, lat)
 	}()
 	return nil
 }
