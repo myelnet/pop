@@ -379,11 +379,9 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// TODO: validate request
 
 		// Check if we may already have this content
+		// TODO: create RefExists method
 		_, err := r.idx.GetRef(req.PayloadCID)
 		if err == nil {
-			log.Error().
-				Str("PayloadCID", req.PayloadCID.String()).
-				Msg("payload CID already exists")
 			return
 		}
 
@@ -422,7 +420,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
-					log.Error().Err(err).Msg("error when fetching keys")
+					log.Debug().Err(err).Msg("error when fetching keys")
 				}
 
 				ref := &DataRef{

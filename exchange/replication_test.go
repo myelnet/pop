@@ -512,17 +512,6 @@ func TestMultiDispatchStreams(t *testing.T) {
 	opts2 := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 	hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx2), opts2)
 	require.NoError(t, err)
-	ref := &DataRef{
-		PayloadCID:  rootCid,
-		PayloadSize: int64(256000),
-	}
-
-	// the file is already in the node so setRef should return ErrRefAlreadyExists
-	require.Error(t, idx.SetRef(ref), ErrRefAlreadyExists)
-
-	// we update the ref instead of adding it
-	require.NoError(t, idx.UpdateRef(ref))
-
 	require.NoError(t, hn1.Start(ctx))
 	receivers[tnode.Host.ID()] = hn1
 	tnds[tnode.Host.ID()] = tnode
@@ -546,6 +535,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 
 	dopts := DefaultDispatchOptions
 	dopts.StoreID = storeID
+	// hn will tell dopts.RF (6) of its neighbors that it has a new rootCid and expects them to retrieve it
 	res, err := hn.Dispatch(rootCid, uint64(len(origBytes)), dopts)
 	require.NoError(t, err)
 
