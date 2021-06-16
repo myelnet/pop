@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -115,6 +116,32 @@ func TestPut(t *testing.T) {
 		ChunkSize: 1024,
 	})
 	<-added
+
+	// We can also add a directory
+	dir := t.TempDir()
+	data1 := make([]byte, 1024)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
+	require.NoError(t, os.WriteFile(path.Join(dir, "data1"), data1, 0666))
+	data2 := make([]byte, 3072)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	require.NoError(t, os.WriteFile(path.Join(dir, "data2"), data2, 0666))
+
+	dirAdded := make(chan string, 2)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.PutResult.Err, "")
+
+		dirAdded <- n.PutResult.Key
+	}
+	cn.Put(ctx, &PutArgs{
+		Path:      dir,
+		ChunkSize: 1024,
+	})
+	close(dirAdded)
+	for k := range dirAdded {
+		if k != "data1" && k != "data2" {
+			t.Fatal("added wrong key")
+		}
+	}
 }
 
 // Put shouldn't race as it's protected with a mutex
@@ -299,6 +326,16 @@ func TestQuote(t *testing.T) {
 	})
 	<-added
 
+	committed := make(chan CommResult, 1)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.CommResult.Err, "")
+		committed <- *n.CommResult
+	}
+	cn.Commit(ctx, &CommArgs{
+		CacheRF: 0,
+	})
+	com := <-committed
+
 	quoted := make(chan QuoteResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, "", n.QuoteResult.Err)
@@ -306,6 +343,7 @@ func TestQuote(t *testing.T) {
 		quoted <- *n.QuoteResult
 	}
 	cn.Quote(ctx, &QuoteArgs{
+		Refs:      []string{com.Ref},
 		Duration:  24 * time.Hour * time.Duration(180),
 		StorageRF: 6,
 		MaxPrice:  uint64(20000000000),
@@ -354,8 +392,7 @@ func TestCommit(t *testing.T) {
 		committed <- n.CommResult.Caches
 	}
 	cn.Commit(ctx, &CommArgs{
-		CacheOnly: true,
-		CacheRF:   2,
+		CacheRF: 2,
 	})
 	close(committed)
 	for range committed {
@@ -406,8 +443,7 @@ func TestGet(t *testing.T) {
 		committed <- struct{}{}
 	}
 	pn.Commit(ctx, &CommArgs{
-		CacheRF:   0,
-		StorageRF: 0,
+		CacheRF: 0,
 	})
 	<-committed
 
@@ -539,8 +575,7 @@ func TestMultipleGet(t *testing.T) {
 		committed <- struct{}{}
 	}
 	pn.Commit(ctx, &CommArgs{
-		CacheRF:   0,
-		StorageRF: 0,
+		CacheRF: 0,
 	})
 	<-committed
 

@@ -447,10 +447,18 @@ type Receipt struct {
 // with the best conditions available
 func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 	var ma []address.Address
+	info := make(map[address.Address]*storagemarket.StorageProviderInfo, len(p.Miners))
 	for _, m := range p.Miners {
 		ma = append(ma, m.Info.Address)
+		info[m.Info.Address] = m.Info
+	}
+	balance, err := s.adapter.GetBalance(ctx, p.Address)
+	if err != nil {
+		return nil, err
 	}
 	epochs := calcEpochs(p.Duration)
+	proposals := make(map[peer.ID]*market.DealProposal)
+	total := abi.NewTokenAmount(0)
 	for _, m := range p.Miners {
 		prop, resp, err := s.ProposeDeal(ctx, StartDealParams{
 			Data:              p.Payload,
@@ -479,34 +487,39 @@ func (s *Storage) Store(ctx context.Context, p Params) (*Receipt, error) {
 		case storagemarket.StorageDealWaitingForData, storagemarket.StorageDealProposalAccepted:
 			log.Info().Msg("ProposalAccepted")
 
-			msgcid, err := s.adapter.AddFunds(ctx, m.Info.Address, prop.ClientBalanceRequirement())
-			if err != nil {
-				log.Error().Err(err).Msg("failed to add funds")
-				continue
-			}
-			_, err = s.fAPI.StateWaitMsg(ctx, msgcid, uint64(5))
-			if err != nil {
-				log.Error().Err(err).Msg("failed to confirm message on chain")
-				continue
-			}
-
-			nd, err := cborutil.AsIpld(prop)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to encode proposal as ipld node")
-				continue
-			}
-
-			voucher := requestvalidation.StorageDataTransferVoucher{Proposal: nd.Cid()}
-
-			_, err = s.dt.OpenPushDataChannel(ctx, m.Info.PeerID, &voucher, p.Payload.Root, selectors.All())
-			if err != nil {
-				log.Error().Err(err).
-					Str("address", m.Info.Address.String()).
-					Msg("failed to open push data transfer for miner")
-				continue
-			}
-			// TODO: handle events
+			proposals[m.Info.PeerID] = prop
+			total = fil.BigAdd(prop.ClientBalanceRequirement(), total)
 		}
+	}
+
+	// Not 100% sure about the math here but it seems we have funds available already we should only
+	// need to topup with what we need for this transfer
+	if balance.Available.LessThan(total) {
+		msgcid, err := s.adapter.AddFunds(ctx, p.Address, fil.BigSub(total, balance.Available))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add funds: %w", err)
+		}
+		_, err = s.fAPI.StateWaitMsg(ctx, msgcid, uint64(5))
+		if err != nil {
+			return nil, fmt.Errorf("failed to confirm message on chain: %w", err)
+		}
+	}
+
+	for pid, prop := range proposals {
+		nd, err := cborutil.AsIpld(prop)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to encode proposal as ipld node")
+			continue
+		}
+
+		voucher := requestvalidation.StorageDataTransferVoucher{Proposal: nd.Cid()}
+
+		_, err = s.dt.OpenPushDataChannel(ctx, pid, &voucher, p.Payload.Root, selectors.All())
+		if err != nil {
+			log.Error().Err(err).Str("miner", prop.Provider.String()).Msg("failed to open push data transfer")
+			continue
+		}
+		// TODO: handle events
 	}
 
 	return &Receipt{

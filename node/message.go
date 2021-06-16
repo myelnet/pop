@@ -32,7 +32,7 @@ type StatusArgs struct {
 
 // QuoteArgs are passed to the quote command
 type QuoteArgs struct {
-	Ref       string
+	Refs      []string
 	StorageRF int // StorageRF is the replication factor or number of miners we will try to store with
 	Duration  time.Duration
 	MaxPrice  uint64
@@ -40,10 +40,13 @@ type QuoteArgs struct {
 
 // CommArgs are passed to the Commit command
 type CommArgs struct {
-	Ref       string // Ref is the root CID of the archive to push to remote storage
-	CacheOnly bool
-	CacheRF   int // CacheRF is the cache replication factor or number of cache provider will request
-	StorageRF int // StorageRF if the replication factor for storage
+	CacheRF int // CacheRF is the cache replication factor or number of cache provider will request
+}
+
+// StoreArgs are arguments for the Store command
+type StoreArgs struct {
+	Refs      []string // Ref is the root CID of the archive to push to remote storage
+	StorageRF int      // StorageRF if the replication factor for storage
 	Duration  time.Duration
 	Miners    map[string]bool
 	MaxPrice  uint64
@@ -74,6 +77,7 @@ type Command struct {
 	Status *StatusArgs
 	Quote  *QuoteArgs
 	Commit *CommArgs
+	Store  *StoreArgs
 	Get    *GetArgs
 	List   *ListArgs
 }
@@ -90,10 +94,12 @@ type PingResult struct {
 
 // PutResult gives us feedback on the result of the Put request
 type PutResult struct {
+	RootCid   string
+	Key       string
 	Cid       string
 	Size      string
-	NumBlocks int
-	Root      string
+	TotalSize string
+	Len       int
 	Err       string
 }
 
@@ -115,9 +121,16 @@ type QuoteResult struct {
 
 // CommResult is feedback on the push operation
 type CommResult struct {
+	Ref    string
+	Caches []string
+	Size   string
+	Err    string
+}
+
+// StoreResult returns the result of the storage operation
+type StoreResult struct {
 	Miners   []string
 	Deals    []string
-	Caches   []string
 	Capacity uint64 // Capacity is the space left before it is possible to store on Filecoin
 	Err      string
 }
@@ -152,6 +165,7 @@ type Notify struct {
 	StatusResult *StatusResult
 	QuoteResult  *QuoteResult
 	CommResult   *CommResult
+	StoreResult  *StoreResult
 	GetResult    *GetResult
 	ListResult   *ListResult
 }
@@ -201,6 +215,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		// push requests are usually quite long so we don't block the thread so users
 		// can start a new transaction while their previous commit is uploading for example
 		go cs.n.Commit(ctx, c)
+		return nil
+	}
+	if c := cmd.Store; c != nil {
+		cs.n.Store(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -284,6 +302,10 @@ func (cc *CommandClient) Quote(args *QuoteArgs) {
 
 func (cc *CommandClient) Commit(args *CommArgs) {
 	cc.send(Command{Commit: args})
+}
+
+func (cc *CommandClient) Store(args *StoreArgs) {
+	cc.send(Command{Store: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {

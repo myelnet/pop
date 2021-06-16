@@ -244,14 +244,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 // load HAMT from the datastore or create new one
 func (nd *node) loadPieceHAMT() error {
-	ms, err := nd.ms.Get(nd.ms.Next())
-	if err != nil {
-		return err
-	}
-
 	enc, err := nd.ds.Get(datastore.NewKey(KContentBatch))
 
-	nd.is = cbor.NewCborStore(ms.Bstore)
+	nd.is = cbor.NewCborStore(nd.bs)
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
 		hnd, err := hamt.NewNode(nd.is, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 		if err != nil {
@@ -390,37 +385,47 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 		nd.tx = nd.exch.Tx(ctx)
 	}
 
-	file, err := os.Open(args.Path)
+	fstat, err := os.Stat(args.Path)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	froot, err := nd.Add(ctx, nd.tx.Store().DAG, file)
+	fnd, err := files.NewSerialFile(args.Path, false, fstat)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	stats, err := utils.Stat(ctx, nd.tx.Store(), froot, sel.All())
-	if err != nil {
-		log.Error().Err(err).Msg("record not found")
-	}
-
-	fname := exchange.KeyFromPath(args.Path)
-	err = nd.tx.Put(fname, froot, int64(stats.Size))
+	added := make(map[string]bool)
+	err = nd.addRecursive(ctx, args.Path, fnd, added)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	nd.send(Notify{
-		PutResult: &PutResult{
-			Cid:       froot.String(),
-			Size:      filecoin.SizeStr(filecoin.NewInt(uint64(stats.Size))),
-			NumBlocks: stats.NumBlocks,
-			Root:      nd.tx.Root().String(),
-		}})
+	entries, err := nd.tx.Status()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	var totalSize int64
+	// only notify about entries added by this operation
+	for k := range added {
+		e := entries[k]
+		totalSize += e.Size
+		nd.send(Notify{
+			PutResult: &PutResult{
+				Key:  k,
+				Cid:  e.Value.String(),
+				Size: filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
+				// NumBlocks: stats.NumBlocks, TODO: should Entry contain the number of blocks?
+				RootCid:   nd.tx.Root().String(),
+				TotalSize: filecoin.SizeStr(filecoin.NewInt(uint64(totalSize))),
+				Len:       len(added),
+			}})
+	}
 }
 
 // Status prints the current transaction status. It shows which files have been added but not yet committed
@@ -479,7 +484,7 @@ func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
 	return nil, ErrNoTx
 }
 
-// Quote returns an estimation of market price for storing a commit on Filecoin
+// Quote returns an estimation of market price for storing a list of transactions on Filecoin
 func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
@@ -492,12 +497,38 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 		sendErr(ErrFilecoinRPCOffline)
 		return
 	}
-	com, err := nd.getRef(args.Ref)
+
+	cbs := cbor.NewCborStore(nd.bs)
+	hnd, err := hamt.NewNode(cbs, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	piece, err := nd.archive(ctx, com.PayloadCID)
+	for _, ref := range args.Refs {
+		ccid, err := cid.Parse(ref)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+
+		cref := CommitRef{ccid}
+		if err := hnd.Set(ctx, ref, &cref); err != nil {
+			sendErr(err)
+			return
+		}
+		if err := hnd.Flush(ctx); err != nil {
+			sendErr(err)
+			return
+		}
+	}
+
+	proot, err := cbs.Put(ctx, hnd)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	piece, err := nd.archive(ctx, proot)
 	if err != nil {
 		sendErr(err)
 		return
@@ -521,7 +552,7 @@ func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
 
 	nd.send(Notify{
 		QuoteResult: &QuoteResult{
-			Ref:         com.PayloadCID.String(),
+			Ref:         piece.CID.String(),
 			Quotes:      quotes,
 			PayloadSize: uint64(piece.PayloadSize),
 			PieceSize:   uint64(piece.PieceSize),
@@ -568,72 +599,96 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	nd.tx = nil
 	nd.txmu.Unlock()
 
-	if !args.CacheOnly && args.StorageRF > 0 {
-		if !nd.exch.IsFilecoinOnline() {
-			sendErr(ErrFilecoinRPCOffline)
-			return
-		}
+	nd.send(Notify{CommResult: &CommResult{
+		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),
+		Ref:  ref.PayloadCID.String(),
+	}})
+}
 
-		piece, err := nd.archive(ctx, ref.PayloadCID)
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		log.Info().Msg("getting quote for a piece")
-
-		quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
-			PieceSize: uint64(piece.PieceSize),
-			Duration:  args.Duration,
-			RF:        args.StorageRF,
-			MaxPrice:  args.MaxPrice,
-			Region:    "Europe",
-			Verified:  args.Verified,
-		})
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		log.Info().Uint64("MinPieceSize", quote.MinPieceSize).Msg("got a quote")
-
-		if quote.MinPieceSize > uint64(piece.PieceSize) {
-			nd.send(Notify{
-				CommResult: &CommResult{
-					Capacity: quote.MinPieceSize - uint64(piece.PieceSize),
-				},
-			})
-			return
-		}
-
-		rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-			ref.PayloadCID,
-			args.Duration,
-			nd.exch.Wallet().DefaultAddress(),
-			quote.Miners,
-			args.Verified,
-		))
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		if len(rcpt.DealRefs) == 0 {
-			sendErr(ErrAllDealsFailed)
-			return
-		}
-		var cr CommResult
-		for _, m := range rcpt.Miners {
-			cr.Miners = append(cr.Miners, m.String())
-		}
-		for _, d := range rcpt.DealRefs {
-			cr.Deals = append(cr.Deals, d.String())
-		}
+// Store aggregates multiple transactions together into a storage deal if the piece is large enough
+// the method may need to be called until there is enough content to reach the minimum storage size
+func (nd *node) Store(ctx context.Context, args *StoreArgs) {
+	sendErr := func(err error) {
 		nd.send(Notify{
-			CommResult: &cr,
+			StoreResult: &StoreResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	if !nd.exch.IsFilecoinOnline() {
+		sendErr(ErrFilecoinRPCOffline)
+		return
+	}
+
+	for _, c := range args.Refs {
+		ref, err := nd.getRef(c)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+
+		cref := CommitRef{ref.PayloadCID}
+		if err := nd.pieceHAMT.Set(ctx, ref.PayloadCID.String(), &cref); err != nil {
+			sendErr(err)
+			return
+		}
+		if err := nd.pieceHAMT.Flush(ctx); err != nil {
+			sendErr(err)
+			return
+		}
+	}
+	proot, err := nd.is.Put(ctx, nd.pieceHAMT)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	piece, err := nd.archive(ctx, proot)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	log.Info().Msg("getting quote for a piece")
+
+	quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
+		PieceSize: uint64(piece.PieceSize),
+		Duration:  args.Duration,
+		RF:        args.StorageRF,
+		MaxPrice:  args.MaxPrice,
+		Region:    "Europe",
+		Verified:  args.Verified,
+	})
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	log.Info().Uint64("MinPieceSize", quote.MinPieceSize).Msg("got a quote")
+
+	if quote.MinPieceSize > uint64(piece.PieceSize) {
+		nd.send(Notify{
+			StoreResult: &StoreResult{
+				Capacity: quote.MinPieceSize - uint64(piece.PieceSize),
+			},
 		})
 		return
 	}
-	nd.send(Notify{CommResult: &CommResult{}})
+
+	rcpt, err := nd.rs.Store(ctx, storage.NewParams(
+		proot,
+		args.Duration,
+		nd.exch.Wallet().DefaultAddress(),
+		quote.Miners,
+		args.Verified,
+	))
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	if len(rcpt.DealRefs) == 0 {
+		sendErr(ErrAllDealsFailed)
+		return
+	}
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli
@@ -910,6 +965,43 @@ func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.Reade
 	}
 
 	return n.Cid(), nil
+}
+
+// addRecursive adds entire file trees into a single transaction
+// it assumes the caller is holding the tx lock until it returns
+// it currently flattens the keys though we may want to maintain the full keys to keep the structure
+func (nd *node) addRecursive(ctx context.Context, name string, file files.Node, added map[string]bool) error {
+	switch f := file.(type) {
+	case files.Directory:
+		it := f.Entries()
+		for it.Next() {
+			err := nd.addRecursive(ctx, it.Name(), it.Node(), added)
+			if err != nil {
+				return err
+			}
+		}
+		return it.Err()
+	case files.File:
+		froot, err := nd.Add(ctx, nd.tx.Store().DAG, f)
+		if err != nil {
+			return err
+		}
+
+		size, err := file.Size()
+		if err != nil {
+			return err
+		}
+
+		key := exchange.KeyFromPath(name)
+		err = nd.tx.Put(key, froot, size)
+		if err != nil {
+			return err
+		}
+		added[key] = true
+		return nil
+	default:
+		return errors.New("unknown file type")
+	}
 }
 
 // connPeers returns a list of connected peer IDs
