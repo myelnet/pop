@@ -826,14 +826,21 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			keys = mk.AsBytes()
 		}
 
-		err = nd.exch.Index().SetRef(&exchange.DataRef{
+		ref := &exchange.DataRef{
 			PayloadCID:  c,
 			PayloadSize: int64(res.Size),
 			Keys:        keys,
-		})
-		if err != nil {
+		}
+
+		err = nd.exch.Index().SetRef(ref)
+		if err == exchange.ErrRefAlreadyExists {
+			if err := nd.exch.Index().UpdateRef(ref); err != nil {
+				return err
+			}
+		} else if err != nil {
 			return err
 		}
+
 		nd.send(Notify{
 			GetResult: &GetResult{
 				DiscLatSeconds:  discDuration.Seconds(),

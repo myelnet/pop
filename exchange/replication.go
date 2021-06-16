@@ -432,11 +432,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 				}
 
 				err = r.idx.SetRef(ref)
-				if err == ErrRefAlreadyExists {
-					if err := r.idx.UpdateRef(ref); err != nil {
-						log.Error().Err(err).Msg("error when updating ref")
-					}
-				} else if err != nil {
+				if err != nil {
 					log.Error().Err(err).Msg("error when setting ref")
 				}
 

@@ -476,6 +476,9 @@ func TestList(t *testing.T) {
 	}
 }
 
+// Commit 2 different files into a single transaction and then retrieve (Get)
+// the files individually with 2 separate operations. Both Get operations are on the
+// same transaction (ref) and based on the same root CID but retrieve 2 different files.
 func TestMultipleGet(t *testing.T) {
 	bgCtx := context.Background()
 
@@ -514,20 +517,6 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added1
 
-	// commit data1
-	ref1, err := pn.getRef("")
-	require.NoError(t, err)
-	committed := make(chan struct{}, 1)
-	pn.notify = func(n Notify) {
-		require.Equal(t, n.CommResult.Err, "")
-		committed <- struct{}{}
-	}
-	pn.Commit(ctx, &CommArgs{
-		CacheRF:   0,
-		StorageRF: 0,
-	})
-	<-committed
-
 	// create data2
 	data2 := make([]byte, 124000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
@@ -548,9 +537,9 @@ func TestMultipleGet(t *testing.T) {
 	<-added2
 
 	// commit data2
-	ref2, err := pn.getRef("")
+	ref, err := pn.getRef("")
 	require.NoError(t, err)
-	committed = make(chan struct{}, 1)
+	committed := make(chan struct{}, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.CommResult.Err, "")
 		committed <- struct{}{}
@@ -568,7 +557,7 @@ func TestMultipleGet(t *testing.T) {
 		got1 <- n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data1", ref1.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
@@ -585,7 +574,7 @@ func TestMultipleGet(t *testing.T) {
 		got2 <- n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data2", ref2.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
@@ -601,7 +590,7 @@ func TestMultipleGet(t *testing.T) {
 		got3 <- n.GetResult
 	}
 	cn2.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data2", ref2.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
