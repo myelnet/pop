@@ -23,6 +23,8 @@ import (
 // ErrRefNotFound is returned when a given ref is not in the store
 var ErrRefNotFound = errors.New("ref not found")
 
+var ErrRefAlreadyExists = errors.New("ref already exists")
+
 // KIndex is the datastore key for persisting the index of a workdag
 const KIndex = "idx"
 
@@ -248,29 +250,43 @@ func (idx *Index) DropRef(k cid.Cid) error {
 	return idx.Flush()
 }
 
+// UpdateRef updates a ref in the index
+func (idx *Index) UpdateRef(ref *DataRef) error {
+	k := ref.PayloadCID.String()
+
+	curef, exists := idx.Refs[k]
+	if !exists {
+		return ErrRefNotFound
+	}
+
+	// If the ref is already there we merge the keys without duplicating them
+	seen := make(map[string]bool, len(curef.Keys))
+	for _, k := range curef.Keys {
+		seen[string(k)] = true
+	}
+
+	for _, k := range ref.Keys {
+		if !seen[string(k)] {
+			curef.Keys = append(curef.Keys, k)
+		}
+	}
+
+	if err := idx.root.Set(context.TODO(), k, ref); err != nil {
+		return err
+	}
+
+	return idx.Flush()
+}
+
 // SetRef adds a ref in the index and increments the LFU queue
 func (idx *Index) SetRef(ref *DataRef) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 	k := ref.PayloadCID.String()
 
-	// TODO: this is kind of hacky. Might want to error out saying it already exist
-	// and create an UpdateRef method
-	if curef, ok := idx.Refs[k]; ok {
-		// If the ref is already there we merge the keys without duplicating them
-		seen := make(map[string]bool, len(curef.Keys))
-		for _, k := range curef.Keys {
-			seen[string(k)] = true
-		}
-		for _, k := range ref.Keys {
-			if !seen[string(k)] {
-				curef.Keys = append(curef.Keys, k)
-			}
-		}
-		if err := idx.root.Set(context.TODO(), k, ref); err != nil {
-			return err
-		}
-		return idx.Flush()
+	_, exists := idx.Refs[k]
+	if exists {
+		return ErrRefAlreadyExists
 	}
 
 	idx.Refs[k] = ref

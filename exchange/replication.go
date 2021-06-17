@@ -180,7 +180,7 @@ func (r *Replication) Start(ctx context.Context) error {
 
 // pumpIndexes iterates over a subscription to new Hey msg received when connecting with other provider peers
 // it keeps index roots into a queue and iteratively fetches them. We could potentially fetch them in parallel
-// but we ideally don't want this to be a burden on the node ressources so we take it easy
+// but we ideally don't want this to be a burden on the node resources so we take it easy
 func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 	var q []HeyEvt
 	var fetchDone chan fetchResult
@@ -213,6 +213,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 					}
 				}(res.root)
 			}
+
 			if len(q) > 0 {
 				fetchDone = make(chan fetchResult, 1)
 				go func(hvt HeyEvt) {
@@ -221,6 +222,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 				}(q[0])
 				q = q[1:]
 			}
+
 		}
 	}
 }
@@ -269,7 +271,7 @@ type fetchResult struct {
 	err  error
 }
 
-// fetchIndex handles the data transfer for retrieving the index of a given peer anounced in a Hey
+// fetchIndex handles the data transfer for retrieving the index of a given peer announced in a Hey
 // msg. It blocks until the transfer is completed or fails.
 func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 	rcid := *hvt.IndexRoot
@@ -377,11 +379,9 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// TODO: validate request
 
 		// Check if we may already have this content
+		// TODO: create RefExists method
 		_, err := r.idx.GetRef(req.PayloadCID)
 		if err == nil {
-			log.Error().
-				Str("PayloadCID", req.PayloadCID.String()).
-				Msg("payload CID already exists")
 			return
 		}
 
@@ -420,14 +420,17 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				keys, err := utils.MapKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
-					log.Error().Err(err).Msg("error when fetching keys")
+					log.Debug().Err(err).Msg("error when fetching keys")
 				}
 
-				if err := r.idx.SetRef(&DataRef{
+				ref := &DataRef{
 					PayloadCID:  req.PayloadCID,
 					PayloadSize: int64(req.Size),
 					Keys:        keys.AsBytes(),
-				}); err != nil {
+				}
+
+				err = r.idx.SetRef(ref)
+				if err != nil {
 					log.Error().Err(err).Msg("error when setting ref")
 				}
 
@@ -518,7 +521,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 
 	requests:
 		for {
-			// Give up after 6 attemps. Maybe should make this customizable for servers that can afford it
+			// Give up after 6 attempts. Maybe should make this customizable for servers that can afford it
 			if int(b.Attempt()) > opt.BackoffAttemps {
 				return
 			}
@@ -541,8 +544,8 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 			for {
 				select {
 				case <-timer.C:
-
 					continue requests
+
 				case r := <-resChan:
 					// forward the confirmations to the Response channel
 					out <- r

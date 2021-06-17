@@ -196,8 +196,8 @@ func BenchmarkStrategies(b *testing.B) {
 			_ = wq.Close()
 		})
 	}
-
 }
+
 func TestExchangeE2E(t *testing.T) {
 	// Iterating a ton helps weed out false positives
 	for i := 0; i < 1; i++ {

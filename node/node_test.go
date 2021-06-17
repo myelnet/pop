@@ -426,7 +426,6 @@ func TestGet(t *testing.T) {
 	added := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-
 		added <- n.PutResult.Cid
 	}
 	pn.Put(ctx, &PutArgs{
@@ -512,6 +511,9 @@ func TestList(t *testing.T) {
 	}
 }
 
+// Commit 2 different files into a single transaction and then retrieve (Get)
+// the files individually with 2 separate operations. Both Get operations are on the
+// same transaction (ref) and based on the same root CID but retrieve 2 different files.
 func TestMultipleGet(t *testing.T) {
 	bgCtx := context.Background()
 
@@ -521,7 +523,7 @@ func TestMultipleGet(t *testing.T) {
 
 	pn := newTestNode(bgCtx, mn, t)
 	cn := newTestNode(bgCtx, mn, t)
-	// cn2 := newTestNode(bgCtx, mn, t)
+	cn2 := newTestNode(bgCtx, mn, t)
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -531,16 +533,17 @@ func TestMultipleGet(t *testing.T) {
 
 	dir := t.TempDir()
 
+	// create data1
 	data1 := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
 	p1 := filepath.Join(dir, "data1")
 	err := os.WriteFile(p1, data1, 0666)
 	require.NoError(t, err)
 
+	// add data1
 	added1 := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-
 		added1 <- n.PutResult.Cid
 	}
 	pn.Put(ctx, &PutArgs{
@@ -549,16 +552,17 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added1
 
+	// create data2
 	data2 := make([]byte, 124000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
 	p2 := filepath.Join(dir, "data2")
 	err = os.WriteFile(p2, data2, 0666)
 	require.NoError(t, err)
 
+	// add data2
 	added2 := make(chan string, 1)
 	pn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-
 		added2 <- n.PutResult.Cid
 	}
 	pn.Put(ctx, &PutArgs{
@@ -567,6 +571,7 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added2
 
+	// commit data2
 	ref, err := pn.getRef("")
 	require.NoError(t, err)
 	committed := make(chan struct{}, 1)
@@ -579,6 +584,7 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-committed
 
+	// check cn received data1
 	got1 := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
@@ -595,7 +601,7 @@ func TestMultipleGet(t *testing.T) {
 	res = <-got1
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	//Now let's try to request the second file
+	// check cn received data2
 	got2 := make(chan *GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
@@ -612,22 +618,21 @@ func TestMultipleGet(t *testing.T) {
 	res = <-got2
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	// @BUG: not entirely sure why this doesn't work if data2 isn't fetched first
-	// got3 := make(chan *GetResult, 2)
-	// cn2.notify = func(n Notify) {
-	// 	require.Equal(t, "", n.GetResult.Err)
-	// 	got3 <- n.GetResult
-	// }
-	// cn2.Get(ctx, &GetArgs{
-	// 	Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
-	// 	Strategy: "SelectFirst",
-	// 	Timeout:  1,
-	// })
-	// res = <-got3
-	// require.NotEqual(t, "", res.DealID)
+	got3 := make(chan *GetResult, 2)
+	cn2.notify = func(n Notify) {
+		require.Equal(t, "", n.GetResult.Err)
+		got3 <- n.GetResult
+	}
+	cn2.Get(ctx, &GetArgs{
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Strategy: "SelectFirst",
+		Timeout:  1,
+	})
+	res = <-got3
+	require.NotEqual(t, "", res.DealID)
 
-	// res = <-got3
-	// require.Greater(t, res.TransLatSeconds, 0.0)
+	res = <-got3
+	require.Greater(t, res.TransLatSeconds, 0.0)
 }
 
 func TestImportKey(t *testing.T) {
