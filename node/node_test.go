@@ -397,23 +397,6 @@ func TestGet(t *testing.T) {
 	})
 	<-added
 
-	data2 := make([]byte, 256000)
-	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
-	p = filepath.Join(dir, "data2")
-	err = os.WriteFile(p, data2, 0666)
-	require.NoError(t, err)
-
-	added = make(chan string, 1)
-	pn.notify = func(n Notify) {
-		require.Equal(t, n.PutResult.Err, "")
-		added <- n.PutResult.Cid
-	}
-	pn.Put(ctx, &PutArgs{
-		Path:      p,
-		ChunkSize: 1024,
-	})
-	<-added
-
 	ref, err := pn.getRef("")
 	require.NoError(t, err)
 	committed := make(chan struct{}, 1)
@@ -464,23 +447,6 @@ func TestGet(t *testing.T) {
 	_, err = file.Read(dataout)
 	require.NoError(t, err)
 	require.EqualValues(t, data, dataout)
-
-	// Test UpdateRef() by calling Get() using an already existing PayloadCID (but with a new key: data2)
-	got = make(chan *GetResult, 2)
-	cn.notify = func(n Notify) {
-		require.Equal(t, n.GetResult.Err, "")
-		got <- n.GetResult
-	}
-	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
-		Strategy: "SelectFirst",
-		Timeout:  1,
-	})
-	res = <-got
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got
-	require.Greater(t, res.TransLatSeconds, 0.0)
 }
 
 func TestList(t *testing.T) {

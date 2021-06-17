@@ -257,6 +257,46 @@ func TestIndexDropRef(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestIndexUpdateRef(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+
+	idx, err := NewIndex(ds)
+	require.NoError(t, err)
+
+	// create a ref with 1 Key (out of 2) & add it to the index
+	c := blockGen.Next().Cid()
+	ref := &DataRef{
+		PayloadCID:  c,
+		PayloadSize: 256000,
+		Keys:        [][]byte{bytes.NewBufferString("data1").Bytes()},
+	}
+	require.NoError(t, idx.SetRef(ref))
+
+	// create a ref with the 2nd key & add it to the index
+	ref2 := &DataRef{
+		PayloadCID:  c,
+		PayloadSize: 256000,
+		Keys:        [][]byte{bytes.NewBufferString("data2").Bytes()},
+	}
+	// must fail because a ref with the same cid already exists
+	require.Error(t, ErrRefAlreadyExists, idx.SetRef(ref2))
+
+	// only 1 key must be present for the cid : c
+	ref, err = idx.GetRef(c)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(ref.Keys))
+
+	// to add the other key we need to use the updateRef method
+	require.NoError(t, idx.UpdateRef(ref2))
+	ref, err = idx.GetRef(c)
+	require.NoError(t, err)
+
+	// we should have the 2 keys data1 & data2
+	require.Equal(t, 2, len(ref.Keys))
+	require.Equal(t, "data1", string(ref.Keys[0]))
+	require.Equal(t, "data2", string(ref.Keys[1]))
+}
+
 func TestIndexListRefs(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
 
