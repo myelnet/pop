@@ -239,7 +239,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
 	return nd, nil
-
 }
 
 // load HAMT from the datastore or create new one

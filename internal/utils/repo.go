@@ -107,6 +107,8 @@ func Bootstrap(ctx context.Context, h host.Host, bpeers []string) error {
 			err := h.Connect(ctx, *peerInfo)
 			if err != nil {
 				log.Error().Err(err).Str("peerId", peerInfo.ID.String()).Msg("failed to connect to peer")
+			} else {
+				log.Trace().Str("peerId", peerInfo.ID.String()).Msg("successfully connected to peer")
 			}
 		}(peerInfo)
 	}

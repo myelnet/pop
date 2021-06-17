@@ -139,7 +139,24 @@ Manage your Myel point of presence from the command line.
 
 	var bAddrs []string
 	if startArgs.Bootstrap != "" {
-		bAddrs = append(bAddrs, startArgs.Bootstrap)
+		startArgs.Bootstrap = strings.ReplaceAll(startArgs.Bootstrap, " ", "")
+		mapDuplicates := make(map[string]struct{})
+		bootstrapAddr := strings.Split(startArgs.Bootstrap, ",")
+
+		// we ignore empty addresses & duplicates, then fill bAddrs with the clean address
+		for _, addr := range bootstrapAddr {
+			if addr == "" {
+				continue
+			}
+
+			_, exists := mapDuplicates[addr]
+			if exists {
+				continue
+			}
+
+			mapDuplicates[addr] = struct{}{}
+			bAddrs = append(bAddrs, addr)
+		}
 	}
 
 	var capacity uint64
