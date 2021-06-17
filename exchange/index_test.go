@@ -268,7 +268,7 @@ func TestIndexUpdateRef(t *testing.T) {
 	ref := &DataRef{
 		PayloadCID:  c,
 		PayloadSize: 256000,
-		Keys:        [][]byte{bytes.NewBufferString("data1").Bytes()},
+		Keys:        [][]byte{[]byte("data1")},
 	}
 	require.NoError(t, idx.SetRef(ref))
 
@@ -276,7 +276,7 @@ func TestIndexUpdateRef(t *testing.T) {
 	ref2 := &DataRef{
 		PayloadCID:  c,
 		PayloadSize: 256000,
-		Keys:        [][]byte{bytes.NewBufferString("data2").Bytes()},
+		Keys:        [][]byte{[]byte("data2")},
 	}
 	// must fail because a ref with the same cid already exists
 	require.Error(t, ErrRefAlreadyExists, idx.SetRef(ref2))
