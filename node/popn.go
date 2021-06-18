@@ -208,10 +208,13 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		ReplInterval: opts.ReplInterval,
 	}
 
-	eopts.FilecoinAPI, err = filecoin.NewLotusRPC(ctx, eopts.FilecoinRPCEndpoint, eopts.FilecoinRPCHeader)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to connect with Lotus RPC")
+	if eopts.FilecoinRPCEndpoint != "" {
+		eopts.FilecoinAPI, err = filecoin.NewLotusRPC(ctx, eopts.FilecoinRPCEndpoint, eopts.FilecoinRPCHeader)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to connect with Lotus RPC")
+		}
 	}
+
 	eopts.Wallet = wallet.NewFromKeystore(
 		ks,
 		wallet.WithFilAPI(eopts.FilecoinAPI),
@@ -239,7 +242,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
 	return nd, nil
-
 }
 
 // load HAMT from the datastore or create new one

@@ -517,7 +517,7 @@ func TestList(t *testing.T) {
 func TestMultipleGet(t *testing.T) {
 	bgCtx := context.Background()
 
-	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
+	ctx, cancel := context.WithTimeout(bgCtx, 6*time.Second)
 	defer cancel()
 	mn := mocknet.New(bgCtx)
 

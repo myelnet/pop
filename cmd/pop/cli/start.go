@@ -50,7 +50,7 @@ The 'pop start' command starts a pop daemon service.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
-		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "", "bootstrap peer to discover others")
+		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "", "bootstrap peer to discover others (add multiple addresses separated by commas)")
 		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
@@ -139,7 +139,24 @@ Manage your Myel point of presence from the command line.
 
 	var bAddrs []string
 	if startArgs.Bootstrap != "" {
-		bAddrs = append(bAddrs, startArgs.Bootstrap)
+		startArgs.Bootstrap = strings.ReplaceAll(startArgs.Bootstrap, " ", "")
+		mapDuplicates := make(map[string]struct{})
+		bootstrapAddr := strings.Split(startArgs.Bootstrap, ",")
+
+		// we ignore empty addresses & duplicates, then fill bAddrs with the clean address
+		for _, addr := range bootstrapAddr {
+			if addr == "" {
+				continue
+			}
+
+			_, exists := mapDuplicates[addr]
+			if exists {
+				continue
+			}
+
+			mapDuplicates[addr] = struct{}{}
+			bAddrs = append(bAddrs, addr)
+		}
 	}
 
 	var capacity uint64
@@ -244,6 +261,9 @@ func setupRepo() (string, bool, error) {
 	if err := survey.Ask(qs, &startArgs); err != nil {
 		return path, false, err
 	}
+
+	// replace line breaks by commas, to be splitted later as slice of addresses
+	startArgs.Bootstrap = strings.ReplaceAll(startArgs.Bootstrap, "\n", ",")
 
 	// Make our root repo dir and datastore dir
 	err = os.MkdirAll(filepath.Join(path, "datastore"), 0755)
