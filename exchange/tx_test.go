@@ -305,7 +305,7 @@ func TestMapFieldSelector(t *testing.T) {
 	stat, err := utils.Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
 	require.NoError(t, err)
 	require.Equal(t, 2, stat.NumBlocks)
-	require.Equal(t, 627, stat.Size)
+	require.Equal(t, 683, stat.Size)
 
 	// Close the transaction
 	require.NoError(t, tx.Close())
