@@ -170,6 +170,8 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Debug().Msg("retrieved blocks")
+
 	s.addUserHeaders(w)
 
 	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
@@ -266,6 +268,11 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		err := tx.Commit()
 		if err != nil {
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
+			return
+		}
+		err = s.node.exch.Index().SetRef(tx.Ref())
+		if err != nil {
+			http.Error(w, "failed to set new ref", http.StatusInternalServerError)
 			return
 		}
 		root = tx.Root()

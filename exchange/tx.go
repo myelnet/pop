@@ -45,11 +45,11 @@ var ErrNoStrategy = errors.New("no strategy")
 // Entry represents a link to an item in the DAG map
 type Entry struct {
 	// Key is string name of the entry
-	Key string
+	Key string `json:"key"`
 	// Value is the CID of the represented content
-	Value cid.Cid
+	Value cid.Cid `json:"value"`
 	// Size is the original file size. Not encoded in the DAG
-	Size int64
+	Size int64 `json:"size"`
 }
 
 // TxResult returns metadata about the transaction including a potential error if something failed
@@ -371,6 +371,9 @@ func (tx *Tx) IsLocal(key string) bool {
 	ref, err := tx.index.GetRef(tx.root)
 	if err != nil {
 		return false
+	}
+	if ref != nil && key == "" {
+		return true
 	}
 	if ref != nil {
 		return ref.Has(key)
