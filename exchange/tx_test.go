@@ -305,7 +305,7 @@ func TestMapFieldSelector(t *testing.T) {
 	stat, err := utils.Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
 	require.NoError(t, err)
 	require.Equal(t, 2, stat.NumBlocks)
-	require.Equal(t, 627, stat.Size)
+	require.Equal(t, 683, stat.Size)
 
 	// Close the transaction
 	require.NoError(t, tx.Close())
@@ -429,7 +429,7 @@ loop2:
 }
 
 func TestTxGetEntries(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	mn := mocknet.New(ctx)
 
@@ -450,13 +450,55 @@ func TestTxGetEntries(t *testing.T) {
 		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
 
+	fname := n1.CreateRandomFile(t, 56000)
+	link, bytes := n1.LoadFileToStore(ctx, t, tx.Store(), fname)
+	rootCid := link.(cidlink.Link).Cid
+	require.NoError(t, tx.Put(KeyFromPath(fname), rootCid, int64(len(bytes))))
+
 	require.NoError(t, tx.Commit())
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 	require.NoError(t, tx.Close())
 
 	// Fresh new tx based on the root of the previous one
 	ntx := pn.Tx(ctx, WithRoot(tx.Root()))
-	entries, err := ntx.GetEntries()
+	keys, err := ntx.Keys()
 	require.NoError(t, err)
-	require.Equal(t, len(filepaths), len(entries))
+	require.Equal(t, len(filepaths)+1, len(keys))
+
+	// A client enters the scene
+	n2 := testutil.NewTestNode(mn, t)
+	opts2 := Options{
+		RepoPath: n2.DTTmpDir,
+	}
+	cn, err := New(ctx, n2.Host, n2.Ds, opts2)
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+	time.Sleep(time.Second)
+
+	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
+	require.NoError(t, gtx.Query(sel.Entries()))
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("could not finish gtx1")
+		case <-gtx.Ongoing():
+		case <-gtx.Done():
+			break loop
+		}
+	}
+
+	// @NOTE: even when selecting a specific key the operation will retrieve all other the entries
+	// without the linked data. We may need to alter this behavior in cases where there is a large
+	// number of entries
+	keys, err = gtx.Keys()
+	require.NoError(t, err)
+	require.Equal(t, len(filepaths)+1, len(keys))
+
+	entries, err := gtx.Entries()
+	require.NoError(t, err)
+	require.Equal(t, len(filepaths)+1, len(entries))
 }

@@ -14,6 +14,14 @@ func All() ipld.Node {
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 }
 
+// Entries selects all entries of an IPLD collection without traversing any data linked in the entries
+// Limitting the recursion depth to 1 will reach all the entries of a map but not beyond.
+func Entries() ipld.Node {
+	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
+	return ssb.ExploreRecursive(selector.RecursionLimitDepth(1),
+		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
+}
+
 // Key selects the link and all the children associated with a given key in a Map
 func Key(key string) ipld.Node {
 	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
