@@ -57,7 +57,7 @@ func TestRecordLatency(t *testing.T) {
 	require.NoError(t, err)
 
 	p1 := NewPeerMgr(n1.Host, idx, []Region{global})
-	p1.receive(n2.Host.ID(), Hey{
+	p1.handleHey(n2.Host.ID(), Hey{
 		Regions:   []RegionCode{GlobalRegion},
 		IndexRoot: nil,
 	})

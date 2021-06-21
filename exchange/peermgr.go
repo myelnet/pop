@@ -18,6 +18,23 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// HeyProtocol identifies the supply greeter protocol
+const HeyProtocol = "/myel/pop/hey/1.0"
+
+//go:generate cbor-gen-for Hey
+
+// Hey is the greeting message which takes in network info
+type Hey struct {
+	Regions   []RegionCode
+	IndexRoot *cid.Cid // If the node has an empty index the root will be nil
+}
+
+// HeyEvt is emitted when a Hey is received and accessible via the libp2p event bus subscription
+type HeyEvt struct {
+	Peer      peer.ID
+	IndexRoot *cid.Cid // nil index root means empty index i.e. brand new node
+}
+
 // Peer contains information recorded while interacted with a peer
 type Peer struct {
 	Regions []RegionCode
@@ -128,7 +145,7 @@ func (pm *PeerMgr) handleStream(s network.Stream) {
 		return
 	}
 
-	pm.receive(s.Conn().RemotePeer(), hmsg)
+	pm.handleHey(s.Conn().RemotePeer(), hmsg)
 
 	// We send back the seed to measure roundrip time
 	go func() {
@@ -143,7 +160,7 @@ func (pm *PeerMgr) handleStream(s network.Stream) {
 }
 
 // Receive a new greeting from peer
-func (pm *PeerMgr) receive(p peer.ID, h Hey) {
+func (pm *PeerMgr) handleHey(p peer.ID, h Hey) {
 	for _, r := range h.Regions {
 		// We only save peers who are in the same region as us
 		if reg, ok := pm.regions[r]; ok {
