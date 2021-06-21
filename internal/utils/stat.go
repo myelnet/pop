@@ -113,7 +113,7 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, er
 		if err != nil {
 			return nil, err
 		}
-		// The key IPLD node needs to be decoded as bytes
+		// The key IPLD node needs to be decoded as a string
 		key, err := k.AsString()
 		if err != nil {
 			return nil, err

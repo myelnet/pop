@@ -32,6 +32,7 @@ import (
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/rs/zerolog/log"
 )
 
 // DefaultHashFunction used for generating CIDs of imported data
@@ -231,6 +232,14 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 		if err != nil {
 			return nil, err
 		}
+		sas, err := mas.AssembleEntry("Size")
+		if err != nil {
+			return nil, err
+		}
+		err = sas.AssignInt(int(v.Size))
+		if err != nil {
+			return nil, err
+		}
 		err = mas.Finish()
 		if err != nil {
 			return nil, err
@@ -370,8 +379,8 @@ func (tx *Tx) IsLocal(key string) bool {
 	return false
 }
 
-// GetEntries retrieves all the entries associated with the root of this transaction
-func (tx *Tx) GetEntries() ([]string, error) {
+// Keys lists the keys for all the entries in the root map of this transaction
+func (tx *Tx) Keys() ([]string, error) {
 	// If this transaction has entries we just return them otherwise
 	// we're looking at a different transaction
 	if len(tx.entries) > 0 {
@@ -384,14 +393,89 @@ func (tx *Tx) GetEntries() ([]string, error) {
 		return entries, nil
 	}
 
-	if ref, err := tx.index.GetRef(tx.root); err == nil {
-		return utils.MapKeys(
-			tx.ctx,
-			ref.PayloadCID,
-			storeutil.LoaderForBlockstore(tx.bs),
-		)
+	loader := storeutil.LoaderForBlockstore(tx.bs)
+	if _, err := tx.index.GetRef(tx.root); err != nil {
+		// Keys might still be in multistore
+		loader = tx.store.Loader
 	}
-	return nil, fmt.Errorf("failed to get entried")
+
+	keys, err := utils.MapKeys(
+		tx.ctx,
+		tx.root,
+		loader,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get keys: %w", err)
+	}
+	return keys, nil
+}
+
+// Entries returns all the entries in the root map of this transaction
+func (tx *Tx) Entries() ([]Entry, error) {
+	loader := storeutil.LoaderForBlockstore(tx.bs)
+	if _, err := tx.index.GetRef(tx.root); err != nil {
+		// Keys might still be in multistore
+		loader = tx.store.Loader
+	}
+
+	lk := cidlink.Link{Cid: tx.root}
+	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
+	nb := basicnode.Prototype.Map.NewBuilder()
+	// Use a loader from the link to read all the children blocks from the global store
+	err := lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return nil, err
+	}
+	// load the IPLD tree
+	nd := nb.Build()
+	// Gather the keys in an array
+	entries := make([]Entry, nd.Length())
+	it := nd.MapIterator()
+	i := 0
+	// Iterate over all the map entries
+	for !it.Done() {
+		k, v, err := it.Next()
+		// all succeed or fail
+		if err != nil {
+			return nil, err
+		}
+
+		key, err := k.AsString()
+		if err != nil {
+			return nil, err
+		}
+
+		// An entry with no value should fail
+		vn, err := v.LookupByString("Value")
+		if err != nil {
+			return nil, err
+		}
+		l, err := vn.AsLink()
+		if err != nil {
+			return nil, err
+		}
+
+		entries[i] = Entry{
+			Key:   key,
+			Value: l.(cidlink.Link).Cid,
+		}
+		i++
+
+		// An entry with no size is still fine
+		sn, err := v.LookupByString("Size")
+		if err != nil {
+			log.Debug().Str("key", key).Msg("no size present in entry")
+			continue
+		}
+		size, err := sn.AsInt()
+		if err != nil {
+			continue
+		}
+		entries[i-1].Size = int64(size)
+
+	}
+	return entries, nil
+
 }
 
 func (tx *Tx) loadFileEntry(k string, store *multistore.Store) (files.Node, error) {

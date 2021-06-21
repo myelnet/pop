@@ -175,14 +175,16 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
 
 	if key == "" {
-		// If there is no key we return all the keys
-		keys, err := tx.GetEntries()
+		// If there is no key we return all the entries as a JSON file detailing information
+		// about each entry. This allows clients to inspec the content in a transaction before
+		// fetching all of it.
+		entries, err := tx.Entries()
 		if err != nil {
 			http.Error(w, "Failed to get entries", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(keys)
+		json.NewEncoder(w).Encode(entries)
 		return
 	}
 	fnd, err := tx.GetFile(segs[0])
