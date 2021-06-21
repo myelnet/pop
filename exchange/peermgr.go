@@ -18,12 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// PeerManager all the methods to maintain an optimal list of peers
-type PeerManager interface {
-	HeyReceiver
-	LatencyRecorder
-}
-
 // Peer contains information recorded while interacted with a peer
 type Peer struct {
 	Regions []RegionCode
@@ -39,12 +33,6 @@ type PeerMgr struct {
 
 	mu    sync.Mutex
 	peers map[peer.ID]Peer
-}
-
-// HeyEvt is emitted when a Hey is received and accessible via the libp2p event bus subscription
-type HeyEvt struct {
-	Peer      peer.ID
-	IndexRoot *cid.Cid // nil index root means empty index i.e. brand new node
 }
 
 // NewPeerMgr prepares a new PeerMgr instance
@@ -201,10 +189,8 @@ func (pm *PeerMgr) sendHey(ctx context.Context, pid peer.ID) error {
 		if err != nil {
 			log.Error().Err(err).Msg("failed to read pong msg")
 		}
-		now := time.Now()
-		lat := now.Sub(start)
 
-		pm.recordLatency(pid, lat)
+		pm.recordLatency(pid, time.Now(), start)
 	}()
 	return nil
 }
@@ -229,14 +215,15 @@ func (pm *PeerMgr) getHey() Hey {
 }
 
 // RecordLatency for a given peer
-func (pm *PeerMgr) recordLatency(p peer.ID, t time.Duration) error {
+func (pm *PeerMgr) recordLatency(p peer.ID, now, start time.Time) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	peer, ok := pm.peers[p]
 	if !ok {
 		return errors.New("no peer given ID")
 	}
-	peer.Latency = t
+
+	peer.Latency = now.Sub(start)
 	pm.peers[p] = peer
 	return nil
 }
