@@ -104,7 +104,6 @@ type Replication struct {
 	ms        *multistore.MultiStore
 	bs        blockstore.Blockstore
 	pm        *PeerMgr
-	hs        *HeyService
 	idx       *Index
 	rgs       []Region
 	reqProtos []protocol.ID
@@ -122,7 +121,7 @@ type Replication struct {
 
 // NewReplication starts the exchange replication management system
 func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) (*Replication, error) {
-	pm := NewPeerMgr(h, opts.Regions)
+	pm := NewPeerMgr(h, idx, opts.Regions)
 	r := &Replication{
 		h:         h,
 		pm:        pm,
@@ -138,7 +137,6 @@ func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv Routed
 		indexRcvd: make(chan struct{}),
 		stores:    make(map[cid.Cid]*multistore.Store),
 	}
-	r.hs = NewHeyService(h, pm, r)
 	h.SetStreamHandler(PopRequestProtocolID, r.handleRequest)
 
 	err := r.dt.RegisterVoucherType(&Request{}, r)
@@ -172,7 +170,7 @@ func (r *Replication) Start(ctx context.Context) error {
 		go r.refreshIndex(ctx)
 		go r.pumpIndexes(ctx, sub)
 	}
-	if err := r.hs.Run(ctx); err != nil {
+	if err := r.pm.Run(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -333,24 +331,6 @@ func (r *Replication) RmStore(k cid.Cid) {
 
 // balanceIndex checks if any content in the interest list is more popular than content in the supply
 // in which case it will try to retrieve it from the network and insert it in there
-
-// GetHey formats a new Hey message
-func (r *Replication) GetHey() Hey {
-	regions := make([]RegionCode, len(r.rgs))
-	i := 0
-	for _, rg := range r.rgs {
-		regions[i] = rg.Code
-		i++
-	}
-	h := Hey{
-		Regions: regions,
-	}
-	idxr := r.idx.Root()
-	if idxr != cid.Undef {
-		h.IndexRoot = &idxr
-	}
-	return h
-}
 
 // NewRequestStream opens a multi stream with the given peer and sets up the interface to write requests to it
 func (r *Replication) NewRequestStream(dest peer.ID) (*RequestStream, error) {
