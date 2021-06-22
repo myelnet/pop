@@ -78,15 +78,15 @@ type ListArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
-	Ping    *PingArgs
-	Put     *PutArgs
-	Status  *StatusArgs
-	KeyArgs *KeyArgs
-	Quote   *QuoteArgs
-	Commit  *CommArgs
-	Store   *StoreArgs
-	Get     *GetArgs
-	List    *ListArgs
+	Ping       *PingArgs
+	Put        *PutArgs
+	Status     *StatusArgs
+	WalletArgs *KeyArgs
+	Quote      *QuoteArgs
+	Commit     *CommArgs
+	Store      *StoreArgs
+	Get        *GetArgs
+	List       *ListArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -117,8 +117,8 @@ type StatusResult struct {
 	Err     string
 }
 
-// KeyResult
-type KeyResult struct {
+// WalletResult
+type WalletResult struct {
 	Err     string
 	Address string
 }
@@ -176,7 +176,7 @@ type Notify struct {
 	PingResult   *PingResult
 	PutResult    *PutResult
 	StatusResult *StatusResult
-	KeyResult    *KeyResult
+	WalletResult *WalletResult
 	QuoteResult  *QuoteResult
 	CommResult   *CommResult
 	StoreResult  *StoreResult
@@ -221,8 +221,8 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.Status(ctx, c)
 		return nil
 	}
-	if c := cmd.KeyArgs; c != nil {
-		cs.n.Key(ctx, c)
+	if c := cmd.WalletArgs; c != nil {
+		cs.n.Wallet(ctx, c)
 		return nil
 	}
 	if c := cmd.Quote; c != nil {
@@ -314,8 +314,8 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
 }
 
-func (cc *CommandClient) Key(args *KeyArgs) {
-	cc.send(Command{KeyArgs: args})
+func (cc *CommandClient) Wallet(args *KeyArgs) {
+	cc.send(Command{WalletArgs: args})
 }
 
 func (cc *CommandClient) Quote(args *QuoteArgs) {
@@ -367,7 +367,6 @@ func ReadMsg(r io.Reader) ([]byte, error) {
 }
 
 func WriteMsg(w io.Writer, b []byte) error {
-
 	cb := make([]byte, 4)
 	if len(b) > MaxMessageSize {
 		return fmt.Errorf("WriteMsg: message too large: %d bytes", len(b))

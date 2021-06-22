@@ -460,10 +460,10 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 }
 
 // Key
-func (nd *node) Key(ctx context.Context, args *KeyArgs) {
+func (nd *node) Wallet(ctx context.Context, args *KeyArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
-			KeyResult: &KeyResult{
+			WalletResult: &WalletResult{
 				Err: err.Error(),
 			},
 		})
@@ -476,7 +476,7 @@ func (nd *node) Key(ctx context.Context, args *KeyArgs) {
 	}
 
 	nd.send(Notify{
-		KeyResult: &KeyResult{
+		WalletResult: &WalletResult{
 			Address: args.Address,
 		},
 	})
