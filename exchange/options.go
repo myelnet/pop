@@ -56,7 +56,7 @@ type Options struct {
 	// FilecoinRPCHeader provides any required header depending on the Lotus server policy.
 	FilecoinRPCHeader http.Header
 	// FilecoinAPI can be passed directly instead of providing an endpoint. This can be useful in case you are.
-	// in an enviornment which already may have the API instance.
+	// in an environment which already may have the API instance.
 	FilecoinAPI filecoin.API
 	// GossipTracer is provided if you are using an external PubSub instance.
 	GossipTracer *GossipTracer

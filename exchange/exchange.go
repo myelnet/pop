@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"math"
 
 	"github.com/filecoin-project/go-address"
@@ -71,10 +72,28 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	}
 
 	// Make a new default key to be sure we have an address where to receive our payments
+	var addr address.Address
 	if opts.Wallet.DefaultAddress() == address.Undef {
-		_, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
+		addr, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
 		if err != nil {
 			return nil, err
+		}
+		fmt.Println("==> Generated new FIL address: ", addr)
+
+	} else {
+		defaultAddress := opts.Wallet.DefaultAddress()
+		addresses, err := opts.Wallet.List()
+		if err != nil {
+			log.Trace().Err(err).Msg("failed to load addresses")
+		}
+
+		fmt.Println("==> Loaded FIL address: ", defaultAddress)
+
+		for _, adr := range addresses {
+			if defaultAddress == adr {
+				continue
+			}
+			fmt.Println("====> Found other FIL address: ", adr.String())
 		}
 	}
 	exch.rtv, err = retrieval.New(
