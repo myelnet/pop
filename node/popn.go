@@ -823,16 +823,25 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		)
 		defer unsub()
 	}
+	results := make(chan GetResult)
+	go func() {
+		for res := range results {
+			nd.send(Notify{
+				GetResult: &res,
+			})
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
 	defer cancel()
-	err = nd.get(ctx, root, args)
+	err = nd.get(ctx, root, args, results)
 	if err != nil {
 		sendErr(err)
 	}
+	close(results)
 }
 
 // get is a synchronous content retrieval operation which can be called by a CLI request or HTTP
-func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
+func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<- GetResult) error {
 	// Check our supply if we may already have it
 	tx := nd.exch.Tx(ctx, exchange.WithRoot(c))
 	local := tx.IsLocal(args.Key)
@@ -847,10 +856,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		}
 	}
 	if local {
-		nd.send(Notify{
-			GetResult: &GetResult{
-				Local: true,
-			}})
+		results <- GetResult{
+			Local: true,
+		}
 		return nil
 	}
 
@@ -918,15 +926,13 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		return ctx.Err()
 	}
 
-	nd.send(Notify{
-		GetResult: &GetResult{
-			DealID:       dref.ID.String(),
-			TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
-			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
-			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-			PieceSize:    filecoin.SizeStr(filecoin.NewInt(resp.Size)),
-		},
-	})
+	results <- GetResult{
+		DealID:       dref.ID.String(),
+		TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
+		PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
+		UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
+		PieceSize:    filecoin.SizeStr(filecoin.NewInt(resp.Size)),
+	}
 
 	select {
 	case res := <-tx.Done():
@@ -973,16 +979,54 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			return err
 		}
 
-		nd.send(Notify{
-			GetResult: &GetResult{
-				DiscLatSeconds:  discDuration.Seconds(),
-				TransLatSeconds: transDuration.Seconds(),
-			},
-		})
+		results <- GetResult{
+			DiscLatSeconds:  discDuration.Seconds(),
+			TransLatSeconds: transDuration.Seconds(),
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// Retrieve is an RPC method that retrieves a given CID and key to the local blockstore.
+// It sends feedback events to a result channel that it returns.
+func (nd *node) Retrieve(ctx context.Context, args *GetArgs) (chan GetResult, error) {
+	results := make(chan GetResult)
+
+	go func() {
+
+		p := path.FromString(args.Cid)
+		root, segs, err := path.SplitAbsPath(p)
+		if err != nil {
+			return
+		}
+
+		args.Key = segs[0]
+
+		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
+			func(event client.Event, state deal.ClientState) {
+				if state.PayloadCID == root {
+					results <- GetResult{
+						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
+						Status:        deal.Statuses[state.Status],
+						TotalReceived: filecoin.SizeStr(filecoin.NewInt(state.BytesPaidFor)),
+					}
+				}
+			},
+		)
+		defer unsub()
+
+		err = nd.get(ctx, root, args, results)
+		if err != nil {
+			results <- GetResult{
+				Err: err.Error(),
+			}
+		}
+		close(results)
+	}()
+
+	return results, nil
 }
 
 // List returns all the roots for the content stored by this node
