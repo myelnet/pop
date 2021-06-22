@@ -99,6 +99,7 @@ change until a first stable release. To get started run 'pop start'.
 			storeCmd,
 			getCmd,
 			listCmd,
+			keyCmd,
 		},
 		FlagSet: rootfs,
 		Exec:    func(context.Context, []string) error { return flag.ErrHelp },

@@ -30,6 +30,12 @@ type StatusArgs struct {
 	Verbose bool
 }
 
+// KeyArgs get passed to the Status command
+type KeyArgs struct {
+	Address    string
+	OutputPath string
+}
+
 // QuoteArgs are passed to the quote command
 type QuoteArgs struct {
 	Refs      []string
@@ -72,14 +78,15 @@ type ListArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
-	Ping   *PingArgs
-	Put    *PutArgs
-	Status *StatusArgs
-	Quote  *QuoteArgs
-	Commit *CommArgs
-	Store  *StoreArgs
-	Get    *GetArgs
-	List   *ListArgs
+	Ping    *PingArgs
+	Put     *PutArgs
+	Status  *StatusArgs
+	KeyArgs *KeyArgs
+	Quote   *QuoteArgs
+	Commit  *CommArgs
+	Store   *StoreArgs
+	Get     *GetArgs
+	List    *ListArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -103,11 +110,17 @@ type PutResult struct {
 	Err       string
 }
 
-// StatusResult gives us the result of status request to pring
+// StatusResult gives us the result of status request to ping
 type StatusResult struct {
 	RootCid string
 	Entries string
 	Err     string
+}
+
+// KeyResult
+type KeyResult struct {
+	Err     string
+	Address string
 }
 
 // QuoteResult returns the output of the Quote request
@@ -163,6 +176,7 @@ type Notify struct {
 	PingResult   *PingResult
 	PutResult    *PutResult
 	StatusResult *StatusResult
+	KeyResult    *KeyResult
 	QuoteResult  *QuoteResult
 	CommResult   *CommResult
 	StoreResult  *StoreResult
@@ -205,6 +219,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Status; c != nil {
 		cs.n.Status(ctx, c)
+		return nil
+	}
+	if c := cmd.KeyArgs; c != nil {
+		cs.n.Key(ctx, c)
 		return nil
 	}
 	if c := cmd.Quote; c != nil {
@@ -294,6 +312,10 @@ func (cc *CommandClient) Put(args *PutArgs) {
 
 func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
+}
+
+func (cc *CommandClient) Key(args *KeyArgs) {
+	cc.send(Command{KeyArgs: args})
 }
 
 func (cc *CommandClient) Quote(args *QuoteArgs) {

@@ -460,30 +460,24 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	sendErr(ErrNoTx)
 }
 
-// getRef is an internal function to find a ref with a given string cid
-// it is used when quoting the commit storage price or pushing to storage providers
-func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
-	// Select the commit with the matching CID
-	// TODO: should prob error out if we don't find it
-	if cstr != "" {
-		ccid, err := cid.Parse(cstr)
-		if err != nil {
-			return nil, err
-		}
-		ref, err := nd.exch.Index().PeekRef(ccid)
-		if err != nil {
-			return nil, err
-		}
-		return ref, nil
+// Key
+func (nd *node) Key(ctx context.Context, args *KeyArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			KeyResult: &KeyResult{
+				Err: err.Error(),
+			},
+		})
 	}
 
-	nd.txmu.Lock()
-	defer nd.txmu.Unlock()
-	if nd.tx != nil {
-		return nd.tx.Ref(), nil
-	}
+	nd.send(Notify{
+		KeyResult: &KeyResult{
+			Address: nd.exch.Wallet().DefaultAddress().String(),
+		},
+	})
+	return
 
-	return nil, ErrNoTx
+	sendErr(ErrNoTx)
 }
 
 // Quote returns an estimation of market price for storing a list of transactions on Filecoin
@@ -974,6 +968,32 @@ func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.Reade
 	}
 
 	return n.Cid(), nil
+}
+
+// getRef is an internal function to find a ref with a given string cid
+// it is used when quoting the commit storage price or pushing to storage providers
+func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
+	// Select the commit with the matching CID
+	// TODO: should prob error out if we don't find it
+	if cstr != "" {
+		ccid, err := cid.Parse(cstr)
+		if err != nil {
+			return nil, err
+		}
+		ref, err := nd.exch.Index().PeekRef(ccid)
+		if err != nil {
+			return nil, err
+		}
+		return ref, nil
+	}
+
+	nd.txmu.Lock()
+	defer nd.txmu.Unlock()
+	if nd.tx != nil {
+		return nd.tx.Ref(), nil
+	}
+
+	return nil, ErrNoTx
 }
 
 // addRecursive adds entire file trees into a single transaction
