@@ -11,6 +11,11 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
+var keyArgs struct {
+	Address    string
+	OutputPath string
+}
+
 var keyCmd = &ffcli.Command{
 	Name:      "key",
 	ShortHelp: "Manage your keys",
@@ -22,8 +27,8 @@ Manage your keys
 	Exec: runKey,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("key", flag.ExitOnError)
-		fs.StringVar(&startArgs.Bootstrap, "address", "", "your FIL address you want to export")
-		fs.StringVar(&startArgs.FilEndpoint, "output-path", "", "path where your address will be exported")
+		fs.StringVar(&keyArgs.Address, "address", "", "the FIL address you want to export")
+		fs.StringVar(&keyArgs.OutputPath, "output-path", "", "path where your private key will be exported")
 		return fs
 	})(),
 }
@@ -40,7 +45,11 @@ func runKey(ctx context.Context, args []string) error {
 	})
 	go receive(ctx, cc, c)
 
-	cc.Key(&node.KeyArgs{})
+	cc.Key(&node.KeyArgs{
+		Address:    keyArgs.Address,
+		OutputPath: keyArgs.OutputPath,
+	})
+
 	select {
 	case kr := <-keyResults:
 		if kr.Err != "" {

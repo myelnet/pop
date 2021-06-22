@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -470,14 +469,17 @@ func (nd *node) Key(ctx context.Context, args *KeyArgs) {
 		})
 	}
 
+	err := nd.exportAddress(args.Address, args.OutputPath)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
 	nd.send(Notify{
 		KeyResult: &KeyResult{
-			Address: nd.exch.Wallet().DefaultAddress().String(),
+			Address: args.Address,
 		},
 	})
-	return
-
-	sendErr(ErrNoTx)
 }
 
 // Quote returns an estimation of market price for storing a list of transactions on Filecoin
@@ -1051,10 +1053,12 @@ func (nd *node) importAddress(pk string) {
 	var iki wallet.KeyInfo
 	data, err := hex.DecodeString(pk)
 	if err != nil {
-		log.Error().Err(err).Msg("hex.DecodeString(opts.PrivKey)")
+		log.Error().Err(err).Msg("failed to decode private key")
 	}
-	if err := json.Unmarshal(data, &iki); err != nil {
-		log.Error().Err(err).Msg("json.Unmarshal(PrivKey)")
+
+	err = iki.FromBytes(data)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to load KeyInfo")
 	}
 
 	addr, err := nd.exch.Wallet().ImportKey(context.TODO(), &iki)
@@ -1067,4 +1071,34 @@ func (nd *node) importAddress(pk string) {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
 		}
 	}
+}
+
+// importAddress from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (nd *node) exportAddress(addr, path string) error {
+	adr, err := address.NewFromString(addr)
+	if err != nil {
+		return fmt.Errorf("failed to decode address: %v", err)
+	}
+
+	iki, err := nd.exch.Wallet().ExportKey(context.TODO(), adr)
+	if err != nil {
+		return fmt.Errorf("failed to export key: %v", err)
+	}
+
+	data, err := iki.ToBytes()
+	if err != nil {
+		return fmt.Errorf("failed to convert address to bytes: %v", err)
+	}
+
+	encodedPk := make([]byte, hex.EncodedLen(len(data)))
+	hex.Encode(encodedPk, data)
+
+	err = os.WriteFile(path, encodedPk, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to export KeyInfo to %s: %v", path, err)
+	}
+
+	return nil
 }

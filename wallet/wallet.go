@@ -3,6 +3,7 @@ package wallet
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -40,6 +41,14 @@ type KeyInfo struct {
 	PrivateKey []byte
 	//internal signer
 	sig Signer
+}
+
+func (k *KeyInfo) FromBytes(data []byte) error {
+	return json.Unmarshal(data, k)
+}
+
+func (k *KeyInfo) ToBytes() ([]byte, error) {
+	return json.Marshal(k)
 }
 
 // Key adds the public key and address on top of the private key
@@ -170,6 +179,7 @@ type Driver interface {
 	SetDefaultAddress(address.Address) error
 	List() ([]address.Address, error)
 	ImportKey(context.Context, *KeyInfo) (address.Address, error)
+	ExportKey(context.Context, address.Address) (*KeyInfo, error)
 	Sign(context.Context, address.Address, []byte) (*crypto.Signature, error)
 	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
 	Balance(context.Context, address.Address) (fil.BigInt, error)
@@ -341,7 +351,7 @@ func (w *KeystoreWallet) List() ([]address.Address, error) {
 }
 
 // ImportKey in the wallet from a private key and key type
-func (w *KeystoreWallet) ImportKey(ctx context.Context, k *KeyInfo) (address.Address, error) {
+func (w *KeystoreWallet) ImportKey(_ context.Context, k *KeyInfo) (address.Address, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -359,6 +369,19 @@ func (w *KeystoreWallet) ImportKey(ctx context.Context, k *KeyInfo) (address.Add
 	}
 	w.keys[key.Address] = key
 	return key.Address, nil
+}
+
+// ExportKey in the wallet from a private key and key type
+func (w *KeystoreWallet) ExportKey(_ context.Context, addr address.Address) (*KeyInfo, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	key, exists := w.keys[addr]
+	if !exists {
+		return nil, fmt.Errorf("address %s does not exist", addr.String())
+	}
+
+	return &key.KeyInfo, nil
 }
 
 // Sign a message with the key associated with the given address. Generates a valid Filecoin signature
