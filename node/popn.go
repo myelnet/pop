@@ -171,6 +171,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	nd.host, err = libp2p.New(
 		ctx,
 		libp2p.Identity(priv),
+		libp2p.ListenAddrStrings(
+			"/ip4/0.0.0.0/tcp/41505",
+			"/ip6/::/tcp/41505",
+		),
 		libp2p.ConnectionManager(connmgr.NewConnManager(
 			20,             // Lowwater
 			60,             // HighWater,
