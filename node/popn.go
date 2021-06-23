@@ -224,8 +224,28 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Import Fil address
 	if opts.PrivKey != "" {
-		nd.importAddress(opts.PrivKey)
+		nd.importAddress(ctx, opts.PrivKey)
+		defaultAddress := nd.exch.Wallet().DefaultAddress()
+		fmt.Println("==> Imported private keys for FIL address: ", defaultAddress)
+
+	} else {
+		if nd.exch.Wallet().DefaultAddress() == address.Undef {
+			// Generate new FIL address
+			var addr address.Address
+			addr, err = nd.exch.Wallet().NewKey(ctx, wallet.KTSecp256k1)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Println("==> Generated new FIL address: ", addr)
+
+		} else {
+			// Load new FIL address
+			defaultAddress := nd.exch.Wallet().DefaultAddress()
+			fmt.Println("==> Loaded FIL address: ", defaultAddress)
+		}
 	}
 
 	nd.rs, err = storage.New(
@@ -459,8 +479,8 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	sendErr(ErrNoTx)
 }
 
-// Key
-func (nd *node) Wallet(ctx context.Context, args *KeyArgs) {
+// WalletList
+func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			WalletResult: &WalletResult{
@@ -469,16 +489,68 @@ func (nd *node) Wallet(ctx context.Context, args *KeyArgs) {
 		})
 	}
 
-	err := nd.exportAddress(args.Address, args.OutputPath)
+	addresses, err := nd.listAddresses()
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
 	nd.send(Notify{
-		WalletResult: &WalletResult{
-			Address: args.Address,
-		},
+		WalletResult: &WalletResult{Addresses: addresses},
+	})
+}
+
+// WalletExport
+func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			WalletResult: &WalletResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	err := nd.exportAddress(ctx, args.Address, args.OutputPath)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	nd.send(Notify{
+		WalletResult: &WalletResult{},
+	})
+}
+
+// WalletPay
+func (nd *node) WalletPay(ctx context.Context, args *WalletPayArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			WalletResult: &WalletResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	from, err := address.NewFromString(args.From)
+	if err != nil {
+		sendErr(fmt.Errorf("failed to decode address %s : %v", args.From, err))
+		return
+	}
+
+	to, err := address.NewFromString(args.To)
+	if err != nil {
+		sendErr(fmt.Errorf("failed to decode address %s : %v", args.To, err))
+		return
+	}
+
+	err = nd.exch.Wallet().Transfer(ctx, from, to, args.Amount)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	nd.send(Notify{
+		WalletResult: &WalletResult{},
 	})
 }
 
@@ -1049,7 +1121,7 @@ func (nd *node) connPeers() []peer.ID {
 // importAddress from a hex encoded private key to use as default on the exchange instead of
 // the auto generated one. This is mostly for development and will be reworked into a nicer command
 // eventually
-func (nd *node) importAddress(pk string) {
+func (nd *node) importAddress(ctx context.Context, pk string) {
 	var iki wallet.KeyInfo
 	data, err := hex.DecodeString(pk)
 	if err != nil {
@@ -1061,11 +1133,10 @@ func (nd *node) importAddress(pk string) {
 		log.Error().Err(err).Msg("failed to load KeyInfo")
 	}
 
-	addr, err := nd.exch.Wallet().ImportKey(context.TODO(), &iki)
+	addr, err := nd.exch.Wallet().ImportKey(ctx, &iki)
 	if err != nil {
 		log.Error().Err(err).Msg("Wallet.ImportKey")
 	} else {
-		fmt.Printf("==> Imported private key for %s.\n", addr.String())
 		err := nd.exch.Wallet().SetDefaultAddress(addr)
 		if err != nil {
 			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
@@ -1076,13 +1147,13 @@ func (nd *node) importAddress(pk string) {
 // importAddress from a hex encoded private key to use as default on the exchange instead of
 // the auto generated one. This is mostly for development and will be reworked into a nicer command
 // eventually
-func (nd *node) exportAddress(addr, path string) error {
+func (nd *node) exportAddress(ctx context.Context, addr, path string) error {
 	adr, err := address.NewFromString(addr)
 	if err != nil {
 		return fmt.Errorf("failed to decode address: %v", err)
 	}
 
-	iki, err := nd.exch.Wallet().ExportKey(context.TODO(), adr)
+	iki, err := nd.exch.Wallet().ExportKey(ctx, adr)
 	if err != nil {
 		return fmt.Errorf("failed to export key: %v", err)
 	}
@@ -1101,4 +1172,19 @@ func (nd *node) exportAddress(addr, path string) error {
 	}
 
 	return nil
+}
+
+func (nd *node) listAddresses() ([]string, error) {
+	addresses, err := nd.exch.Wallet().List()
+	if err != nil {
+		return nil, fmt.Errorf("failed to export key: %v", err)
+	}
+
+	var stringAddresses = make([]string, len(addresses))
+
+	for i, addr := range addresses {
+		stringAddresses[i] = addr.String()
+	}
+
+	return stringAddresses, nil
 }

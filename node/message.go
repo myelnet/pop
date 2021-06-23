@@ -30,10 +30,20 @@ type StatusArgs struct {
 	Verbose bool
 }
 
-// KeyArgs get passed to the Status command
-type KeyArgs struct {
+// WalletListArgs get passed to the Status command
+type WalletListArgs struct{}
+
+// WalletExportArgs get passed to the Status command
+type WalletExportArgs struct {
 	Address    string
 	OutputPath string
+}
+
+// WalletPayArgs get passed to the Status command
+type WalletPayArgs struct {
+	From   string
+	To     string
+	Amount string
 }
 
 // QuoteArgs are passed to the quote command
@@ -78,15 +88,17 @@ type ListArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
-	Ping       *PingArgs
-	Put        *PutArgs
-	Status     *StatusArgs
-	WalletArgs *KeyArgs
-	Quote      *QuoteArgs
-	Commit     *CommArgs
-	Store      *StoreArgs
-	Get        *GetArgs
-	List       *ListArgs
+	Ping             *PingArgs
+	Put              *PutArgs
+	Status           *StatusArgs
+	WalletListArgs   *WalletListArgs
+	WalletExportArgs *WalletExportArgs
+	WalletPayArgs    *WalletPayArgs
+	Quote            *QuoteArgs
+	Commit           *CommArgs
+	Store            *StoreArgs
+	Get              *GetArgs
+	List             *ListArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -119,8 +131,8 @@ type StatusResult struct {
 
 // WalletResult
 type WalletResult struct {
-	Err     string
-	Address string
+	Err       string
+	Addresses []string
 }
 
 // QuoteResult returns the output of the Quote request
@@ -221,8 +233,16 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.Status(ctx, c)
 		return nil
 	}
-	if c := cmd.WalletArgs; c != nil {
-		cs.n.Wallet(ctx, c)
+	if c := cmd.WalletListArgs; c != nil {
+		cs.n.WalletList(ctx, c)
+		return nil
+	}
+	if c := cmd.WalletExportArgs; c != nil {
+		cs.n.WalletExport(ctx, c)
+		return nil
+	}
+	if c := cmd.WalletPayArgs; c != nil {
+		cs.n.WalletPay(ctx, c)
 		return nil
 	}
 	if c := cmd.Quote; c != nil {
@@ -314,8 +334,16 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
 }
 
-func (cc *CommandClient) Wallet(args *KeyArgs) {
-	cc.send(Command{WalletArgs: args})
+func (cc *CommandClient) WalletListKeys(args *WalletListArgs) {
+	cc.send(Command{WalletListArgs: args})
+}
+
+func (cc *CommandClient) WalletExport(args *WalletExportArgs) {
+	cc.send(Command{WalletExportArgs: args})
+}
+
+func (cc *CommandClient) WalletPay(args *WalletPayArgs) {
+	cc.send(Command{WalletPayArgs: args})
 }
 
 func (cc *CommandClient) Quote(args *QuoteArgs) {

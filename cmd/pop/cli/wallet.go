@@ -11,44 +11,25 @@ import (
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
-var exportArgs struct {
-	Address    string
-	OutputPath string
-}
-
-var payArgs struct {
-	From   string
-	To     string
-	Amount string
+var listKeys = &ffcli.Command{
+	Name:       "list",
+	ShortUsage: "wallet list",
+	ShortHelp:  "",
+	Exec:       runListKeys,
 }
 
 var export = &ffcli.Command{
 	Name:       "export",
 	ShortUsage: "wallet export",
 	ShortHelp:  "",
-	FlagSet: (func() *flag.FlagSet {
-		fs := flag.NewFlagSet("wallet export", flag.ExitOnError)
-		fs.StringVar(&exportArgs.Address, "address", "", "the FIL address you want to export")
-		fs.StringVar(&exportArgs.OutputPath, "output-path", "", "path where your private key will be exported")
-		return fs
-	})(),
-	Exec: func(ctx context.Context, args []string) error {
-		return runExport(ctx)
-	},
+	Exec:       runExport,
 }
 
 var pay = &ffcli.Command{
 	Name:       "pay",
 	ShortUsage: "wallet pay",
 	ShortHelp:  "",
-	FlagSet: (func() *flag.FlagSet {
-		fs := flag.NewFlagSet("wallet pay", flag.ExitOnError)
-
-		return fs
-	})(),
-	Exec: func(ctx context.Context, args []string) error {
-		return runPay(ctx)
-	},
+	Exec:       runPay,
 }
 
 var walletCmd = &ffcli.Command{
@@ -59,10 +40,10 @@ var walletCmd = &ffcli.Command{
 		return flag.ErrHelp
 	},
 	FlagSet:     flag.NewFlagSet("wallet", flag.ExitOnError),
-	Subcommands: []*ffcli.Command{export, pay},
+	Subcommands: []*ffcli.Command{listKeys, export, pay},
 }
 
-func runExport(ctx context.Context) error {
+func runListKeys(ctx context.Context, args []string) error {
 	c, cc, ctx, cancel := connect(ctx)
 	defer cancel()
 
@@ -74,9 +55,46 @@ func runExport(ctx context.Context) error {
 	})
 	go receive(ctx, cc, c)
 
-	cc.Wallet(&node.KeyArgs{
-		Address:    exportArgs.Address,
-		OutputPath: exportArgs.OutputPath,
+	cc.WalletListKeys(&node.WalletListArgs{})
+
+	select {
+	case kr := <-keyResults:
+		if kr.Err != "" {
+			return errors.New(kr.Err)
+		}
+
+		keys := strings.Join(kr.Addresses, "\n ==> ")
+
+		fmt.Printf("List of all your keys : \n ==> %s \n", keys)
+		return nil
+
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func runExport(ctx context.Context, args []string) error {
+	if len(args) < 2 {
+		return errors.New("incorrect number of args, see usage")
+	}
+
+	address := args[0]
+	outputPath := args[1]
+
+	c, cc, ctx, cancel := connect(ctx)
+	defer cancel()
+
+	keyResults := make(chan *node.WalletResult, 1)
+	cc.SetNotifyCallback(func(n node.Notify) {
+		if sr := n.WalletResult; sr != nil {
+			keyResults <- sr
+		}
+	})
+	go receive(ctx, cc, c)
+
+	cc.WalletExport(&node.WalletExportArgs{
+		Address:    address,
+		OutputPath: outputPath,
 	})
 
 	select {
@@ -85,12 +103,7 @@ func runExport(ctx context.Context) error {
 			return errors.New(kr.Err)
 		}
 
-		if kr.Address == "" {
-			fmt.Printf("Missing Key.\n")
-			return nil
-		}
-
-		fmt.Printf("Fil Key : %s\n", kr.Address)
+		fmt.Printf("Successfully exported key %s to %s\n", address, outputPath)
 		return nil
 
 	case <-ctx.Done():
@@ -98,7 +111,42 @@ func runExport(ctx context.Context) error {
 	}
 }
 
-func runPay(ctx context.Context) error {
-	fmt.Println(">>>>> IN PAY")
-	return nil
+func runPay(ctx context.Context, args []string) error {
+	if len(args) < 3 {
+		return errors.New("incorrect number of args, see usage")
+	}
+
+	from := args[0]
+	to := args[1]
+	amount := args[2]
+
+	c, cc, ctx, cancel := connect(ctx)
+	defer cancel()
+
+	keyResults := make(chan *node.WalletResult, 1)
+	cc.SetNotifyCallback(func(n node.Notify) {
+		if sr := n.WalletResult; sr != nil {
+			keyResults <- sr
+		}
+	})
+	go receive(ctx, cc, c)
+
+	cc.WalletPay(&node.WalletPayArgs{
+		From:   from,
+		To:     to,
+		Amount: amount,
+	})
+
+	select {
+	case kr := <-keyResults:
+		if kr.Err != "" {
+			return errors.New(kr.Err)
+		}
+
+		fmt.Printf("Successfully paid %s from %s to %s\n", amount, from, to)
+		return nil
+
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
