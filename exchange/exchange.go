@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
@@ -68,21 +67,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
 	if err != nil {
 		return nil, err
-	}
-
-	if opts.PrivKey != "" {
-		fmt.Println("==> Importing private keys...")
-		_, err = exch.Wallet().ImportKey(ctx, opts.PrivKey)
-		if err != nil {
-			return nil, err
-		}
-
-	} else if opts.Wallet.DefaultAddress() == address.Undef {
-		fmt.Println("==> Generating new FIL address...")
-		_, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	exch.rtv, err = retrieval.New(

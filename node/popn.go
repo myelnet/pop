@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -219,6 +220,23 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		wallet.WithFilAPI(eopts.FilecoinAPI),
 		wallet.WithBLSSig(bls{}),
 	)
+
+	if opts.PrivKey != "" {
+		fmt.Println("==> Importing private keys...")
+
+		err = nd.importPrivateKey(ctx, opts.PrivKey)
+		if err != nil {
+			return nil, err
+		}
+
+	} else if eopts.Wallet.DefaultAddress() == address.Undef {
+		fmt.Println("==> Generating new FIL address...")
+
+		_, err = eopts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {
@@ -495,9 +513,9 @@ func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
 		})
 	}
 
-	err := nd.exch.Wallet().ExportKey(ctx, args.Address, args.OutputPath)
+	err := nd.exportPrivateKey(ctx, args.Address, args.OutputPath)
 	if err != nil {
-		sendErr(err)
+		sendErr(fmt.Errorf("cannot export private key: %v", err))
 		return
 	}
 
@@ -1101,4 +1119,63 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
+}
+
+// importPrivateKey from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (nd *node) importPrivateKey(ctx context.Context, pk string) error {
+	var iki wallet.KeyInfo
+
+	data, err := hex.DecodeString(pk)
+	if err != nil {
+		return fmt.Errorf("failed to decode key: %v", err)
+	}
+
+	err = iki.FromBytes(data)
+	if err != nil {
+		return fmt.Errorf("failed to decode keyInfo: %v", err)
+	}
+
+	addr, err := nd.exch.Wallet().ImportKey(ctx, &iki)
+	if err != nil {
+		return fmt.Errorf("failed to import key: %v", err)
+	}
+
+	err = nd.exch.Wallet().SetDefaultAddress(addr)
+	if err != nil {
+		return fmt.Errorf("failed to set default address: %v", err)
+	}
+
+	return nil
+}
+
+// importPrivateKey from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (nd *node) exportPrivateKey(ctx context.Context, addr, outputPath string) error {
+	adr, err := address.NewFromString(addr)
+	if err != nil {
+		return fmt.Errorf("failed to decode address: %v", err)
+	}
+
+	key, err := nd.exch.Wallet().ExportKey(ctx, adr)
+	if err != nil {
+		return fmt.Errorf("address %s does not exist", addr)
+	}
+
+	data, err := key.ToBytes()
+	if err != nil {
+		return fmt.Errorf("failed to convert address to bytes: %v", err)
+	}
+
+	encodedPk := make([]byte, hex.EncodedLen(len(data)))
+	hex.Encode(encodedPk, data)
+
+	err = os.WriteFile(outputPath, encodedPk, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to export KeyInfo to %s: %v", addr, err)
+	}
+
+	return nil
 }
