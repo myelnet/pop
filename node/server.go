@@ -19,10 +19,12 @@ import (
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	ipath "github.com/ipfs/go-path"
+	"github.com/jpillora/backoff"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
+	"runtime/debug"
 )
 
 // server listens for connection and controls the node to execute requests
@@ -328,18 +330,35 @@ func Run(ctx context.Context, opts Options) error {
 
 	nd.notify = server.cs.send
 
-	for i := 1; ctx.Err() == nil; i++ {
-		c, err := listen.Accept()
+	b := backoff.Backoff{
+		Min: time.Second,
+		Max: time.Second * 5,
+	}
 
+	for ctx.Err() == nil {
+		c, err := listen.Accept()
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Error().Err(err).Msg("listen.Accept")
+
 				// backOff
+				delay := b.Duration()
+				time.Sleep(delay)
 			}
 			continue
 		}
 
-		go server.serveConn(ctx, c)
+		// reset backoff
+		b.Reset()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Msgf("recovered from panic : [%v] - stack trace : \n [%s]", r, debug.Stack())
+				}
+			}()
+
+			server.serveConn(ctx, c)
+		}()
 	}
 
 	return ctx.Err()
