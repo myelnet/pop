@@ -14,28 +14,33 @@ import (
 var listKeys = &ffcli.Command{
 	Name:       "list",
 	ShortUsage: "wallet list",
-	ShortHelp:  "",
+	ShortHelp:  "List all the addresses you have",
 	Exec:       runListKeys,
 }
 
 var export = &ffcli.Command{
 	Name:       "export",
-	ShortUsage: "wallet export",
-	ShortHelp:  "",
+	ShortUsage: "wallet export <address> </your/path>",
+	ShortHelp:  "Export your private key",
 	Exec:       runExport,
 }
 
 var pay = &ffcli.Command{
 	Name:       "pay",
-	ShortUsage: "wallet pay",
-	ShortHelp:  "",
+	ShortUsage: "wallet pay <from> <to> <amount>",
+	ShortHelp:  "Make a transaction in FIL",
 	Exec:       runPay,
 }
 
 var walletCmd = &ffcli.Command{
 	Name:      "wallet",
-	ShortHelp: "Manage your keys",
-	LongHelp:  strings.TrimSpace(` Manage your keys`),
+	ShortHelp: "Manage your wallet",
+	LongHelp: strings.TrimSpace(`
+
+The 'pop wallet' command is a multipurpose wallet command used for managing your private key & FIL address.
+You can list or export your addresses, as well as paying to a FIL address.
+
+`),
 	Exec: func(context.Context, []string) error {
 		return flag.ErrHelp
 	},
