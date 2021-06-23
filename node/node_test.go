@@ -642,7 +642,7 @@ func TestImportKey(t *testing.T) {
 	n := newTestNode(ctx, mn, t)
 
 	h := "7b2254797065223a22626c73222c22507269766174654b6579223a226a6b55704e6a53493749664a4632434f6f505169344f79477a475241532b766b616c314e5a616f7a3853633d227d"
-	n.importAddress(ctx, h)
+	n.exch.ImportAddress(ctx, h)
 
 	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
 	require.Equal(t, expected, n.exch.Wallet().DefaultAddress())

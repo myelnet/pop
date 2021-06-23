@@ -2,9 +2,12 @@ package exchange
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math"
+	"os"
 
+	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
@@ -20,6 +23,7 @@ import (
 	"github.com/myelnet/pop/selectors"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
+	"github.com/rs/zerolog/log"
 )
 
 // Exchange is a financially incentivized IPLD  block exchange
@@ -67,6 +71,18 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
 	if err != nil {
 		return nil, err
+	}
+
+	if opts.PrivKey != "" {
+		fmt.Println("==> Importing private keys...")
+		exch.ImportAddress(ctx, opts.PrivKey)
+
+	} else if opts.Wallet.DefaultAddress() == address.Undef {
+		fmt.Println("==> Generating new FIL address...")
+		_, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	exch.rtv, err = retrieval.New(
@@ -226,4 +242,76 @@ func (e *Exchange) R() *Replication {
 // Index returns the exchange data index
 func (e *Exchange) Index() *Index {
 	return e.idx
+}
+
+// ImportAddress from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (e *Exchange) ImportAddress(ctx context.Context, pk string) {
+	var iki wallet.KeyInfo
+	data, err := hex.DecodeString(pk)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to decode private key")
+	}
+
+	err = iki.FromBytes(data)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to load KeyInfo")
+	}
+
+	addr, err := e.Wallet().ImportKey(ctx, &iki)
+	if err != nil {
+		log.Error().Err(err).Msg("Wallet.ImportKey")
+	} else {
+		err := e.Wallet().SetDefaultAddress(addr)
+		if err != nil {
+			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
+		}
+	}
+}
+
+// ExportAddress from a hex encoded private key to use as default on the exchange instead of
+// the auto generated one. This is mostly for development and will be reworked into a nicer command
+// eventually
+func (e *Exchange) ExportAddress(ctx context.Context, addr, path string) error {
+	adr, err := address.NewFromString(addr)
+	if err != nil {
+		return fmt.Errorf("failed to decode address: %v", err)
+	}
+
+	iki, err := e.Wallet().ExportKey(ctx, adr)
+	if err != nil {
+		return fmt.Errorf("failed to export key: %v", err)
+	}
+
+	data, err := iki.ToBytes()
+	if err != nil {
+		return fmt.Errorf("failed to convert address to bytes: %v", err)
+	}
+
+	encodedPk := make([]byte, hex.EncodedLen(len(data)))
+	hex.Encode(encodedPk, data)
+
+	err = os.WriteFile(path, encodedPk, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to export KeyInfo to %s: %v", path, err)
+	}
+
+	return nil
+}
+
+// ListAddresses returns a slice with all the addresses set
+func (e *Exchange) ListAddresses() ([]string, error) {
+	addresses, err := e.Wallet().List()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses: %v", err)
+	}
+
+	var stringAddresses = make([]string, len(addresses))
+
+	for i, addr := range addresses {
+		stringAddresses[i] = addr.String()
+	}
+
+	return stringAddresses, nil
 }

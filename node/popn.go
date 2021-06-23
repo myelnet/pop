@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -205,6 +204,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Regions:      regions,
 		Capacity:     opts.Capacity,
 		ReplInterval: opts.ReplInterval,
+		PrivKey:      opts.PrivKey,
 	}
 
 	if eopts.FilecoinRPCEndpoint != "" {
@@ -225,28 +225,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	// Import Fil address
-	if opts.PrivKey != "" {
-		nd.importAddress(ctx, opts.PrivKey)
-		defaultAddress := nd.exch.Wallet().DefaultAddress()
-		fmt.Println("==> Imported private keys for FIL address: ", defaultAddress)
-
-	} else {
-		if nd.exch.Wallet().DefaultAddress() == address.Undef {
-			// Generate new FIL address
-			var addr address.Address
-			addr, err = nd.exch.Wallet().NewKey(ctx, wallet.KTSecp256k1)
-			if err != nil {
-				return nil, err
-			}
-			fmt.Println("==> Generated new FIL address: ", addr)
-
-		} else {
-			// Load new FIL address
-			defaultAddress := nd.exch.Wallet().DefaultAddress()
-			fmt.Println("==> Loaded FIL address: ", defaultAddress)
-		}
-	}
+	defaultAddress := nd.exch.Wallet().DefaultAddress()
+	fmt.Println("==> Default FIL address loaded: ", defaultAddress)
 
 	nd.rs, err = storage.New(
 		nd.host,
@@ -489,7 +469,7 @@ func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
 		})
 	}
 
-	addresses, err := nd.listAddresses()
+	addresses, err := nd.exch.ListAddresses()
 	if err != nil {
 		sendErr(err)
 		return
@@ -510,7 +490,7 @@ func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
 		})
 	}
 
-	err := nd.exportAddress(ctx, args.Address, args.OutputPath)
+	err := nd.exch.ExportAddress(ctx, args.Address, args.OutputPath)
 	if err != nil {
 		sendErr(err)
 		return
@@ -1116,75 +1096,4 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
-}
-
-// importAddress from a hex encoded private key to use as default on the exchange instead of
-// the auto generated one. This is mostly for development and will be reworked into a nicer command
-// eventually
-func (nd *node) importAddress(ctx context.Context, pk string) {
-	var iki wallet.KeyInfo
-	data, err := hex.DecodeString(pk)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to decode private key")
-	}
-
-	err = iki.FromBytes(data)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to load KeyInfo")
-	}
-
-	addr, err := nd.exch.Wallet().ImportKey(ctx, &iki)
-	if err != nil {
-		log.Error().Err(err).Msg("Wallet.ImportKey")
-	} else {
-		err := nd.exch.Wallet().SetDefaultAddress(addr)
-		if err != nil {
-			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
-		}
-	}
-}
-
-// importAddress from a hex encoded private key to use as default on the exchange instead of
-// the auto generated one. This is mostly for development and will be reworked into a nicer command
-// eventually
-func (nd *node) exportAddress(ctx context.Context, addr, path string) error {
-	adr, err := address.NewFromString(addr)
-	if err != nil {
-		return fmt.Errorf("failed to decode address: %v", err)
-	}
-
-	iki, err := nd.exch.Wallet().ExportKey(ctx, adr)
-	if err != nil {
-		return fmt.Errorf("failed to export key: %v", err)
-	}
-
-	data, err := iki.ToBytes()
-	if err != nil {
-		return fmt.Errorf("failed to convert address to bytes: %v", err)
-	}
-
-	encodedPk := make([]byte, hex.EncodedLen(len(data)))
-	hex.Encode(encodedPk, data)
-
-	err = os.WriteFile(path, encodedPk, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to export KeyInfo to %s: %v", path, err)
-	}
-
-	return nil
-}
-
-func (nd *node) listAddresses() ([]string, error) {
-	addresses, err := nd.exch.Wallet().List()
-	if err != nil {
-		return nil, fmt.Errorf("failed to export key: %v", err)
-	}
-
-	var stringAddresses = make([]string, len(addresses))
-
-	for i, addr := range addresses {
-		stringAddresses[i] = addr.String()
-	}
-
-	return stringAddresses, nil
 }
