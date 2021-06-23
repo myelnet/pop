@@ -30,16 +30,16 @@ type StatusArgs struct {
 	Verbose bool
 }
 
-// WalletListArgs get passed to the Status command
+// WalletListArgs get passed to the WalletList command
 type WalletListArgs struct{}
 
-// WalletExportArgs get passed to the Status command
+// WalletExportArgs get passed to the WalletExport command
 type WalletExportArgs struct {
 	Address    string
 	OutputPath string
 }
 
-// WalletPayArgs get passed to the Status command
+// WalletPayArgs get passed to the WalletPay command
 type WalletPayArgs struct {
 	From   string
 	To     string
@@ -129,7 +129,7 @@ type StatusResult struct {
 	Err     string
 }
 
-// WalletResult
+// WalletResult returns the output of every WalletList/WalletExport/WalletPay requests
 type WalletResult struct {
 	Err       string
 	Addresses []string

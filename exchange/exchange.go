@@ -270,9 +270,8 @@ func (e *Exchange) ImportAddress(ctx context.Context, pk string) {
 	}
 }
 
-// ExportAddress from a hex encoded private key to use as default on the exchange instead of
-// the auto generated one. This is mostly for development and will be reworked into a nicer command
-// eventually
+// ExportAddress exports a private key, given an address, to a hex encoded slice of bytes
+// and writes it into a file at the given path
 func (e *Exchange) ExportAddress(ctx context.Context, addr, path string) error {
 	adr, err := address.NewFromString(addr)
 	if err != nil {

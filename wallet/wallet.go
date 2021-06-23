@@ -371,7 +371,7 @@ func (w *KeystoreWallet) ImportKey(_ context.Context, k *KeyInfo) (address.Addre
 	return key.Address, nil
 }
 
-// ExportKey in the wallet from a private key and key type
+// ExportKey to a private key and key type from an address in the wallet
 func (w *KeystoreWallet) ExportKey(_ context.Context, addr address.Address) (*KeyInfo, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
