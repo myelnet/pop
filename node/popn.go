@@ -869,7 +869,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 	case "SelectCheapest":
 		strategy = exchange.SelectCheapest(5, 4*time.Second)
 	case "SelectFirstLowerThan":
-		strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(5))
+		strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
 	default:
 		return errors.New("unknown strategy")
 	}

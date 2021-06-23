@@ -79,6 +79,7 @@ type GetArgs struct {
 	Verbose  bool   `json:"verbose,omitempty"`
 	Miner    string `json:"miner,omitempty"`
 	Strategy string `json:"strategy,omitempty"`
+	MaxPPB   int64  `json:"maxPPB,omitempty"`
 }
 
 // ListArgs provides params for the List command

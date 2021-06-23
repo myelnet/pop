@@ -446,10 +446,10 @@ func TestGet(t *testing.T) {
 	})
 	<-committed
 
-	got := make(chan *GetResult, 2)
+	got := make(chan GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got <- n.GetResult
+		got <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
@@ -463,10 +463,10 @@ func TestGet(t *testing.T) {
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// We should be able to request again this time from local storage
-	got = make(chan *GetResult, 1)
+	got = make(chan GetResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got <- n.GetResult
+		got <- *n.GetResult
 	}
 	out := filepath.Join(dir, "dataout")
 	cn.Get(ctx, &GetArgs{
@@ -585,10 +585,10 @@ func TestMultipleGet(t *testing.T) {
 	<-committed
 
 	// check cn received data1
-	got1 := make(chan *GetResult, 2)
+	got1 := make(chan GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got1 <- n.GetResult
+		got1 <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
@@ -602,10 +602,10 @@ func TestMultipleGet(t *testing.T) {
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// check cn received data2
-	got2 := make(chan *GetResult, 2)
+	got2 := make(chan GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got2 <- n.GetResult
+		got2 <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
@@ -618,10 +618,10 @@ func TestMultipleGet(t *testing.T) {
 	res = <-got2
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	got3 := make(chan *GetResult, 2)
+	got3 := make(chan GetResult, 2)
 	cn2.notify = func(n Notify) {
 		require.Equal(t, "", n.GetResult.Err)
-		got3 <- n.GetResult
+		got3 <- *n.GetResult
 	}
 	cn2.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
