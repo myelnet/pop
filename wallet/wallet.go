@@ -3,8 +3,10 @@ package wallet
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -178,8 +180,8 @@ type Driver interface {
 	DefaultAddress() address.Address
 	SetDefaultAddress(address.Address) error
 	List() ([]address.Address, error)
-	ImportKey(context.Context, *KeyInfo) (address.Address, error)
-	ExportKey(context.Context, address.Address) (*KeyInfo, error)
+	ImportKey(context.Context, string) (address.Address, error)
+	ExportKey(context.Context, string, string) error
 	Sign(context.Context, address.Address, []byte) (*crypto.Signature, error)
 	Verify(context.Context, address.Address, []byte, *crypto.Signature) (bool, error)
 	Balance(context.Context, address.Address) (fil.BigInt, error)
@@ -306,6 +308,10 @@ func (w *KeystoreWallet) SetDefaultAddress(addr address.Address) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	return w.setDefaultAddress(addr)
+}
+
+func (w *KeystoreWallet) setDefaultAddress(addr address.Address) error {
 	k, err := w.keystore.Get(KNamePrefix + addr.String())
 	if err != nil {
 		return err
@@ -351,37 +357,75 @@ func (w *KeystoreWallet) List() ([]address.Address, error) {
 }
 
 // ImportKey in the wallet from a private key and key type
-func (w *KeystoreWallet) ImportKey(_ context.Context, k *KeyInfo) (address.Address, error) {
+func (w *KeystoreWallet) ImportKey(_ context.Context, pk string) (address.Address, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	var k KeyInfo
+	data, err := hex.DecodeString(pk)
+	if err != nil {
+		return address.Address{}, err
+	}
+
+	err = k.FromBytes(data)
+	if err != nil {
+		return address.Address{}, err
+	}
 
 	sig, err := KeyTypeSig(k.KType, w.sigs)
 	if err != nil {
 		return address.Undef, err
 	}
+
 	k.sig = sig
-	key, err := NewKeyFromKeyInfo(*k)
+	key, err := NewKeyFromKeyInfo(k)
 	if err != nil {
 		return address.Undef, err
 	}
+
 	if err := w.keystore.Put(KNamePrefix+key.Address.String(), key); err != nil {
 		return address.Undef, err
 	}
+
 	w.keys[key.Address] = key
+
+	err = w.setDefaultAddress(key.Address)
+	if err != nil {
+		return address.Undef, err
+	}
+
 	return key.Address, nil
 }
 
 // ExportKey to a private key and key type from an address in the wallet
-func (w *KeystoreWallet) ExportKey(_ context.Context, addr address.Address) (*KeyInfo, error) {
+func (w *KeystoreWallet) ExportKey(_ context.Context, addr, path string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	key, exists := w.keys[addr]
-	if !exists {
-		return nil, fmt.Errorf("address %s does not exist", addr.String())
+	adr, err := address.NewFromString(addr)
+	if err != nil {
+		return fmt.Errorf("failed to decode address: %v", err)
 	}
 
-	return &key.KeyInfo, nil
+	key, exists := w.keys[adr]
+	if !exists {
+		return fmt.Errorf("address %s does not exist", addr)
+	}
+
+	data, err := key.ToBytes()
+	if err != nil {
+		return fmt.Errorf("failed to convert address to bytes: %v", err)
+	}
+
+	encodedPk := make([]byte, hex.EncodedLen(len(data)))
+	hex.Encode(encodedPk, data)
+
+	err = os.WriteFile(path, encodedPk, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to export KeyInfo to %s: %v", path, err)
+	}
+
+	return nil
 }
 
 // Sign a message with the key associated with the given address. Generates a valid Filecoin signature

@@ -226,7 +226,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	defaultAddress := nd.exch.Wallet().DefaultAddress()
-	fmt.Println("==> Default FIL address loaded: ", defaultAddress)
+	fmt.Println("==> Loaded default FIL address: ", defaultAddress)
 
 	nd.rs, err = storage.New(
 		nd.host,
@@ -469,14 +469,19 @@ func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
 		})
 	}
 
-	addresses, err := nd.exch.ListAddresses()
+	addresses, err := nd.exch.Wallet().List()
 	if err != nil {
-		sendErr(err)
-		return
+		sendErr(fmt.Errorf("failed to list addresses: %v", err))
+	}
+
+	var stringAddresses = make([]string, len(addresses))
+
+	for i, addr := range addresses {
+		stringAddresses[i] = addr.String()
 	}
 
 	nd.send(Notify{
-		WalletResult: &WalletResult{Addresses: addresses},
+		WalletResult: &WalletResult{Addresses: stringAddresses},
 	})
 }
 
@@ -490,7 +495,7 @@ func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
 		})
 	}
 
-	err := nd.exch.ExportAddress(ctx, args.Address, args.OutputPath)
+	err := nd.exch.Wallet().ExportKey(ctx, args.Address, args.OutputPath)
 	if err != nil {
 		sendErr(err)
 		return
