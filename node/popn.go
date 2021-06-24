@@ -220,21 +220,13 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		wallet.WithBLSSig(bls{}),
 	)
 
-	if opts.PrivKey != "" {
-		fmt.Println("==> Importing private keys...")
-
-		err = nd.importPrivateKey(ctx, opts.PrivKey)
+	var addr address.Address
+	if eopts.Wallet.DefaultAddress() == address.Undef && opts.PrivKey == "" {
+		addr, err = eopts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
 		if err != nil {
 			return nil, err
 		}
-
-	} else if eopts.Wallet.DefaultAddress() == address.Undef {
-		fmt.Println("==> Generating new FIL address...")
-
-		_, err = utils.NewKey(ctx, eopts.Wallet)
-		if err != nil {
-			return nil, err
-		}
+		fmt.Printf("==> Generated new FIL address: %s\n", addr)
 	}
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
@@ -242,8 +234,16 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	defaultAddress := nd.exch.Wallet().DefaultAddress()
-	fmt.Println("==> Loaded default FIL address: ", defaultAddress)
+	if opts.PrivKey != "" {
+		err = nd.importPrivateKey(ctx, opts.PrivKey)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("==> Imported private keys: %s\n", nd.exch.Wallet().DefaultAddress())
+
+	} else if addr.Empty() {
+		fmt.Printf("==> Loaded default FIL address: %s\n", nd.exch.Wallet().DefaultAddress())
+	}
 
 	nd.rs, err = storage.New(
 		nd.host,
@@ -489,6 +489,7 @@ func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
 	addresses, err := nd.exch.Wallet().List()
 	if err != nil {
 		sendErr(fmt.Errorf("failed to list addresses: %v", err))
+		return
 	}
 
 	var stringAddresses = make([]string, len(addresses))
@@ -1149,9 +1150,7 @@ func (nd *node) importPrivateKey(ctx context.Context, pk string) error {
 	return nil
 }
 
-// importPrivateKey from a hex encoded private key to use as default on the exchange instead of
-// the auto generated one. This is mostly for development and will be reworked into a nicer command
-// eventually
+// exportPrivateKey exports the private key of a given address to an output file
 func (nd *node) exportPrivateKey(ctx context.Context, addr, outputPath string) error {
 	adr, err := address.NewFromString(addr)
 	if err != nil {

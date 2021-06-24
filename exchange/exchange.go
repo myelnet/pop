@@ -71,7 +71,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	}
 
 	if opts.Wallet.DefaultAddress() == address.Undef {
-		_, err = utils.NewKey(ctx, opts.Wallet)
+		_, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
 		if err != nil {
 			return nil, err
 		}

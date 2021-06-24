@@ -88,17 +88,17 @@ type ListArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
-	Ping             *PingArgs
-	Put              *PutArgs
-	Status           *StatusArgs
-	WalletListArgs   *WalletListArgs
-	WalletExportArgs *WalletExportArgs
-	WalletPayArgs    *WalletPayArgs
-	Quote            *QuoteArgs
-	Commit           *CommArgs
-	Store            *StoreArgs
-	Get              *GetArgs
-	List             *ListArgs
+	Ping         *PingArgs
+	Put          *PutArgs
+	Status       *StatusArgs
+	WalletList   *WalletListArgs
+	WalletExport *WalletExportArgs
+	WalletPay    *WalletPayArgs
+	Quote        *QuoteArgs
+	Commit       *CommArgs
+	Store        *StoreArgs
+	Get          *GetArgs
+	List         *ListArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -233,15 +233,15 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.Status(ctx, c)
 		return nil
 	}
-	if c := cmd.WalletListArgs; c != nil {
+	if c := cmd.WalletList; c != nil {
 		cs.n.WalletList(ctx, c)
 		return nil
 	}
-	if c := cmd.WalletExportArgs; c != nil {
+	if c := cmd.WalletExport; c != nil {
 		cs.n.WalletExport(ctx, c)
 		return nil
 	}
-	if c := cmd.WalletPayArgs; c != nil {
+	if c := cmd.WalletPay; c != nil {
 		cs.n.WalletPay(ctx, c)
 		return nil
 	}
@@ -335,15 +335,15 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 }
 
 func (cc *CommandClient) WalletListKeys(args *WalletListArgs) {
-	cc.send(Command{WalletListArgs: args})
+	cc.send(Command{WalletList: args})
 }
 
 func (cc *CommandClient) WalletExport(args *WalletExportArgs) {
-	cc.send(Command{WalletExportArgs: args})
+	cc.send(Command{WalletExport: args})
 }
 
 func (cc *CommandClient) WalletPay(args *WalletPayArgs) {
-	cc.send(Command{WalletPayArgs: args})
+	cc.send(Command{WalletPay: args})
 }
 
 func (cc *CommandClient) Quote(args *QuoteArgs) {
