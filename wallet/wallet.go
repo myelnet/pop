@@ -19,10 +19,6 @@ import (
 	fil "github.com/myelnet/pop/filecoin"
 )
 
-func init() {
-	address.CurrentNetwork = address.Mainnet
-}
-
 var ErrNoAPI = fmt.Errorf("no filecoin api connected")
 
 const (
