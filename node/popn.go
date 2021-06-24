@@ -856,6 +856,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 		}
 	}
 	if local {
+		log.Info().Msg("content is available locally")
 		results <- GetResult{
 			Local: true,
 		}
@@ -884,6 +885,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 	} else {
 		sl = sel.All()
 	}
+
+	log.Info().Msg("starting query")
+
 	if err := tx.Query(sl); err != nil {
 		return err
 	}
@@ -905,6 +909,8 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 		}
 	}
 
+	log.Info().Msg("waiting for triage")
+
 	// Triage waits until we select the first offer it might not mean the first
 	// offer that we receive depending on the strategy used
 	selection, err := tx.Triage()
@@ -914,6 +920,16 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 	now := time.Now()
 	discDuration := now.Sub(start)
 	resp := selection.Offer.Response
+
+	log.Info().Msg("selected an offer")
+
+	results <- GetResult{
+		Size:         int64(resp.Size),
+		Status:       "StatusSelectedOffer",
+		UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
+		TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
+		PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
+	}
 
 	// TODO: accept all by default but we should be able to pass flag to provide
 	// confirmation before retrieving
@@ -926,20 +942,18 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 		return ctx.Err()
 	}
 
+	log.Info().Msg("started transfer")
+
 	results <- GetResult{
-		DealID:       dref.ID.String(),
-		TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
-		PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
-		UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-		PieceSize:    filecoin.SizeStr(filecoin.NewInt(resp.Size)),
+		DealID: dref.ID.String(),
 	}
 
 	select {
 	case res := <-tx.Done():
+		log.Info().Msg("finished transfer")
 		if res.Err != nil {
 			return res.Err
 		}
-		tx.Close()
 		end := time.Now()
 		transDuration := end.Sub(start) - discDuration
 		if args.Out != "" {
@@ -1002,7 +1016,17 @@ func (nd *node) Retrieve(ctx context.Context, args *GetArgs) (chan GetResult, er
 			return
 		}
 
-		args.Key = segs[0]
+		if len(segs) > 0 {
+			args.Key = segs[0]
+		}
+
+		if args.Strategy == "" {
+			args.Strategy = "SelectFirst"
+		}
+
+		if args.Strategy == "" && args.MaxPPB > 0 {
+			args.Strategy = "SelectFirstLowerThan"
+		}
 
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
@@ -1010,7 +1034,7 @@ func (nd *node) Retrieve(ctx context.Context, args *GetArgs) (chan GetResult, er
 					results <- GetResult{
 						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
 						Status:        deal.Statuses[state.Status],
-						TotalReceived: filecoin.SizeStr(filecoin.NewInt(state.BytesPaidFor)),
+						TotalReceived: int64(state.TotalReceived),
 					}
 				}
 			},

@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
-	miner3 "github.com/filecoin-project/specs-actors/v3/actors/builtin"
-	market3 "github.com/filecoin-project/specs-actors/v3/actors/builtin/market"
+	miner3 "github.com/filecoin-project/specs-actors/v4/actors/builtin"
+	market3 "github.com/filecoin-project/specs-actors/v4/actors/builtin/market"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-fil-markets/shared"

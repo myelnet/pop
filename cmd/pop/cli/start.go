@@ -157,6 +157,8 @@ Manage your Myel point of presence from the command line.
 			mapDuplicates[addr] = struct{}{}
 			bAddrs = append(bAddrs, addr)
 		}
+
+		bAddrs = append(bAddrs, "/ip4/3.129.144.139/tcp/41505/p2p/12D3KooWLJp52qe5Fa2ND3nsWocdnRhi7ERo2SzkApE1q8jUg2Xy")
 	}
 
 	var capacity uint64

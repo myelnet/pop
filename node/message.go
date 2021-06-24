@@ -165,8 +165,9 @@ type StoreResult struct {
 type GetResult struct {
 	Status          string  `json:"status,omitempty"`
 	DealID          string  `json:"dealID,omitempty"`
+	Size            int64   `json:"size,omitempty"`
 	TotalSpent      string  `json:"totalSpent,omitempty"`
-	TotalReceived   string  `json:"totalReceived,omitempty"`
+	TotalReceived   int64   `json:"totalReceived,omitempty"`
 	BytesPaidFor    string  `json:"bytesPaidFor,omitempty"`
 	TotalPrice      string  `json:"totalPrice,omitempty"`
 	PieceSize       string  `json:"pieceSize,omitempty"`
