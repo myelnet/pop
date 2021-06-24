@@ -35,6 +35,10 @@ const (
 	KTBLS       KeyType = "bls"
 )
 
+func init() {
+	address.CurrentNetwork = address.Mainnet
+}
+
 // KeyInfo stores info about a private key
 type KeyInfo struct {
 	KType      KeyType `json:"Type"` // Had to name it KType as Type() is used already
