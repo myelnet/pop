@@ -150,6 +150,8 @@ func (s *server) addUserHeaders(w http.ResponseWriter) {
 	w.Header()["Access-Control-Expose-Headers"] = []string{"IPFS-Hash"}
 }
 
+// HTTP get does not retrieve content but only serves content already cached locally
+// to make sure content is loaded use JSON RPC method Load available via websocket
 func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 
@@ -165,27 +167,16 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if len(segs) > 0 {
 		key = segs[0]
 	}
-	// We can ignore results in the get request
-	results := make(chan GetResult)
-	go func() {
-		for range results {
-		}
-	}()
-	// try to retrieve the blocks
-	err = s.node.get(r.Context(), root, &GetArgs{Key: key, Strategy: "SelectFirst"}, results)
-	close(results)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to get blocks")
-		// TODO: give better feedback into what went wrong
-		http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
-		return
-	}
-
-	log.Debug().Msg("retrieved blocks")
 
 	s.addUserHeaders(w)
 
 	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
+
+	has := tx.IsLocal(key)
+	if !has {
+		http.Error(w, "content not cached on this node", http.StatusNotFound)
+		return
+	}
 
 	if key == "" {
 		// If there is no key we return all the entries as a JSON file detailing information

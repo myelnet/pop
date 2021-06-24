@@ -1003,9 +1003,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 	}
 }
 
-// Retrieve is an RPC method that retrieves a given CID and key to the local blockstore.
+// Load is an RPC method that retrieves a given CID and key to the local blockstore.
 // It sends feedback events to a result channel that it returns.
-func (nd *node) Retrieve(ctx context.Context, args *GetArgs) (chan GetResult, error) {
+func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error) {
 	results := make(chan GetResult)
 
 	go func() {
