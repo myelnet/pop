@@ -205,7 +205,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Regions:      regions,
 		Capacity:     opts.Capacity,
 		ReplInterval: opts.ReplInterval,
-		PrivKey:      opts.PrivKey,
 	}
 
 	if eopts.FilecoinRPCEndpoint != "" {
@@ -232,7 +231,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	} else if eopts.Wallet.DefaultAddress() == address.Undef {
 		fmt.Println("==> Generating new FIL address...")
 
-		_, err = eopts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
+		_, err = utils.NewKey(ctx, eopts.Wallet)
 		if err != nil {
 			return nil, err
 		}

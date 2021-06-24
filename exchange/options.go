@@ -66,8 +66,6 @@ type Options struct {
 	// least frequently used content is evicted to make more room for new content.
 	// Default is 10GB.
 	Capacity uint64
-	// PrivKey is the path of the private key the user wants to import
-	PrivKey string
 	// ReplInterval is the replication interval after which a worker will try to retrieve fresh new content
 	// on the network
 	ReplInterval time.Duration
