@@ -30,6 +30,22 @@ type StatusArgs struct {
 	Verbose bool
 }
 
+// WalletListArgs get passed to the WalletList command
+type WalletListArgs struct{}
+
+// WalletExportArgs get passed to the WalletExport command
+type WalletExportArgs struct {
+	Address    string
+	OutputPath string
+}
+
+// WalletPayArgs get passed to the WalletPay command
+type WalletPayArgs struct {
+	From   string
+	To     string
+	Amount string
+}
+
 // QuoteArgs are passed to the quote command
 type QuoteArgs struct {
 	Refs      []string
@@ -72,14 +88,17 @@ type ListArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
-	Ping   *PingArgs
-	Put    *PutArgs
-	Status *StatusArgs
-	Quote  *QuoteArgs
-	Commit *CommArgs
-	Store  *StoreArgs
-	Get    *GetArgs
-	List   *ListArgs
+	Ping         *PingArgs
+	Put          *PutArgs
+	Status       *StatusArgs
+	WalletList   *WalletListArgs
+	WalletExport *WalletExportArgs
+	WalletPay    *WalletPayArgs
+	Quote        *QuoteArgs
+	Commit       *CommArgs
+	Store        *StoreArgs
+	Get          *GetArgs
+	List         *ListArgs
 }
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -103,11 +122,17 @@ type PutResult struct {
 	Err       string
 }
 
-// StatusResult gives us the result of status request to pring
+// StatusResult gives us the result of status request to ping
 type StatusResult struct {
 	RootCid string
 	Entries string
 	Err     string
+}
+
+// WalletResult returns the output of every WalletList/WalletExport/WalletPay requests
+type WalletResult struct {
+	Err       string
+	Addresses []string
 }
 
 // QuoteResult returns the output of the Quote request
@@ -163,6 +188,7 @@ type Notify struct {
 	PingResult   *PingResult
 	PutResult    *PutResult
 	StatusResult *StatusResult
+	WalletResult *WalletResult
 	QuoteResult  *QuoteResult
 	CommResult   *CommResult
 	StoreResult  *StoreResult
@@ -205,6 +231,18 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.Status; c != nil {
 		cs.n.Status(ctx, c)
+		return nil
+	}
+	if c := cmd.WalletList; c != nil {
+		cs.n.WalletList(ctx, c)
+		return nil
+	}
+	if c := cmd.WalletExport; c != nil {
+		cs.n.WalletExport(ctx, c)
+		return nil
+	}
+	if c := cmd.WalletPay; c != nil {
+		cs.n.WalletPay(ctx, c)
 		return nil
 	}
 	if c := cmd.Quote; c != nil {
@@ -296,6 +334,18 @@ func (cc *CommandClient) Status(args *StatusArgs) {
 	cc.send(Command{Status: args})
 }
 
+func (cc *CommandClient) WalletListKeys(args *WalletListArgs) {
+	cc.send(Command{WalletList: args})
+}
+
+func (cc *CommandClient) WalletExport(args *WalletExportArgs) {
+	cc.send(Command{WalletExport: args})
+}
+
+func (cc *CommandClient) WalletPay(args *WalletPayArgs) {
+	cc.send(Command{WalletPay: args})
+}
+
 func (cc *CommandClient) Quote(args *QuoteArgs) {
 	cc.send(Command{Quote: args})
 }
@@ -345,7 +395,6 @@ func ReadMsg(r io.Reader) ([]byte, error) {
 }
 
 func WriteMsg(w io.Writer, b []byte) error {
-
 	cb := make([]byte, 4)
 	if len(b) > MaxMessageSize {
 		return fmt.Errorf("WriteMsg: message too large: %d bytes", len(b))

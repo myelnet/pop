@@ -70,13 +70,13 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		return nil, err
 	}
 
-	// Make a new default key to be sure we have an address where to receive our payments
 	if opts.Wallet.DefaultAddress() == address.Undef {
 		_, err = opts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	exch.rtv, err = retrieval.New(
 		ctx,
 		opts.MultiStore,

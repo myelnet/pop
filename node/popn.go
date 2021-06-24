@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -225,12 +224,29 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		wallet.WithBLSSig(bls{}),
 	)
 
+	var addr address.Address
+	if eopts.Wallet.DefaultAddress() == address.Undef && opts.PrivKey == "" {
+		addr, err = eopts.Wallet.NewKey(ctx, wallet.KTSecp256k1)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("==> Generated new FIL address: %s\n", addr)
+	}
+
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {
 		return nil, err
 	}
+
 	if opts.PrivKey != "" {
-		nd.importAddress(opts.PrivKey)
+		err = nd.importPrivateKey(ctx, opts.PrivKey)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("==> Imported private keys: %s\n", nd.exch.Wallet().DefaultAddress())
+
+	} else if addr.Empty() {
+		fmt.Printf("==> Loaded default FIL address: %s\n", nd.exch.Wallet().DefaultAddress())
 	}
 
 	nd.rs, err = storage.New(
@@ -464,30 +480,85 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	sendErr(ErrNoTx)
 }
 
-// getRef is an internal function to find a ref with a given string cid
-// it is used when quoting the commit storage price or pushing to storage providers
-func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
-	// Select the commit with the matching CID
-	// TODO: should prob error out if we don't find it
-	if cstr != "" {
-		ccid, err := cid.Parse(cstr)
-		if err != nil {
-			return nil, err
-		}
-		ref, err := nd.exch.Index().PeekRef(ccid)
-		if err != nil {
-			return nil, err
-		}
-		return ref, nil
+// WalletList
+func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			WalletResult: &WalletResult{
+				Err: err.Error(),
+			},
+		})
 	}
 
-	nd.txmu.Lock()
-	defer nd.txmu.Unlock()
-	if nd.tx != nil {
-		return nd.tx.Ref(), nil
+	addresses, err := nd.exch.Wallet().List()
+	if err != nil {
+		sendErr(fmt.Errorf("failed to list addresses: %v", err))
+		return
 	}
 
-	return nil, ErrNoTx
+	var stringAddresses = make([]string, len(addresses))
+
+	for i, addr := range addresses {
+		stringAddresses[i] = addr.String()
+	}
+
+	nd.send(Notify{
+		WalletResult: &WalletResult{Addresses: stringAddresses},
+	})
+}
+
+// WalletExport
+func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			WalletResult: &WalletResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	err := nd.exportPrivateKey(ctx, args.Address, args.OutputPath)
+	if err != nil {
+		sendErr(fmt.Errorf("cannot export private key: %v", err))
+		return
+	}
+
+	nd.send(Notify{
+		WalletResult: &WalletResult{},
+	})
+}
+
+// WalletPay
+func (nd *node) WalletPay(ctx context.Context, args *WalletPayArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			WalletResult: &WalletResult{
+				Err: err.Error(),
+			},
+		})
+	}
+
+	from, err := address.NewFromString(args.From)
+	if err != nil {
+		sendErr(fmt.Errorf("failed to decode address %s : %v", args.From, err))
+		return
+	}
+
+	to, err := address.NewFromString(args.To)
+	if err != nil {
+		sendErr(fmt.Errorf("failed to decode address %s : %v", args.To, err))
+		return
+	}
+
+	err = nd.exch.Wallet().Transfer(ctx, from, to, args.Amount)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	nd.send(Notify{
+		WalletResult: &WalletResult{},
+	})
 }
 
 // Quote returns an estimation of market price for storing a list of transactions on Filecoin
@@ -980,6 +1051,32 @@ func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.Reade
 	return n.Cid(), nil
 }
 
+// getRef is an internal function to find a ref with a given string cid
+// it is used when quoting the commit storage price or pushing to storage providers
+func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
+	// Select the commit with the matching CID
+	// TODO: should prob error out if we don't find it
+	if cstr != "" {
+		ccid, err := cid.Parse(cstr)
+		if err != nil {
+			return nil, err
+		}
+		ref, err := nd.exch.Index().PeekRef(ccid)
+		if err != nil {
+			return nil, err
+		}
+		return ref, nil
+	}
+
+	nd.txmu.Lock()
+	defer nd.txmu.Unlock()
+	if nd.tx != nil {
+		return nd.tx.Ref(), nil
+	}
+
+	return nil, ErrNoTx
+}
+
 // addRecursive adds entire file trees into a single transaction
 // it assumes the caller is holding the tx lock until it returns
 // it currently flattens the keys though we may want to maintain the full keys to keep the structure
@@ -1028,27 +1125,59 @@ func (nd *node) connPeers() []peer.ID {
 	return out
 }
 
-// importAddress from a hex encoded private key to use as default on the exchange instead of
+// importPrivateKey from a hex encoded private key to use as default on the exchange instead of
 // the auto generated one. This is mostly for development and will be reworked into a nicer command
 // eventually
-func (nd *node) importAddress(pk string) {
+func (nd *node) importPrivateKey(ctx context.Context, pk string) error {
 	var iki wallet.KeyInfo
+
 	data, err := hex.DecodeString(pk)
 	if err != nil {
-		log.Error().Err(err).Msg("hex.DecodeString(opts.PrivKey)")
-	}
-	if err := json.Unmarshal(data, &iki); err != nil {
-		log.Error().Err(err).Msg("json.Unmarshal(PrivKey)")
+		return fmt.Errorf("failed to decode key: %v", err)
 	}
 
-	addr, err := nd.exch.Wallet().ImportKey(context.TODO(), &iki)
+	err = iki.FromBytes(data)
 	if err != nil {
-		log.Error().Err(err).Msg("Wallet.ImportKey")
-	} else {
-		fmt.Printf("==> Imported private key for %s.\n", addr.String())
-		err := nd.exch.Wallet().SetDefaultAddress(addr)
-		if err != nil {
-			log.Error().Err(err).Msg("Wallet.SetDefaultAddress")
-		}
+		return fmt.Errorf("failed to decode keyInfo: %v", err)
 	}
+
+	addr, err := nd.exch.Wallet().ImportKey(ctx, &iki)
+	if err != nil {
+		return fmt.Errorf("failed to import key: %v", err)
+	}
+
+	err = nd.exch.Wallet().SetDefaultAddress(addr)
+	if err != nil {
+		return fmt.Errorf("failed to set default address: %v", err)
+	}
+
+	return nil
+}
+
+// exportPrivateKey exports the private key of a given address to an output file
+func (nd *node) exportPrivateKey(ctx context.Context, addr, outputPath string) error {
+	adr, err := address.NewFromString(addr)
+	if err != nil {
+		return fmt.Errorf("failed to decode address: %v", err)
+	}
+
+	key, err := nd.exch.Wallet().ExportKey(ctx, adr)
+	if err != nil {
+		return fmt.Errorf("address %s does not exist", addr)
+	}
+
+	data, err := key.ToBytes()
+	if err != nil {
+		return fmt.Errorf("failed to convert address to bytes: %v", err)
+	}
+
+	encodedPk := make([]byte, hex.EncodedLen(len(data)))
+	hex.Encode(encodedPk, data)
+
+	err = os.WriteFile(outputPath, encodedPk, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to export KeyInfo to %s: %v", addr, err)
+	}
+
+	return nil
 }

@@ -56,7 +56,7 @@ type Options struct {
 	// FilecoinRPCHeader provides any required header depending on the Lotus server policy.
 	FilecoinRPCHeader http.Header
 	// FilecoinAPI can be passed directly instead of providing an endpoint. This can be useful in case you are.
-	// in an enviornment which already may have the API instance.
+	// in an environment which already may have the API instance.
 	FilecoinAPI filecoin.API
 	// GossipTracer is provided if you are using an external PubSub instance.
 	GossipTracer *GossipTracer
@@ -66,7 +66,6 @@ type Options struct {
 	// least frequently used content is evicted to make more room for new content.
 	// Default is 10GB.
 	Capacity uint64
-
 	// ReplInterval is the replication interval after which a worker will try to retrieve fresh new content
 	// on the network
 	ReplInterval time.Duration
