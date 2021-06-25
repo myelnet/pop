@@ -823,16 +823,25 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		)
 		defer unsub()
 	}
+	results := make(chan GetResult)
+	go func() {
+		for res := range results {
+			nd.send(Notify{
+				GetResult: &res,
+			})
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
 	defer cancel()
-	err = nd.get(ctx, root, args)
+	err = nd.get(ctx, root, args, results)
 	if err != nil {
 		sendErr(err)
 	}
+	close(results)
 }
 
 // get is a synchronous content retrieval operation which can be called by a CLI request or HTTP
-func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
+func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<- GetResult) error {
 	// Check our supply if we may already have it
 	tx := nd.exch.Tx(ctx, exchange.WithRoot(c))
 	local := tx.IsLocal(args.Key)
@@ -847,10 +856,10 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		}
 	}
 	if local {
-		nd.send(Notify{
-			GetResult: &GetResult{
-				Local: true,
-			}})
+		log.Info().Msg("content is available locally")
+		results <- GetResult{
+			Local: true,
+		}
 		return nil
 	}
 
@@ -861,7 +870,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	case "SelectCheapest":
 		strategy = exchange.SelectCheapest(5, 4*time.Second)
 	case "SelectFirstLowerThan":
-		strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(5))
+		strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
 	default:
 		return errors.New("unknown strategy")
 	}
@@ -876,6 +885,9 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	} else {
 		sl = sel.All()
 	}
+
+	log.Info().Msg("starting query")
+
 	if err := tx.Query(sl); err != nil {
 		return err
 	}
@@ -897,6 +909,8 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		}
 	}
 
+	log.Info().Msg("waiting for triage")
+
 	// Triage waits until we select the first offer it might not mean the first
 	// offer that we receive depending on the strategy used
 	selection, err := tx.Triage()
@@ -906,6 +920,16 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 	now := time.Now()
 	discDuration := now.Sub(start)
 	resp := selection.Offer.Response
+
+	log.Info().Msg("selected an offer")
+
+	results <- GetResult{
+		Size:         int64(resp.Size),
+		Status:       "StatusSelectedOffer",
+		UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
+		TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
+		PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
+	}
 
 	// TODO: accept all by default but we should be able to pass flag to provide
 	// confirmation before retrieving
@@ -918,22 +942,18 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 		return ctx.Err()
 	}
 
-	nd.send(Notify{
-		GetResult: &GetResult{
-			DealID:       dref.ID.String(),
-			TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
-			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
-			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-			PieceSize:    filecoin.SizeStr(filecoin.NewInt(resp.Size)),
-		},
-	})
+	log.Info().Msg("started transfer")
+
+	results <- GetResult{
+		DealID: dref.ID.String(),
+	}
 
 	select {
 	case res := <-tx.Done():
+		log.Info().Msg("finished transfer")
 		if res.Err != nil {
 			return res.Err
 		}
-		tx.Close()
 		end := time.Now()
 		transDuration := end.Sub(start) - discDuration
 		if args.Out != "" {
@@ -973,16 +993,64 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs) error {
 			return err
 		}
 
-		nd.send(Notify{
-			GetResult: &GetResult{
-				DiscLatSeconds:  discDuration.Seconds(),
-				TransLatSeconds: transDuration.Seconds(),
-			},
-		})
+		results <- GetResult{
+			DiscLatSeconds:  discDuration.Seconds(),
+			TransLatSeconds: transDuration.Seconds(),
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// Load is an RPC method that retrieves a given CID and key to the local blockstore.
+// It sends feedback events to a result channel that it returns.
+func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error) {
+	results := make(chan GetResult)
+
+	go func() {
+
+		p := path.FromString(args.Cid)
+		root, segs, err := path.SplitAbsPath(p)
+		if err != nil {
+			return
+		}
+
+		if len(segs) > 0 {
+			args.Key = segs[0]
+		}
+
+		if args.Strategy == "" {
+			args.Strategy = "SelectFirst"
+		}
+
+		if args.Strategy == "" && args.MaxPPB > 0 {
+			args.Strategy = "SelectFirstLowerThan"
+		}
+
+		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
+			func(event client.Event, state deal.ClientState) {
+				if state.PayloadCID == root {
+					results <- GetResult{
+						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
+						Status:        deal.Statuses[state.Status],
+						TotalReceived: int64(state.TotalReceived),
+					}
+				}
+			},
+		)
+		defer unsub()
+
+		err = nd.get(ctx, root, args, results)
+		if err != nil {
+			results <- GetResult{
+				Err: err.Error(),
+			}
+		}
+		close(results)
+	}()
+
+	return results, nil
 }
 
 // List returns all the roots for the content stored by this node

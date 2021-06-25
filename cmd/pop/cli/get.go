@@ -18,6 +18,7 @@ var getArgs struct {
 	verbose  bool
 	miner    string
 	strategy string
+	maxppb   int64
 }
 
 var getCmd = &ffcli.Command{
@@ -38,6 +39,7 @@ data to disk. Adding a miner flag will fallback to miner if content is not avail
 		fs.BoolVar(&getArgs.verbose, "verbose", false, "print the state transitions")
 		fs.StringVar(&getArgs.miner, "miner", "", "ask storage miner and use as fallback if network does not have the content")
 		fs.StringVar(&getArgs.strategy, "strategy", "SelectFirst", "strategy for selecting offers from providers")
+		fs.Int64Var(&getArgs.maxppb, "maxppb", 5, "max price per byte")
 		return fs
 	})(),
 }
@@ -62,6 +64,7 @@ func runGet(ctx context.Context, args []string) error {
 		Verbose:  getArgs.verbose,
 		Miner:    getArgs.miner,
 		Strategy: getArgs.strategy,
+		MaxPPB:   getArgs.maxppb,
 	})
 
 	for {

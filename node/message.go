@@ -71,14 +71,15 @@ type StoreArgs struct {
 
 // GetArgs get passed to the Get command
 type GetArgs struct {
-	Cid      string
-	Key      string
-	Sel      string
-	Out      string
-	Timeout  int
-	Verbose  bool
-	Miner    string
-	Strategy string
+	Cid      string `json:"cid"`
+	Key      string `json:"key,omitempty"`
+	Sel      string `json:"sel,omitempty"`
+	Out      string `json:"out,omitempty"`
+	Timeout  int    `json:"timeout,omitempty"`
+	Verbose  bool   `json:"verbose,omitempty"`
+	Miner    string `json:"miner,omitempty"`
+	Strategy string `json:"strategy,omitempty"`
+	MaxPPB   int64  `json:"maxPPB,omitempty"`
 }
 
 // ListArgs provides params for the List command
@@ -162,16 +163,19 @@ type StoreResult struct {
 
 // GetResult gives us feedback on the result of the Get request
 type GetResult struct {
-	DealID          string
-	TotalSpent      string
-	TotalPrice      string
-	PieceSize       string
-	PricePerByte    string
-	UnsealPrice     string
-	DiscLatSeconds  float64
-	TransLatSeconds float64
-	Local           bool
-	Err             string
+	Status          string  `json:"status,omitempty"`
+	DealID          string  `json:"dealID,omitempty"`
+	Size            int64   `json:"size,omitempty"`
+	TotalSpent      string  `json:"totalSpent,omitempty"`
+	TotalReceived   int64   `json:"totalReceived,omitempty"`
+	BytesPaidFor    string  `json:"bytesPaidFor,omitempty"`
+	TotalPrice      string  `json:"totalPrice,omitempty"`
+	PricePerByte    string  `json:"pricePerByte,omitempty"`
+	UnsealPrice     string  `json:"unsealPrice,omitempty"`
+	DiscLatSeconds  float64 `json:"discLatSeconds,omitempty"`
+	TransLatSeconds float64 `json:"tansLatSeconds,omitempty"`
+	Local           bool    `json:"local,omitempty"`
+	Err             string  `json:"error,omitempty"`
 }
 
 // ListResult contains the result for a single item of the list

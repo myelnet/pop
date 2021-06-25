@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"runtime/debug"
+
+	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
@@ -24,7 +27,6 @@ import (
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
-	"runtime/debug"
 )
 
 // server listens for connection and controls the node to execute requests
@@ -55,7 +57,7 @@ func (s *server) serveConn(ctx context.Context, c net.Conn) {
 			// minutes. 5 seconds is enough to let browser hit
 			// favicon.ico and such.
 			IdleTimeout: 5 * time.Second,
-			Handler:     s.localhostHandler(),
+			Handler:     http.DefaultServeMux,
 		}
 		httpServer.Serve(&oneConnListener{&protoSwitchConn{br: br, Conn: c}})
 		return
@@ -148,6 +150,8 @@ func (s *server) addUserHeaders(w http.ResponseWriter) {
 	w.Header()["Access-Control-Expose-Headers"] = []string{"IPFS-Hash"}
 }
 
+// HTTP get does not retrieve content but only serves content already cached locally
+// to make sure content is loaded use JSON RPC method Load available via websocket
 func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 
@@ -163,20 +167,16 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if len(segs) > 0 {
 		key = segs[0]
 	}
-	// try to retrieve the blocks
-	err = s.node.get(r.Context(), root, &GetArgs{Key: key, Strategy: "SelectFirst"})
-	if err != nil {
-		log.Error().Err(err).Msg("failed to get blocks")
-		// TODO: give better feedback into what went wrong
-		http.Error(w, "Failed to retrieve content", http.StatusInternalServerError)
-		return
-	}
-
-	log.Debug().Msg("retrieved blocks")
 
 	s.addUserHeaders(w)
 
 	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
+
+	has := tx.IsLocal(key)
+	if !has {
+		http.Error(w, "content not cached on this node", http.StatusNotFound)
+		return
+	}
 
 	if key == "" {
 		// If there is no key we return all the entries as a JSON file detailing information
@@ -329,6 +329,13 @@ func Run(ctx context.Context, opts Options) error {
 	server.cs = NewCommandServer(nd, server.writeToClients)
 
 	nd.notify = server.cs.send
+
+	http.Handle("/", server.localhostHandler())
+
+	rpcServer := jsonrpc.NewServer()
+	rpcServer.Register("pop", nd)
+
+	http.Handle("/rpc", rpcServer)
 
 	b := backoff.Backoff{
 		Min: time.Second,

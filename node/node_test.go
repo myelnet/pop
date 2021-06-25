@@ -446,10 +446,10 @@ func TestGet(t *testing.T) {
 	})
 	<-committed
 
-	got := make(chan *GetResult, 2)
+	got := make(chan GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got <- n.GetResult
+		got <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
@@ -457,16 +457,19 @@ func TestGet(t *testing.T) {
 		Timeout:  1,
 	})
 	res := <-got
+	require.Equal(t, int64(256189), res.Size)
+
+	res = <-got
 	require.NotEqual(t, "", res.DealID)
 
 	res = <-got
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// We should be able to request again this time from local storage
-	got = make(chan *GetResult, 1)
+	got = make(chan GetResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got <- n.GetResult
+		got <- *n.GetResult
 	}
 	out := filepath.Join(dir, "dataout")
 	cn.Get(ctx, &GetArgs{
@@ -517,7 +520,7 @@ func TestList(t *testing.T) {
 func TestMultipleGet(t *testing.T) {
 	bgCtx := context.Background()
 
-	ctx, cancel := context.WithTimeout(bgCtx, 6*time.Second)
+	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 	defer cancel()
 	mn := mocknet.New(bgCtx)
 
@@ -571,7 +574,7 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added2
 
-	// commit data2
+	// commit data1 + data2
 	ref, err := pn.getRef("")
 	require.NoError(t, err)
 	committed := make(chan struct{}, 1)
@@ -585,10 +588,10 @@ func TestMultipleGet(t *testing.T) {
 	<-committed
 
 	// check cn received data1
-	got1 := make(chan *GetResult, 2)
+	got1 := make(chan GetResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got1 <- n.GetResult
+		got1 <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
@@ -596,16 +599,19 @@ func TestMultipleGet(t *testing.T) {
 		Timeout:  1,
 	})
 	res := <-got1
+	require.Equal(t, int64(256265), res.Size)
+
+	res = <-got1
 	require.NotEqual(t, "", res.DealID)
 
 	res = <-got1
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// check cn received data2
-	got2 := make(chan *GetResult, 2)
+	got2 := make(chan GetResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got2 <- n.GetResult
+		got2 <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
@@ -613,21 +619,27 @@ func TestMultipleGet(t *testing.T) {
 		Timeout:  1,
 	})
 	res = <-got2
+	require.Equal(t, int64(124153), res.Size)
+
+	res = <-got2
 	require.NotEqual(t, "", res.DealID)
 
 	res = <-got2
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
-	got3 := make(chan *GetResult, 2)
+	got3 := make(chan GetResult, 2)
 	cn2.notify = func(n Notify) {
 		require.Equal(t, "", n.GetResult.Err)
-		got3 <- n.GetResult
+		got3 <- *n.GetResult
 	}
 	cn2.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
+	res = <-got3
+	require.Equal(t, int64(124153), res.Size)
+
 	res = <-got3
 	require.NotEqual(t, "", res.DealID)
 
