@@ -65,6 +65,7 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	if err != nil {
 		return res, err
 	}
+
 	// Traverse any links from the root node
 	err = traversal.Progress{
 		Cfg: &traversal.Config{
@@ -74,6 +75,10 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
 		return nil
 	})
+	if err != nil {
+		return res, err
+	}
+
 	return res, nil
 }
 
