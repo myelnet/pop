@@ -56,6 +56,9 @@ type Index struct {
 	// to trigger request for new content and refreshing the index with new popular content
 	updateFunc func()
 
+	emu         sync.Mutex
+	evictionSet *cid.Set
+
 	mu sync.Mutex
 	// current size of content committed to the store
 	size uint64
@@ -117,12 +120,13 @@ func WithUpdateFunc(fn func()) IndexOption {
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
 func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
-		blist:    list.New(),
-		freqs:    list.New(),
-		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
-		Refs:     make(map[string]*DataRef),
-		interest: make(map[string]*DataRef),
-		rootCID:  cid.Undef,
+		blist:       list.New(),
+		freqs:       list.New(),
+		ds:          namespace.Wrap(ds, datastore.NewKey("/index")),
+		Refs:        make(map[string]*DataRef),
+		interest:    make(map[string]*DataRef),
+		rootCID:     cid.Undef,
+		evictionSet: cid.NewSet(),
 	}
 	for _, o := range opts {
 		o(idx)
@@ -448,9 +452,9 @@ func (idx *Index) evict(size uint64) uint64 {
 	var evicted uint64
 	for place := idx.blist.Front(); place != nil; place = place.Next() {
 		for entry := range place.Value.(*bucket).entries {
-			err := idx.garbageCollect(entry)
+			err := idx.tagForEviction(entry)
 			if err != nil {
-				log.Error().Err(err).Msgf("failed to garbage collect ref %s", entry.PayloadCID.String())
+				log.Error().Err(err).Msgf("failed to tag ref %s for eviction", entry.PayloadCID.String())
 			}
 
 			delete(idx.Refs, entry.PayloadCID.String())
@@ -465,8 +469,10 @@ func (idx *Index) evict(size uint64) uint64 {
 	return evicted
 }
 
-func (idx *Index) garbageCollect(ref *DataRef) error {
-	cs := cid.NewSet()
+func (idx *Index) tagForEviction(ref *DataRef) error {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
 	link := cidlink.Link{Cid: ref.PayloadCID}
 	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
 		return basicnode.Prototype.Any, nil
@@ -499,14 +505,11 @@ func (idx *Index) garbageCollect(ref *DataRef) error {
 				return reader, err
 			}
 
-			cs.Add(v.PayloadCID)
+			idx.evictionSet.Add(v.PayloadCID)
 
 			return reader, nil
 		}
 	}
-
-	unlock := idx.bstore.GCLock()
-	defer unlock.Unlock()
 
 	// Load the root node
 	err = link.Load(context.TODO(), ipld.LinkContext{}, builder, makeLoader(idx.bstore))
@@ -533,14 +536,24 @@ func (idx *Index) garbageCollect(ref *DataRef) error {
 		return err
 	}
 
-	err = cs.ForEach(func(c cid.Cid) error {
+	return nil
+}
+
+func (idx *Index) GC() {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
+	unlock := idx.bstore.GCLock()
+	defer unlock.Unlock()
+
+	err := idx.evictionSet.ForEach(func(c cid.Cid) error {
 		return idx.bstore.DeleteBlock(c)
 	})
 	if err != nil {
-		return err
+		log.Error().Err(err).Msgf("failed to run garbage collector")
 	}
 
-	return nil
+	idx.evictionSet = cid.NewSet()
 }
 
 // ---------- Interest --------------

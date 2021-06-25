@@ -672,6 +672,10 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		sendErr(err)
 		return
 	}
+
+	// Run the garbage collector to remove tagged Refs
+	nd.exch.Index().GC()
+
 	nd.tx.Close()
 	nd.tx = nil
 	nd.txmu.Unlock()
