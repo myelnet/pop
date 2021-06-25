@@ -457,6 +457,9 @@ func TestGet(t *testing.T) {
 		Timeout:  1,
 	})
 	res := <-got
+	require.Equal(t, int64(256189), res.Size)
+
+	res = <-got
 	require.NotEqual(t, "", res.DealID)
 
 	res = <-got
@@ -571,7 +574,7 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-added2
 
-	// commit data2
+	// commit data1 + data2
 	ref, err := pn.getRef("")
 	require.NoError(t, err)
 	committed := make(chan struct{}, 1)
@@ -585,7 +588,7 @@ func TestMultipleGet(t *testing.T) {
 	<-committed
 
 	// check cn received data1
-	got1 := make(chan GetResult, 2)
+	got1 := make(chan GetResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 		got1 <- *n.GetResult
@@ -596,13 +599,16 @@ func TestMultipleGet(t *testing.T) {
 		Timeout:  1,
 	})
 	res := <-got1
+	require.Equal(t, int64(256265), res.Size)
+
+	res = <-got1
 	require.NotEqual(t, "", res.DealID)
 
 	res = <-got1
 	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// check cn received data2
-	got2 := make(chan GetResult, 2)
+	got2 := make(chan GetResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 		got2 <- *n.GetResult
@@ -612,6 +618,9 @@ func TestMultipleGet(t *testing.T) {
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
+	res = <-got2
+	require.Equal(t, int64(124153), res.Size)
+
 	res = <-got2
 	require.NotEqual(t, "", res.DealID)
 
@@ -628,6 +637,9 @@ func TestMultipleGet(t *testing.T) {
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
+	res = <-got3
+	require.Equal(t, int64(124153), res.Size)
+
 	res = <-got3
 	require.NotEqual(t, "", res.DealID)
 
