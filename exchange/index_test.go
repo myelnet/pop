@@ -603,12 +603,12 @@ func TestGC(t *testing.T) {
 		PayloadSize: int64(len(b1.RawData())),
 	}))
 
-	// check ref is in index
+	// check if ref is in index
 	ref, err := exch.Index().GetRef(b1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, ref.PayloadCID, b1.Cid())
 
-	// check bstore has block
+	// check if bstore has block
 	has, err := exch.Index().Bstore().Has(b1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
@@ -619,7 +619,7 @@ func TestGC(t *testing.T) {
 
 	//time.Sleep(opts.GCLoopDuration + 1)
 
-	// check GC removed tagged block
+	// check if GC removed tagged block
 	//err = exch.Index().Bstore().DeleteBlock(b1.Cid())
 	//require.NoError(t, err)
 }

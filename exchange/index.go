@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipld/go-ipld-prime"
 	dagpb "github.com/ipld/go-ipld-prime-proto"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -490,9 +491,18 @@ func (idx *Index) evict(size uint64) uint64 {
 }
 
 func (idx *Index) tagForEviction(ref *DataRef) error {
-	return idx.browseDAG(ref, func(v *DataRef) {
-		idx.evictionSet.Add(v.PayloadCID)
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
+	err := idx.browseDAG(ref.PayloadCID, func(blk blocks.Block) error {
+		idx.evictionSet.Add(blk.Cid())
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (idx *Index) GC() {
@@ -537,6 +547,9 @@ func (idx *Index) gcLoop() {
 }
 
 func (idx *Index) cleanBlockStore() error {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
 	cidSet := cid.NewSet()
 
 	err := idx.root.ForEach(context.Background(), func(k string, val *cbg.Deferred) error {
@@ -546,8 +559,9 @@ func (idx *Index) cleanBlockStore() error {
 			return err
 		}
 
-		err = idx.browseDAG(ref, func(currentRef *DataRef) {
-			cidSet.Add(currentRef.PayloadCID)
+		err = idx.browseDAG(ref.PayloadCID, func(blk blocks.Block) error {
+			cidSet.Add(blk.Cid())
+			return nil
 		})
 		if err != nil {
 			return err
@@ -571,11 +585,8 @@ func (idx *Index) cleanBlockStore() error {
 	return nil
 }
 
-func (idx *Index) browseDAG(ref *DataRef, f func(*DataRef)) error {
-	idx.emu.Lock()
-	defer idx.emu.Unlock()
-
-	link := cidlink.Link{Cid: ref.PayloadCID}
+func (idx *Index) browseDAG(root cid.Cid, f func(blocks.Block) error) error {
+	link := cidlink.Link{Cid: root}
 	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
 		return basicnode.Prototype.Any, nil
 	})
@@ -601,13 +612,10 @@ func (idx *Index) browseDAG(ref *DataRef, f func(*DataRef)) error {
 			}
 
 			reader := bytes.NewReader(block.RawData())
-
-			v := new(DataRef)
-			if err := v.UnmarshalCBOR(reader); err != nil {
-				return reader, err
+			err = f(block)
+			if err != nil {
+				return nil, err
 			}
-
-			f(v)
 
 			return reader, nil
 		}
