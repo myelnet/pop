@@ -265,6 +265,12 @@ func (idx *Index) DropRef(k cid.Cid) error {
 		return ErrRefNotFound
 	}
 	ref := idx.Refs[k.String()]
+
+	err := idx.tagForEviction(ref)
+	if err != nil {
+		log.Error().Err(err).Msgf("failed to tag ref %s for eviction", ref.PayloadCID.String())
+	}
+
 	idx.remBlistEntry(ref.bucketNode, ref)
 
 	delete(idx.Refs, k.String())
@@ -563,7 +569,7 @@ func (idx *Index) GC() {
 		return idx.bstore.DeleteBlock(c)
 	})
 	if err != nil {
-		log.Error().Err(err).Msgf("failed to run garbage collector")
+		log.Error().Err(err).Msg("failed to run garbage collector")
 	}
 
 	idx.evictionSet = cid.NewSet()

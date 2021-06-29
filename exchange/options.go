@@ -68,7 +68,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval is the replication interval after which a worker will try to retrieve fresh new content
 	// on the network
-	ReplInterval time.Duration
+	ReplInterval   time.Duration
+	GCLoopDuration time.Duration
 }
 
 // Everything isn't thoroughly validated so we trust users who provide options know what they're doing
@@ -131,6 +132,11 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 	if opts.ReplInterval == 0 {
 		opts.ReplInterval = 60 * time.Second
 	}
+
+	if opts.GCLoopDuration == 0 {
+		opts.GCLoopDuration = time.Minute * 5
+	}
+
 	return opts, nil
 }
 

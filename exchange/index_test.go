@@ -3,9 +3,12 @@ package exchange
 import (
 	"bytes"
 	"context"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/pop/internal/testutil"
 	"math/rand"
 	"runtime"
 	"testing"
+	"time"
 
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -573,4 +576,50 @@ func TestLoadInterest(t *testing.T) {
 	for k := range in {
 		require.Equal(t, reflist2[0].PayloadCID, k.PayloadCID)
 	}
+}
+
+func TestGC(t *testing.T) {
+	ctx := context.Background()
+
+	mn := mocknet.New(ctx)
+	n := testutil.NewTestNode(mn, t)
+
+	opts := Options{
+		Blockstore:     n.Bs,
+		MultiStore:     n.Ms,
+		RepoPath:       n.DTTmpDir,
+		GCLoopDuration: 1 * time.Second,
+	}
+	exch, err := New(ctx, n.Host, n.Ds, opts)
+	require.NoError(t, err)
+
+	// generate block
+	b1 := blockGen.Next()
+	require.NoError(t, exch.Index().Bstore().Put(b1))
+
+	// set ref in index
+	require.NoError(t, exch.Index().SetRef(&DataRef{
+		PayloadCID:  b1.Cid(),
+		PayloadSize: int64(len(b1.RawData())),
+	}))
+
+	// check ref is in index
+	ref, err := exch.Index().GetRef(b1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, ref.PayloadCID, b1.Cid())
+
+	// check bstore has block
+	has, err := exch.Index().Bstore().Has(b1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	// drop ref & tag corresponding block for eviction
+	err = exch.Index().DropRef(b1.Cid())
+	require.NoError(t, err)
+
+	//time.Sleep(opts.GCLoopDuration + 1)
+
+	// check GC removed tagged block
+	//err = exch.Index().Bstore().DeleteBlock(b1.Cid())
+	//require.NoError(t, err)
 }
