@@ -982,7 +982,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 
 	// TODO: accept all by default but we should be able to pass flag to provide
 	// confirmation before retrieving
-	selection.Incline()
+	selection.Incline(sl)
 
 	var dref exchange.DealRef
 	select {
@@ -1058,10 +1058,14 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 	results := make(chan GetResult)
 
 	go func() {
+		defer close(results)
 
 		p := path.FromString(args.Cid)
 		root, segs, err := path.SplitAbsPath(p)
 		if err != nil {
+			results <- GetResult{
+				Err: err.Error(),
+			}
 			return
 		}
 
@@ -1096,7 +1100,117 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				Err: err.Error(),
 			}
 		}
-		close(results)
+	}()
+
+	return results, nil
+}
+
+// PreloadEntries is an RPC method that retrieves all the entries associated with a root CID
+// and loads up a payment channel to pay for retrieving the entire DAG.
+func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResult, error) {
+	results := make(chan GetResult)
+
+	go func() {
+		defer close(results)
+		// Only a CID is allowed here.
+		root, err := cid.Decode(args.Cid)
+		if err != nil {
+			results <- GetResult{
+				Err: err.Error(),
+			}
+			return
+		}
+		//TODO: strategy option
+		strategy := exchange.SelectFirst
+
+		if args.Strategy == "" && args.MaxPPB > 0 {
+			strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
+		}
+
+		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
+			func(event client.Event, state deal.ClientState) {
+				if state.PayloadCID == root {
+					results <- GetResult{
+						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
+						Status:        deal.Statuses[state.Status],
+						TotalReceived: int64(state.TotalReceived),
+					}
+				}
+			},
+		)
+		defer unsub()
+
+		log.Info().Msg("starting query")
+
+		tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithStrategy(strategy), exchange.WithTriage())
+		defer tx.Close()
+
+		// Ask for all content
+		err = tx.Query(sel.All())
+		if err != nil {
+			results <- GetResult{
+				Err: err.Error(),
+			}
+			return
+		}
+
+		log.Info().Msg("waiting for triage")
+
+		// The selection comes back for ALL the content
+		selection, err := tx.Triage()
+		if err != nil {
+			results <- GetResult{
+				Err: err.Error(),
+			}
+			return
+		}
+		resp := selection.Offer.Response
+
+		log.Info().Msg("selected an offer")
+
+		results <- GetResult{
+			Size:         int64(resp.Size),
+			Status:       "StatusSelectedOffer",
+			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
+			TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
+			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
+		}
+
+		// Changing the selector here means the funds will still be loaded for the response size
+		// and amounts but we are partially retrieving the DAG so we won't use up everything
+		selection.Incline(sel.Entries())
+
+		var dref exchange.DealRef
+		select {
+		case dref = <-tx.Ongoing():
+		case <-ctx.Done():
+			results <- GetResult{
+				Err: err.Error(),
+			}
+			return
+		}
+
+		log.Info().Msg("started transfer")
+
+		results <- GetResult{
+			DealID: dref.ID.String(),
+		}
+
+		select {
+		case res := <-tx.Done():
+			log.Info().Msg("finished transfer")
+			if res.Err != nil {
+				results <- GetResult{
+					Err: res.Err.Error(),
+				}
+
+				return
+			}
+			return
+		case <-ctx.Done():
+			return
+		}
+
 	}()
 
 	return results, nil

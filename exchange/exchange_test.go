@@ -35,7 +35,7 @@ func (te testExecutor) SetError(err error) {
 	te.err <- err
 }
 
-func (te testExecutor) Execute(o deal.Offer) TxResult {
+func (te testExecutor) Execute(o deal.Offer, p DealExecParams) TxResult {
 	err := <-te.err
 	if err != nil {
 		return TxResult{
@@ -46,12 +46,14 @@ func (te testExecutor) Execute(o deal.Offer) TxResult {
 	return TxResult{}
 }
 
-func (te testExecutor) Confirm(o deal.Offer) bool {
+func (te testExecutor) Confirm(o deal.Offer) DealExecParams {
 	select {
 	case te.conf <- o:
 	default:
 	}
-	return true
+	return DealExecParams{
+		Accepted: true,
+	}
 }
 
 func (te testExecutor) Finish(res TxResult) {
@@ -286,7 +288,7 @@ func TestExchangeE2E(t *testing.T) {
 			selected, err := tx.Triage()
 			require.NoError(t, err)
 
-			selected.Incline()
+			selected.Incline(sel.All())
 
 			ref := <-tx.Ongoing()
 			require.NoError(t, err)

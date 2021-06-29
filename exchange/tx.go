@@ -540,20 +540,34 @@ type DealRef struct {
 	Offer deal.Offer
 }
 
+// DealExecParams are params to apply when executing a selected deal
+// Can be used to assign different parameters than the defaults in the offer
+// while respecting the offer conditions otherwise it will fail
+type DealExecParams struct {
+	Accepted bool
+	Selector ipld.Node
+}
+
 // DealSelection sends the selected offer with a channel to expect confirmation on
 type DealSelection struct {
 	Offer   deal.Offer
-	confirm chan bool
+	confirm chan DealExecParams
 }
 
 // Incline accepts execution for an offer
-func (ds DealSelection) Incline() {
-	ds.confirm <- true
+// @NOTE: maybe make optional param as it could be verbose when repeating the same selector
+func (ds DealSelection) Incline(sel ipld.Node) {
+	ds.confirm <- DealExecParams{
+		Accepted: true,
+		Selector: sel,
+	}
 }
 
 // Decline an offer
 func (ds DealSelection) Decline() {
-	ds.confirm <- false
+	ds.confirm <- DealExecParams{
+		Accepted: false,
+	}
 }
 
 // Query the discovery service for offers
@@ -574,7 +588,7 @@ func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
-func (tx *Tx) Execute(of deal.Offer) TxResult {
+func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 	result := make(chan TxResult, 1)
 	tx.unsub = tx.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
@@ -604,7 +618,7 @@ func (tx *Tx) Execute(of deal.Offer) TxResult {
 		of.Response.MinPricePerByte,
 		of.Response.MaxPaymentInterval,
 		of.Response.MaxPaymentIntervalIncrease,
-		tx.sel,
+		p.Selector,
 		nil,
 		of.Response.UnsealPrice,
 	)
@@ -649,9 +663,9 @@ func (tx *Tx) Execute(of deal.Offer) TxResult {
 }
 
 // Confirm takes an offer and blocks to wait for user confirmation before returning true or false
-func (tx *Tx) Confirm(of deal.Offer) bool {
+func (tx *Tx) Confirm(of deal.Offer) DealExecParams {
 	if tx.triage != nil {
-		dch := make(chan bool, 1)
+		dch := make(chan DealExecParams, 1)
 		tx.triage <- DealSelection{
 			Offer:   of,
 			confirm: dch,
@@ -660,10 +674,15 @@ func (tx *Tx) Confirm(of deal.Offer) bool {
 		case d := <-dch:
 			return d
 		case <-tx.ctx.Done():
-			return false
+			return DealExecParams{
+				Accepted: false,
+			}
 		}
 	}
-	return true
+	return DealExecParams{
+		Accepted: true,
+		Selector: tx.sel,
+	}
 }
 
 // Triage allows manually triaging the next selection
@@ -747,8 +766,8 @@ type OfferWorker interface {
 
 // OfferExecutor exposes the methods required to execute offers
 type OfferExecutor interface {
-	Execute(deal.Offer) TxResult
-	Confirm(deal.Offer) bool
+	Execute(deal.Offer, DealExecParams) TxResult
+	Confirm(deal.Offer) DealExecParams
 	Finish(TxResult)
 }
 
@@ -820,8 +839,8 @@ func (s sessionWorker) exec(offer deal.Offer, result chan TxResult) {
 	// Confirm may block until user sends a response
 	// if we are blocking for a while the worker acts as if we'd started the transfer and will continue
 	// buffering offers according to the given rules
-	if s.executor.Confirm(offer) {
-		result <- s.executor.Execute(offer)
+	if params := s.executor.Confirm(offer); params.Accepted {
+		result <- s.executor.Execute(offer, params)
 		return
 	}
 	result <- TxResult{
