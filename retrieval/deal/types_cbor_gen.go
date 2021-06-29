@@ -69,7 +69,6 @@ func (t *QueryParams) MarshalCBOR(w io.Writer) error {
 	if err := t.Selector.MarshalCBOR(w); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -106,17 +105,6 @@ func (t *QueryParams) UnmarshalCBOR(r io.Reader) error {
 		}
 
 		switch name {
-		// t.Selector (typegen.Deferred) (struct)
-		case "Selector":
-
-			{
-
-				t.Selector = new(cbg.Deferred)
-
-				if err := t.Selector.UnmarshalCBOR(br); err != nil {
-					return xerrors.Errorf("failed to read deferred field: %w", err)
-				}
-			}
 		// t.PieceCID (cid.Cid) (struct)
 		case "PieceCID":
 
@@ -139,6 +127,17 @@ func (t *QueryParams) UnmarshalCBOR(r io.Reader) error {
 					t.PieceCID = &c
 				}
 
+			}
+			// t.Selector (typegen.Deferred) (struct)
+		case "Selector":
+
+			{
+
+				t.Selector = new(cbg.Deferred)
+
+				if err := t.Selector.UnmarshalCBOR(br); err != nil {
+					return xerrors.Errorf("failed to read deferred field: %w", err)
+				}
 			}
 
 		default:
@@ -2464,6 +2463,341 @@ func (t *PaymentInfo) UnmarshalCBOR(r io.Reader) error {
 					return fmt.Errorf("wrong type for uint64 field")
 				}
 				t.Lane = uint64(extra)
+
+			}
+
+		default:
+			// Field doesn't exist on this type, so ignore it
+			cbg.ScanForLinks(r, func(cid.Cid) {})
+		}
+	}
+
+	return nil
+}
+func (t *Offer) MarshalCBOR(w io.Writer) error {
+	if t == nil {
+		_, err := w.Write(cbg.CborNull)
+		return err
+	}
+	if _, err := w.Write([]byte{169}); err != nil {
+		return err
+	}
+
+	scratch := make([]byte, 9)
+
+	// t.ID (string) (string)
+	if len("ID") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"ID\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("ID"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("ID")); err != nil {
+		return err
+	}
+
+	if len(t.ID) > cbg.MaxLength {
+		return xerrors.Errorf("Value in field t.ID was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(t.ID))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string(t.ID)); err != nil {
+		return err
+	}
+
+	// t.PeerAddr ([]uint8) (slice)
+	if len("PeerAddr") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PeerAddr\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PeerAddr"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PeerAddr")); err != nil {
+		return err
+	}
+
+	if len(t.PeerAddr) > cbg.ByteArrayMaxLen {
+		return xerrors.Errorf("Byte array in field t.PeerAddr was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(t.PeerAddr))); err != nil {
+		return err
+	}
+
+	if _, err := w.Write(t.PeerAddr[:]); err != nil {
+		return err
+	}
+
+	// t.PayloadCID (cid.Cid) (struct)
+	if len("PayloadCID") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PayloadCID\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PayloadCID"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PayloadCID")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteCidBuf(scratch, w, t.PayloadCID); err != nil {
+		return xerrors.Errorf("failed to write cid field t.PayloadCID: %w", err)
+	}
+
+	// t.Size (uint64) (uint64)
+	if len("Size") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"Size\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("Size"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("Size")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.Size)); err != nil {
+		return err
+	}
+
+	// t.PaymentAddress (address.Address) (struct)
+	if len("PaymentAddress") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PaymentAddress\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PaymentAddress"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("PaymentAddress")); err != nil {
+		return err
+	}
+
+	if err := t.PaymentAddress.MarshalCBOR(w); err != nil {
+		return err
+	}
+
+	// t.MinPricePerByte (big.Int) (struct)
+	if len("MinPricePerByte") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"MinPricePerByte\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("MinPricePerByte"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("MinPricePerByte")); err != nil {
+		return err
+	}
+
+	if err := t.MinPricePerByte.MarshalCBOR(w); err != nil {
+		return err
+	}
+
+	// t.MaxPaymentInterval (uint64) (uint64)
+	if len("MaxPaymentInterval") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"MaxPaymentInterval\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("MaxPaymentInterval"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("MaxPaymentInterval")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.MaxPaymentInterval)); err != nil {
+		return err
+	}
+
+	// t.MaxPaymentIntervalIncrease (uint64) (uint64)
+	if len("MaxPaymentIntervalIncrease") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"MaxPaymentIntervalIncrease\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("MaxPaymentIntervalIncrease"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("MaxPaymentIntervalIncrease")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.MaxPaymentIntervalIncrease)); err != nil {
+		return err
+	}
+
+	// t.UnsealPrice (big.Int) (struct)
+	if len("UnsealPrice") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"UnsealPrice\" was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("UnsealPrice"))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string("UnsealPrice")); err != nil {
+		return err
+	}
+
+	if err := t.UnsealPrice.MarshalCBOR(w); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *Offer) UnmarshalCBOR(r io.Reader) error {
+	*t = Offer{}
+
+	br := cbg.GetPeeker(r)
+	scratch := make([]byte, 8)
+
+	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajMap {
+		return fmt.Errorf("cbor input should be of type map")
+	}
+
+	if extra > cbg.MaxLength {
+		return fmt.Errorf("Offer: map struct too large (%d)", extra)
+	}
+
+	var name string
+	n := extra
+
+	for i := uint64(0); i < n; i++ {
+
+		{
+			sval, err := cbg.ReadStringBuf(br, scratch)
+			if err != nil {
+				return err
+			}
+
+			name = string(sval)
+		}
+
+		switch name {
+		// t.ID (string) (string)
+		case "ID":
+
+			{
+				sval, err := cbg.ReadStringBuf(br, scratch)
+				if err != nil {
+					return err
+				}
+
+				t.ID = string(sval)
+			}
+			// t.PeerAddr ([]uint8) (slice)
+		case "PeerAddr":
+
+			maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+			if err != nil {
+				return err
+			}
+
+			if extra > cbg.ByteArrayMaxLen {
+				return fmt.Errorf("t.PeerAddr: byte array too large (%d)", extra)
+			}
+			if maj != cbg.MajByteString {
+				return fmt.Errorf("expected byte array")
+			}
+
+			if extra > 0 {
+				t.PeerAddr = make([]uint8, extra)
+			}
+
+			if _, err := io.ReadFull(br, t.PeerAddr[:]); err != nil {
+				return err
+			}
+			// t.PayloadCID (cid.Cid) (struct)
+		case "PayloadCID":
+
+			{
+
+				c, err := cbg.ReadCid(br)
+				if err != nil {
+					return xerrors.Errorf("failed to read cid field t.PayloadCID: %w", err)
+				}
+
+				t.PayloadCID = c
+
+			}
+			// t.Size (uint64) (uint64)
+		case "Size":
+
+			{
+
+				maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+				if err != nil {
+					return err
+				}
+				if maj != cbg.MajUnsignedInt {
+					return fmt.Errorf("wrong type for uint64 field")
+				}
+				t.Size = uint64(extra)
+
+			}
+			// t.PaymentAddress (address.Address) (struct)
+		case "PaymentAddress":
+
+			{
+
+				if err := t.PaymentAddress.UnmarshalCBOR(br); err != nil {
+					return xerrors.Errorf("unmarshaling t.PaymentAddress: %w", err)
+				}
+
+			}
+			// t.MinPricePerByte (big.Int) (struct)
+		case "MinPricePerByte":
+
+			{
+
+				if err := t.MinPricePerByte.UnmarshalCBOR(br); err != nil {
+					return xerrors.Errorf("unmarshaling t.MinPricePerByte: %w", err)
+				}
+
+			}
+			// t.MaxPaymentInterval (uint64) (uint64)
+		case "MaxPaymentInterval":
+
+			{
+
+				maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+				if err != nil {
+					return err
+				}
+				if maj != cbg.MajUnsignedInt {
+					return fmt.Errorf("wrong type for uint64 field")
+				}
+				t.MaxPaymentInterval = uint64(extra)
+
+			}
+			// t.MaxPaymentIntervalIncrease (uint64) (uint64)
+		case "MaxPaymentIntervalIncrease":
+
+			{
+
+				maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
+				if err != nil {
+					return err
+				}
+				if maj != cbg.MajUnsignedInt {
+					return fmt.Errorf("wrong type for uint64 field")
+				}
+				t.MaxPaymentIntervalIncrease = uint64(extra)
+
+			}
+			// t.UnsealPrice (big.Int) (struct)
+		case "UnsealPrice":
+
+			{
+
+				if err := t.UnsealPrice.UnmarshalCBOR(br); err != nil {
+					return xerrors.Errorf("unmarshaling t.UnsealPrice: %w", err)
+				}
 
 			}
 

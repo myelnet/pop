@@ -13,11 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/filecoin-project/go-address"
+	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	dtimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
+	init2 "github.com/filecoin-project/specs-actors/v4/actors/builtin/init"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -29,7 +32,7 @@ import (
 	"github.com/ipfs/go-graphsync/network"
 	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	bstore "github.com/ipfs/go-ipfs-blockstore"
+	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
@@ -47,6 +50,7 @@ import (
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/myelnet/pop/filecoin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -184,7 +188,7 @@ func (tn *TestNode) CreateRandomFile(t testing.TB, size int) string {
 	return file.Name()
 }
 
-func CreateRandomBlock(t testing.TB, bs bstore.Blockstore) *blocks.BasicBlock {
+func CreateRandomBlock(t testing.TB, bs blockstore.Blockstore) *blocks.BasicBlock {
 	lb := cidlink.LinkBuilder{
 		Prefix: cid.Prefix{
 			Version:  1,
@@ -317,4 +321,40 @@ func (v *FakeDTValidator) ValidatePull(isRestart bool, chid datatransfer.Channel
 func Connect(tn1, tn2 *TestNode) error {
 	pinfo := host.InfoFromHost(tn1.Host)
 	return tn2.Host.Connect(context.Background(), *pinfo)
+}
+
+var blockGen = blocksutil.NewBlockGenerator()
+
+func FormatMsgLookup(t *testing.T, chAddr address.Address) *filecoin.MsgLookup {
+	createChannelRet := init2.ExecReturn{
+		IDAddress:     chAddr,
+		RobustAddress: chAddr,
+	}
+	createChannelRetBytes, err := cborutil.Dump(&createChannelRet)
+	require.NoError(t, err)
+	lookup := &filecoin.MsgLookup{
+		Message: blockGen.Next().Cid(),
+		Receipt: filecoin.MessageReceipt{
+			ExitCode: 0,
+			Return:   createChannelRetBytes,
+			GasUsed:  10,
+		},
+	}
+
+	return lookup
+}
+
+type BytesGetter struct {
+	b []byte
+}
+
+func (bg *BytesGetter) UnmarshalCBOR(r io.Reader) error {
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(r)
+	bg.b = buf.Bytes()
+	return nil
+}
+
+func (bg *BytesGetter) Bytes() []byte {
+	return bg.b
 }

@@ -99,13 +99,13 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	return exch, nil
 }
 
-func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
+func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.Offer, error) {
 	_, err := e.idx.GetRef(q.PayloadCID)
 	if err != nil {
-		return deal.QueryResponse{}, err
+		return deal.Offer{}, err
 	}
 	if q.Selector == nil {
-		return deal.QueryResponse{}, fmt.Errorf("no selector provided")
+		return deal.Offer{}, fmt.Errorf("no selector provided")
 	}
 	sel, err := retrieval.DecodeNode(q.QueryParams.Selector)
 	if err != nil {
@@ -117,10 +117,10 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
-		return deal.QueryResponse{}, fmt.Errorf("%s content unavailable: %w", e.h.ID(), err)
+		return deal.Offer{}, fmt.Errorf("%s content unavailable: %w", e.h.ID(), err)
 	}
-	resp := deal.QueryResponse{
-		Status:                     deal.QueryResponseAvailable,
+	ask := deal.Offer{
+		PayloadCID:                 q.PayloadCID,
 		Size:                       uint64(stats.Size),
 		PaymentAddress:             e.opts.Wallet.DefaultAddress(),
 		MinPricePerByte:            r.PPB, // TODO: dynamic pricing
@@ -129,8 +129,8 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// We need to remember the offer we made so we can validate against it once
 	// clients start the retrieval
-	e.rtv.Provider().SetAsk(q.PayloadCID, resp)
-	return resp, nil
+	e.rtv.Provider().SetAsk(q.PayloadCID, ask)
+	return ask, nil
 }
 
 // Tx returns a new transaction. The caller must also call tx.Close to cleanup and perist the new blocks

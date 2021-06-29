@@ -293,7 +293,7 @@ totalFunds: %s
 			unsealPrice := big.Zero()
 			params, err := deal.NewParams(pricePerByte, testCase.paymentInterval, paymentIntervalIncrease, selectors.All(), nil, unsealPrice)
 			require.NoError(t, err)
-			ask := deal.QueryResponse{
+			ask := deal.Offer{
 				MinPricePerByte:            pricePerByte,
 				MaxPaymentInterval:         testCase.paymentInterval,
 				MaxPaymentIntervalIncrease: paymentIntervalIncrease,

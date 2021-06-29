@@ -125,7 +125,7 @@ func WithStrategy(strategy SelectionStrategy) TxOption {
 	return func(tx *Tx) {
 		tx.worker = strategy(tx)
 		tx.worker.Start()
-		tx.rou.SetReceiver(tx.worker.ReceiveResponse)
+		tx.rou.SetReceiver(tx.worker.ReceiveOffer)
 	}
 }
 
@@ -580,11 +580,17 @@ func (tx *Tx) Query(sel ipld.Node) error {
 }
 
 // QueryFrom allows querying directly from a given peer
-func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
+func (tx *Tx) QueryFrom(info peer.AddrInfo, sel ipld.Node) error {
+	tx.sel = sel
 	if tx.worker != nil {
-		return tx.rou.QueryPeer(info, tx.root, tx.worker.ReceiveResponse)
+		return tx.rou.QueryProvider(info, tx.root, sel, tx.worker.ReceiveOffer)
 	}
 	return ErrNoStrategy
+}
+
+// ApplyOffer allows executing a transaction based on an existing offer without querying the routing service
+func (tx *Tx) ApplyOffer(offer deal.Offer) {
+	tx.worker.ReceiveOffer(offer)
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
@@ -612,15 +618,21 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 		}
 	})
 
+	info, err := of.AddrInfo()
+	if err != nil {
+		return TxResult{
+			Err: err,
+		}
+	}
 	// Make sure our provider is in our peerstore
-	tx.rou.AddAddrs(of.Provider.ID, of.Provider.Addrs)
+	tx.rou.AddAddrs(info.ID, info.Addrs)
 	params, err := deal.NewParams(
-		of.Response.MinPricePerByte,
-		of.Response.MaxPaymentInterval,
-		of.Response.MaxPaymentIntervalIncrease,
+		of.MinPricePerByte,
+		of.MaxPaymentInterval,
+		of.MaxPaymentIntervalIncrease,
 		p.Selector,
 		nil,
-		of.Response.UnsealPrice,
+		of.UnsealPrice,
 	)
 	if err != nil {
 		return TxResult{
@@ -632,10 +644,10 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 		tx.ctx,
 		tx.root,
 		params,
-		of.Response.PieceRetrievalPrice(),
-		of.Provider.ID,
+		of.RetrievalPrice(),
+		info.ID,
 		tx.clientAddr,
-		of.Response.PaymentAddress,
+		of.PaymentAddress,
 		&tx.storeID,
 	)
 	if err != nil {
@@ -760,7 +772,7 @@ var ErrUserDeniedOffer = errors.New("user denied offer")
 // OfferWorker is a generic interface to manage the lifecycle of offers
 type OfferWorker interface {
 	Start()
-	ReceiveResponse(peer.AddrInfo, deal.QueryResponse)
+	ReceiveOffer(deal.Offer)
 	Close() []deal.Offer
 }
 
@@ -869,7 +881,7 @@ func (s sessionWorker) Start() {
 				resc <- q
 				return
 			case of := <-s.offersIn:
-				if useCeiling && of.Response.MinPricePerByte.LessThan(s.priceCeiling) {
+				if useCeiling && of.MinPricePerByte.LessThan(s.priceCeiling) {
 					continue
 				}
 				if s.numThreshold < 0 && s.timeThreshold < 0 && execDone == nil {
@@ -927,18 +939,15 @@ func (s sessionWorker) Close() []deal.Offer {
 	}
 }
 
-// ReceiveResponse sends a new offer to the queue
-func (s sessionWorker) ReceiveResponse(p peer.AddrInfo, res deal.QueryResponse) {
+// ReceiveOffer sends a new offer to the queue
+func (s sessionWorker) ReceiveOffer(offer deal.Offer) {
 	// This never blocks as our queue is always receiving and decides when to drop offers
-	s.offersIn <- deal.Offer{
-		Provider: p,
-		Response: res,
-	}
+	s.offersIn <- offer
 }
 
 func sortOffers(offers []deal.Offer) {
 	sort.Slice(offers, func(i, j int) bool {
-		return offers[i].Response.MinPricePerByte.LessThan(offers[j].Response.MinPricePerByte)
+		return offers[i].MinPricePerByte.LessThan(offers[j].MinPricePerByte)
 	})
 }
 

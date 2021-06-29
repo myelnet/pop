@@ -1,19 +1,14 @@
 package payments
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/filecoin-project/go-address"
-	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/specs-actors/v4/actors/builtin"
-	init2 "github.com/filecoin-project/specs-actors/v4/actors/builtin/init"
 	"github.com/filecoin-project/specs-actors/v4/actors/builtin/paych"
 	"github.com/filecoin-project/specs-actors/v4/support/mock"
 	tutils "github.com/filecoin-project/specs-actors/v4/support/testing"
@@ -25,6 +20,7 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
@@ -106,7 +102,7 @@ func TestChannel(t *testing.T) {
 	require.Equal(t, c, *chInfo.CreateMsg)
 
 	chAddr := tutils.NewIDAddr(t, 101)
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 
 	confirmed := make(chan bool, 2)
 	ch.msgListeners.onMsgComplete(c, func(e error) {
@@ -197,7 +193,7 @@ func TestChannel(t *testing.T) {
 	// the mock actor builder doesn't export the underlying block store so we send a fake cbor unmarshaller
 	// to intercept the byte stream
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
@@ -227,25 +223,6 @@ func TestChannel(t *testing.T) {
 
 	_, err = ch.collect(ctx, chAddr)
 	require.NoError(t, err)
-}
-
-func formatMsgLookup(t *testing.T, chAddr address.Address) *fil.MsgLookup {
-	createChannelRet := init2.ExecReturn{
-		IDAddress:     chAddr,
-		RobustAddress: chAddr,
-	}
-	createChannelRetBytes, err := cborutil.Dump(&createChannelRet)
-	require.NoError(t, err)
-	lookup := &fil.MsgLookup{
-		Message: blockGen.Next().Cid(),
-		Receipt: fil.MessageReceipt{
-			ExitCode: 0,
-			Return:   createChannelRetBytes,
-			GasUsed:  10,
-		},
-	}
-
-	return lookup
 }
 
 func TestLoadActorState(t *testing.T) {
@@ -319,19 +296,4 @@ func TestLoadActorState(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, ch.from, from)
-}
-
-type bytesGetter struct {
-	b []byte
-}
-
-func (bg *bytesGetter) UnmarshalCBOR(r io.Reader) error {
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(r)
-	bg.b = buf.Bytes()
-	return nil
-}
-
-func (bg *bytesGetter) Bytes() []byte {
-	return bg.b
 }

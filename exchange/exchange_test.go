@@ -122,9 +122,8 @@ func TestSelectionStrategies(t *testing.T) {
 			wq := testCase.strategy(exec)
 
 			for i := 0; i < testCase.offers; i++ {
-				i := i
 				go func() {
-					wq.ReceiveResponse(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+					wq.ReceiveOffer(deal.Offer{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -182,9 +181,8 @@ func BenchmarkStrategies(b *testing.B) {
 			wq := testCase.strategy(exec)
 
 			for i := 0; i < 30+b.N; i++ {
-				i := i
 				go func() {
-					wq.ReceiveResponse(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+					wq.ReceiveOffer(deal.Offer{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()

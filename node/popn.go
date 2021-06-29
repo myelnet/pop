@@ -117,6 +117,7 @@ type node struct {
 	dag  ipldformat.DAGService
 	exch *exchange.Exchange
 	rs   RemoteStorer
+	omg  *OfferMgr
 
 	// opts keeps all the node params set when starting the node
 	opts Options
@@ -249,6 +250,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	nd.omg = NewOfferMgr()
 
 	if opts.PrivKey != "" {
 		err = nd.importPrivateKey(ctx, opts.PrivKey)
@@ -924,65 +927,85 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 		return errors.New("unknown strategy")
 	}
 
-	start := time.Now()
-
-	tx = nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
-	defer tx.Close()
 	var sl ipld.Node
 	if args.Key != "" {
 		sl = sel.Key(args.Key)
 	} else {
 		sl = sel.All()
 	}
+	start := time.Now()
 
-	log.Info().Msg("starting query")
-
-	if err := tx.Query(sl); err != nil {
-		return err
-	}
-	// We can query a specific miner on top of gossip
-	if args.Miner != "" {
-		miner, err := address.NewFromString(args.Miner)
-		if err != nil {
-			return err
-		}
-		info, err := nd.rs.PeerInfo(ctx, miner)
-		if err != nil {
-			// Maybe fall back to a discovery session?
-			return err
-		}
-		err = tx.QueryFrom(*info, args.Key)
-		if err != nil {
-			// Maybe we shouldn't fail here, the transfer could still work with other peers
-			return err
-		}
-	}
-
-	log.Info().Msg("waiting for triage")
-
-	// Triage waits until we select the first offer it might not mean the first
-	// offer that we receive depending on the strategy used
-	selection, err := tx.Triage()
+	// If we already have an offer we can skip routing queries
+	offer, err := nd.omg.GetOffer(c)
 	if err != nil {
-		return err
+
+		tx = nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
+		defer tx.Close()
+
+		log.Info().Msg("starting query")
+
+		if err := tx.Query(sl); err != nil {
+			return err
+		}
+		// We can query a specific miner on top of gossip
+		if args.Miner != "" {
+			miner, err := address.NewFromString(args.Miner)
+			if err != nil {
+				return err
+			}
+			info, err := nd.rs.PeerInfo(ctx, miner)
+			if err != nil {
+				// Maybe fall back to a discovery session?
+				return err
+			}
+			err = tx.QueryFrom(*info, sl)
+			if err != nil {
+				// Maybe we shouldn't fail here, the transfer could still work with other peers
+				return err
+			}
+		}
+
+		log.Info().Msg("waiting for triage")
+
+		// Triage waits until we select the first offer it might not mean the first
+		// offer that we receive depending on the strategy used
+		selection, err := tx.Triage()
+		if err != nil {
+			return err
+		}
+		resp := selection.Offer
+
+		log.Info().Msg("selected an offer")
+
+		results <- GetResult{
+			Size:         int64(resp.Size),
+			Status:       "DealStatusSelectedOffer",
+			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
+			TotalPrice:   filecoin.FIL(resp.RetrievalPrice()).Short(),
+			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
+		}
+
+		// TODO: accept all by default but we should be able to pass flag to provide
+		// confirmation before retrieving
+		selection.Incline(sl)
+
+	} else {
+		// No need for triage we already know the offer
+		tx = nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy))
+		defer tx.Close()
+
+		info, err := offer.AddrInfo()
+		if err != nil {
+			return err
+		}
+
+		// Will be selected automatically in the strategy
+		if err := tx.QueryFrom(*info, sl); err != nil {
+			return err
+		}
 	}
 	now := time.Now()
 	discDuration := now.Sub(start)
-	resp := selection.Offer.Response
-
-	log.Info().Msg("selected an offer")
-
-	results <- GetResult{
-		Size:         int64(resp.Size),
-		Status:       "StatusSelectedOffer",
-		UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-		TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
-		PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
-	}
-
-	// TODO: accept all by default but we should be able to pass flag to provide
-	// confirmation before retrieving
-	selection.Incline(sl)
 
 	var dref exchange.DealRef
 	select {
@@ -1129,6 +1152,7 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
+				fmt.Println("status", deal.Statuses[state.Status], state.Message)
 				if state.PayloadCID == root {
 					results <- GetResult{
 						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
@@ -1164,15 +1188,15 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 			}
 			return
 		}
-		resp := selection.Offer.Response
+		resp := selection.Offer
 
 		log.Info().Msg("selected an offer")
 
 		results <- GetResult{
 			Size:         int64(resp.Size),
-			Status:       "StatusSelectedOffer",
+			Status:       "DealStatusSelectedOffer",
 			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-			TotalPrice:   filecoin.FIL(resp.PieceRetrievalPrice()).Short(),
+			TotalPrice:   filecoin.FIL(resp.RetrievalPrice()).Short(),
 			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
 		}
 
@@ -1205,6 +1229,11 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 				}
 
 				return
+			}
+			// transfer was successful so we keep the offer around
+			err := nd.omg.SetOffer(root, resp)
+			if err != nil {
+				log.Error().Err(err).Msg("setting offer")
 			}
 			return
 		case <-ctx.Done():
@@ -1247,7 +1276,7 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 	}
 }
 
-// Add a buffer into the node global DAG. These DAGs can eventually be put into transactions.
+// Add a buffer into the given DAG. These DAGs can eventually be put into transactions.
 func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.Reader) (cid.Cid, error) {
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, dag)
 

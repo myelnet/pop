@@ -85,12 +85,12 @@ type Provider struct {
 }
 
 // GetAsk returns the current deal parameters this provider accepts for a given content ID
-func (p *Provider) GetAsk(k cid.Cid) deal.QueryResponse {
+func (p *Provider) GetAsk(k cid.Cid) deal.Offer {
 	return p.askStore.GetAsk(k)
 }
 
 // SetAsk sets the deal parameters this provider accepts
-func (p *Provider) SetAsk(k cid.Cid, ask deal.QueryResponse) {
+func (p *Provider) SetAsk(k cid.Cid, ask deal.Offer) {
 	err := p.askStore.SetAsk(k, ask)
 	if err != nil {
 		log.Error().Err(err).Msg("error setting retrieval ask")
@@ -147,7 +147,7 @@ func New(
 		dataTransfer: dt,
 		pay:          pay,
 		askStore: &AskStore{
-			asks: make(map[cid.Cid]deal.QueryResponse),
+			asks: make(map[cid.Cid]deal.Offer),
 		},
 	}
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{

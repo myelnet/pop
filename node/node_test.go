@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -15,6 +16,12 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/specs-actors/v4/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v4/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v4/support/mock"
+	tutils "github.com/filecoin-project/specs-actors/v4/support/testing"
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
@@ -729,4 +736,214 @@ func TestImportKey(t *testing.T) {
 
 	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
 	require.Equal(t, expected, n.exch.Wallet().DefaultAddress())
+}
+
+// Preload is a full integration test for gradually retrieving a DAG paid with a single
+// payment channel
+func TestPreload(t *testing.T) {
+	var blockGen = blocksutil.NewBlockGenerator()
+	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+
+	region := exchange.Regions["Europe"]
+
+	// Provider setup
+	tn1 := testutil.NewTestNode(mn, t)
+	pn := &node{}
+	pn.ds = tn1.Ds
+	pn.bs = tn1.Bs
+	pn.ms = tn1.Ms
+	pn.dag = tn1.DAG
+	pn.host = tn1.Host
+	pfapi := filecoin.NewMockLotusAPI()
+	popts := exchange.Options{
+		Blockstore:  pn.bs,
+		MultiStore:  pn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: pfapi,
+	}
+	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
+	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
+	require.NoError(t, err)
+
+	// Client setup
+	tn2 := testutil.NewTestNode(mn, t)
+	cn := &node{}
+	cn.ds = tn2.Ds
+	cn.bs = tn2.Bs
+	cn.ms = tn2.Ms
+	cn.dag = tn2.DAG
+	cn.host = tn2.Host
+	cn.omg = NewOfferMgr()
+	cfapi := filecoin.NewMockLotusAPI()
+	copts := exchange.Options{
+		Blockstore:  cn.bs,
+		MultiStore:  cn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: cfapi,
+	}
+	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
+	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Let the routing propagate to gossip
+	time.Sleep(time.Second)
+
+	tx := pn.exch.Tx(ctx)
+
+	data1 := make([]byte, 10000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
+	cid1, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data1))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("first", cid1, 10000))
+
+	data2 := make([]byte, 14000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	cid2, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data2))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("second", cid2, 14000))
+
+	data3 := make([]byte, 26000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data3)
+	cid3, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data3))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("third", cid3, 26000))
+
+	tx.SetCacheRF(0)
+	require.NoError(t, tx.Commit())
+	ref := tx.Ref()
+	root := ref.PayloadCID
+	require.NoError(t, pn.exch.Index().SetRef(ref))
+	require.NoError(t, tx.Close())
+
+	// Prepare the payment channel mocks
+	from := cn.exch.Wallet().DefaultAddress()
+	// to := pn.exch.Wallet().DefaultAddress()
+
+	payerAddr := tutils.NewIDAddr(t, 102)
+	payeeAddr := tutils.NewIDAddr(t, 103)
+
+	createAmt := big.Mul(region.PPB, abi.NewTokenAmount(ref.PayloadSize))
+	act := &filecoin.Actor{
+		Code:    blockGen.Next().Cid(),
+		Head:    blockGen.Next().Cid(),
+		Nonce:   1,
+		Balance: createAmt,
+	}
+	cfapi.SetActor(act)
+	pfapi.SetActor(act)
+
+	chAddr := tutils.NewIDAddr(t, 101)
+	initActorAddr := tutils.NewIDAddr(t, 100)
+	hasher := func(data []byte) [32]byte { return [32]byte{} }
+
+	builder := mock.NewBuilder(chAddr).
+		WithBalance(createAmt, abi.NewTokenAmount(0)).
+		WithEpoch(abi.ChainEpoch(1)).
+		WithCaller(initActorAddr, builtin.InitActorCodeID).
+		WithActorType(payeeAddr, builtin.AccountActorCodeID).
+		WithActorType(payerAddr, builtin.AccountActorCodeID).
+		WithHasher(hasher)
+
+	rt := builder.Build(t)
+	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
+	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
+	actor := paych.Actor{}
+	rt.Call(actor.Constructor, params)
+
+	var st paych.State
+	rt.GetState(&st)
+
+	actState := filecoin.ActorState{
+		Balance: createAmt,
+		State:   st,
+	}
+	// We need to set an actor state as creating a voucher will query the state from the chain
+	// both apis are sharing the same state
+	cfapi.SetActorState(&actState)
+	pfapi.SetActorState(&actState)
+	// See channel tests for note about this
+	objReader := func(c cid.Cid) []byte {
+		var bg testutil.BytesGetter
+		rt.StoreGet(c, &bg)
+		return bg.Bytes()
+	}
+	cfapi.SetObjectReader(objReader)
+	pfapi.SetObjectReader(objReader)
+
+	cfapi.SetAccountKey(from)
+	// provider is resolving the account key to verify the voucher signature
+	pfapi.SetAccountKey(from)
+
+	// Return success exit code from calls to check if voucher is spendable
+	pfapi.SetInvocResult(&filecoin.InvocResult{
+		MsgRct: &filecoin.MessageReceipt{
+			ExitCode: 0,
+		},
+	})
+
+	results, err := cn.PreloadEntries(ctx, &GetArgs{Cid: root.String()})
+	require.NoError(t, err)
+
+	// Discovery went well, we got an offer
+	select {
+	case res := <-results:
+		require.Equal(t, "DealStatusSelectedOffer", res.Status)
+	case <-ctx.Done():
+		t.Fatal("could not select an offer")
+	}
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+	lookup := testutil.FormatMsgLookup(t, chAddr)
+	cfapi.SetMsgLookup(lookup)
+
+loop:
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "DealStatusCompleted" {
+				break loop
+			}
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
+
+	// from now on we should have the funds to retrieve everything progressively
+	// from the same peer using the same payment channel
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%v/%s", root, "first")})
+	require.NoError(t, err)
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "DealStatusCompleted" {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
 }

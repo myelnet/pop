@@ -18,6 +18,7 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +64,7 @@ func TestAddFunds(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cis, 0)
 
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -162,7 +163,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	createRes, err := mgr.GetChannel(ctx, from, to, createAmt)
 	require.NoError(t, err)
 
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 	// Send message confirmation to create channel
 	api.SetMsgLookup(lookup)
 
@@ -199,7 +200,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	api.SetActorState(&actState)
 	// See channel tests for note about this
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
@@ -312,7 +313,7 @@ func TestBestSpendable(t *testing.T) {
 	api.SetActorState(&actState)
 	// object reader to send a serialized object
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
@@ -456,7 +457,7 @@ func TestCollectChannel(t *testing.T) {
 	api.SetActorState(&actState)
 	// object reader to send a serialized object
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
@@ -519,7 +520,7 @@ func TestCollectChannel(t *testing.T) {
 	// update our actor state to the api so it's queryable
 	api.SetActorState(&actState)
 
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 	// We should have 3 chain txs we're waiting for
 	for i := 0; i < 3; i++ {
 		api.SetMsgLookup(lookup)
