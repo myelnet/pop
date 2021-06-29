@@ -183,6 +183,12 @@ func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 		return nil, err
 	}
 
+	// remove potential unwanted blocks
+	err = idx.cleanBlockStore()
+	if err != nil {
+		return nil, err
+	}
+
 	// start garbage collector
 	idx.gcLoop()
 
@@ -484,73 +490,9 @@ func (idx *Index) evict(size uint64) uint64 {
 }
 
 func (idx *Index) tagForEviction(ref *DataRef) error {
-	idx.emu.Lock()
-	defer idx.emu.Unlock()
-
-	link := cidlink.Link{Cid: ref.PayloadCID}
-	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
-		return basicnode.Prototype.Any, nil
+	return idx.browseDAG(ref, func(v *DataRef) {
+		idx.evictionSet.Add(v.PayloadCID)
 	})
-
-	// The root node could be a raw node so we need to select the builder accordingly
-	nodeType, err := chooser(link, ipld.LinkContext{})
-	if err != nil {
-		return err
-	}
-	builder := nodeType.NewBuilder()
-
-	// We make a custom loader to intercept when each block is read during the traversal
-	makeLoader := func(bs blockstore.GCBlockstore) ipld.Loader {
-		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
-			c, ok := lnk.(cidlink.Link)
-			if !ok {
-				return nil, fmt.Errorf("incorrect Link Type")
-			}
-
-			block, err := bs.Get(c.Cid)
-			if err != nil {
-				return nil, err
-			}
-
-			reader := bytes.NewReader(block.RawData())
-
-			v := new(DataRef)
-			if err := v.UnmarshalCBOR(reader); err != nil {
-				return reader, err
-			}
-
-			idx.evictionSet.Add(v.PayloadCID)
-
-			return reader, nil
-		}
-	}
-
-	// Load the root node
-	err = link.Load(context.TODO(), ipld.LinkContext{}, builder, makeLoader(idx.bstore))
-	if err != nil {
-		return fmt.Errorf("unable to load link: %v", err)
-	}
-	nd := builder.Build()
-
-	s, err := selector.ParseSelector(sel.All())
-	if err != nil {
-		return err
-	}
-
-	// Traverse any links from the root node
-	err = traversal.Progress{
-		Cfg: &traversal.Config{
-			LinkLoader:                     makeLoader(idx.bstore),
-			LinkTargetNodePrototypeChooser: chooser,
-		},
-	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (idx *Index) GC() {
@@ -592,6 +534,111 @@ func (idx *Index) gcLoop() {
 			}
 		}
 	}()
+}
+
+func (idx *Index) cleanBlockStore() error {
+	cidSet := cid.NewSet()
+
+	err := idx.root.ForEach(context.Background(), func(k string, val *cbg.Deferred) error {
+		ref := new(DataRef)
+		err := ref.UnmarshalCBOR(bytes.NewReader(val.Raw))
+		if err != nil {
+			return err
+		}
+
+		err = idx.browseDAG(ref, func(currentRef *DataRef) {
+			cidSet.Add(currentRef.PayloadCID)
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	kc, err := idx.Bstore().AllKeysChan(context.Background())
+	for k := range kc {
+		if cidSet.Has(k) {
+			continue
+		}
+
+		err = idx.Bstore().DeleteBlock(k)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (idx *Index) browseDAG(ref *DataRef, f func(*DataRef)) error {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
+	link := cidlink.Link{Cid: ref.PayloadCID}
+	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
+		return basicnode.Prototype.Any, nil
+	})
+
+	// The root node could be a raw node so we need to select the builder accordingly
+	nodeType, err := chooser(link, ipld.LinkContext{})
+	if err != nil {
+		return err
+	}
+	builder := nodeType.NewBuilder()
+
+	// We make a custom loader to intercept when each block is read during the traversal
+	makeLoader := func(bs blockstore.GCBlockstore) ipld.Loader {
+		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
+			c, ok := lnk.(cidlink.Link)
+			if !ok {
+				return nil, fmt.Errorf("incorrect Link Type")
+			}
+
+			block, err := bs.Get(c.Cid)
+			if err != nil {
+				return nil, err
+			}
+
+			reader := bytes.NewReader(block.RawData())
+
+			v := new(DataRef)
+			if err := v.UnmarshalCBOR(reader); err != nil {
+				return reader, err
+			}
+
+			f(v)
+
+			return reader, nil
+		}
+	}
+
+	// Load the root node
+	err = link.Load(context.TODO(), ipld.LinkContext{}, builder, makeLoader(idx.bstore))
+	if err != nil {
+		return fmt.Errorf("unable to load link: %v", err)
+	}
+	nd := builder.Build()
+
+	s, err := selector.ParseSelector(sel.All())
+	if err != nil {
+		return err
+	}
+
+	// Traverse any links from the root node
+	err = traversal.Progress{
+		Cfg: &traversal.Config{
+			LinkLoader:                     makeLoader(idx.bstore),
+			LinkTargetNodePrototypeChooser: chooser,
+		},
+	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ---------- Interest --------------
