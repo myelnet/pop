@@ -546,7 +546,7 @@ func (idx *Index) CleanBlockStore() error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
-	cidSet := cid.NewSet()
+	hashSet := make(map[string]struct{})
 
 	err := idx.root.ForEach(context.Background(), func(k string, val *cbg.Deferred) error {
 		ref := new(DataRef)
@@ -556,14 +556,23 @@ func (idx *Index) CleanBlockStore() error {
 		}
 
 		return idx.walkDAG(ref.PayloadCID, func(blk blocks.Block) error {
-			cidSet.Add(blk.Cid())
+			hash := blk.Cid().Hash()
+			hashSet[hash.String()] = struct{}{}
 			return nil
 		})
 	})
+	if err != nil {
+		return err
+	}
 
 	kc, err := idx.Bstore().AllKeysChan(context.Background())
+	if err != nil {
+		return err
+	}
 	for k := range kc {
-		if cidSet.Has(k) {
+		hash := k.Hash()
+		_, exists := hashSet[hash.String()]
+		if exists {
 			continue
 		}
 
