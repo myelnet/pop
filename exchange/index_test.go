@@ -675,7 +675,7 @@ func TestCleanBlockStore(t *testing.T) {
 		PayloadSize: int64(len(blk1.RawData())),
 	}))
 
-	// set blk2 ref1 in index
+	// set blk2 ref2 in index
 	require.NoError(t, exch.Index().SetRef(&DataRef{
 		PayloadCID:  blk2.Cid(),
 		PayloadSize: int64(len(blk2.RawData())),
@@ -703,7 +703,7 @@ func TestCleanBlockStore(t *testing.T) {
 	err = exch.Index().DropRef(blk1.Cid())
 	require.NoError(t, err)
 
-	// remove block1 in blockstore, which Refs were delete
+	// remove blocks from blockstore, which Refs were delete
 	err = exch.Index().CleanBlockStore()
 	require.NoError(t, err)
 
