@@ -29,7 +29,6 @@ func runPing(ctx context.Context, args []string) error {
 
 	prc := make(chan *node.PingResult, 1)
 	cc.SetNotifyCallback(func(n node.Notify) {
-
 		if pr := n.PingResult; pr != nil {
 			prc <- pr
 		}

@@ -14,6 +14,9 @@ import (
 
 var jsonEscapedZero = []byte(`\u0000`)
 
+// OffArgs get passed to the Off command
+type OffArgs struct{}
+
 // PingArgs get passed to the Ping command
 type PingArgs struct {
 	Addr string
@@ -89,6 +92,7 @@ type ListArgs struct {
 
 // Command is a message sent from a client to the daemon
 type Command struct {
+	Off          *OffArgs
 	Ping         *PingArgs
 	Put          *PutArgs
 	Status       *StatusArgs
@@ -101,6 +105,9 @@ type Command struct {
 	Get          *GetArgs
 	List         *ListArgs
 }
+
+// OffResult
+type OffResult struct{}
 
 // PingResult is sent in the notify message to give us the info we requested
 type PingResult struct {
@@ -189,6 +196,7 @@ type ListResult struct {
 
 // Notify is a message sent from the daemon to the client
 type Notify struct {
+	OffResult    *OffResult
 	PingResult   *PingResult
 	PutResult    *PutResult
 	StatusResult *StatusResult
@@ -225,6 +233,10 @@ func (cs *CommandServer) GotMsgBytes(ctx context.Context, b []byte) error {
 }
 
 func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
+	if c := cmd.Off; c != nil {
+		cs.n.Off(ctx)
+		return nil
+	}
 	if c := cmd.Ping; c != nil {
 		cs.n.Ping(ctx, c.Addr)
 		return nil
@@ -324,6 +336,10 @@ func (cc *CommandClient) send(cmd Command) {
 		log.Error().Err(err).Msg("[unexpected] zero byte in CommandClient.send")
 	}
 	cc.sendCommandMsg(b)
+}
+
+func (cc *CommandClient) Off() {
+	cc.send(Command{Off: &OffArgs{}})
 }
 
 func (cc *CommandClient) Ping(addr string) {

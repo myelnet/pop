@@ -74,6 +74,8 @@ var ErrQuoteNotFound = errors.New("quote not found")
 // ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
 var ErrInvalidPeer = errors.New("invalid peer ID or address")
 
+var GracefulShutdown = make(chan struct{})
+
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -321,6 +323,12 @@ func (nd *node) send(n Notify) {
 	} else {
 		log.Info().Interface("notif", n).Msg("nil notify callback; dropping")
 	}
+}
+
+// Off
+func (nd *node) Off(ctx context.Context) {
+	nd.send(Notify{OffResult: &OffResult{}})
+	GracefulShutdown <- struct{}{}
 }
 
 // Ping the node for sanity check more than anything

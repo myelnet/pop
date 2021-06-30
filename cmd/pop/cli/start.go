@@ -137,6 +137,12 @@ Manage your Myel point of presence from the command line.
 		}
 	}()
 
+	go func() {
+		<-GracefulShutdown
+		fmt.Printf("Gracefully shutting down\n")
+		cancel()
+	}()
+
 	filToken := utils.FormatToken(startArgs.FilToken, startArgs.FilTokenType)
 
 	var bAddrs []string
