@@ -65,6 +65,13 @@ func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Ba
 // GetChannel adds fund to a new channel in a given direction, if one already exists it will update it
 // it does not wait for the message to be confirmed on chain
 func (p *Payments) GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*ChannelResponse, error) {
+	ci, err := p.store.OutboundActiveByFromTo(from, to)
+	if err == nil && ci.Amount.GreaterThan(amt) {
+		return &ChannelResponse{
+			Channel:      *ci.Channel,
+			WaitSentinel: cid.Undef,
+		}, nil
+	}
 	ch, err := p.channelByFromTo(from, to)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to get or create channel accessor: %v", err)

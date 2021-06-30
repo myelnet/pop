@@ -31,6 +31,8 @@ type Exchange struct {
 	opts Options
 	// pubsub topics
 	tops []*pubsub.Topic
+	// payment manager for more control over payment channels
+	pay payments.Manager
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
 	// Routing service
@@ -65,6 +67,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		opts: opts,
 		idx:  idx,
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+		pay:  payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
@@ -83,7 +86,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ctx,
 		opts.MultiStore,
 		ds,
-		payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
+		exch.pay,
 		opts.DataTransfer,
 		h.ID(),
 	)
@@ -236,4 +239,9 @@ func (e *Exchange) R() *Replication {
 // Index returns the exchange data index
 func (e *Exchange) Index() *Index {
 	return e.idx
+}
+
+// Payments returns the payment manager
+func (e *Exchange) Payments() payments.Manager {
+	return e.pay
 }

@@ -1107,6 +1107,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
 				if state.PayloadCID == root {
+					fmt.Println("status", deal.Statuses[state.Status], state.Message)
 					results <- GetResult{
 						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
 						Status:        deal.Statuses[state.Status],
@@ -1152,8 +1153,8 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
-				fmt.Println("status", deal.Statuses[state.Status], state.Message)
 				if state.PayloadCID == root {
+					fmt.Println("status", deal.Statuses[state.Status], state.Message)
 					results <- GetResult{
 						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
 						Status:        deal.Statuses[state.Status],

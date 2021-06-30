@@ -923,6 +923,15 @@ loop:
 		}
 	}
 
+	// We should have a single channel
+	channels, err := cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	availableFunds, err := cn.exch.Payments().ChannelAvailableFunds(channels[0])
+	require.NoError(t, err)
+	fmt.Println("funds", availableFunds.ConfirmedAmt)
+
 	// from now on we should have the funds to retrieve everything progressively
 	// from the same peer using the same payment channel
 	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%v/%s", root, "first")})
@@ -936,14 +945,24 @@ loop:
 		t.Fatal("could not start the transfer")
 	}
 
+loop2:
 	for {
 		select {
 		case res := <-results:
 			if res.Status == "DealStatusCompleted" {
-				return
+				break loop2
 			}
 		case <-ctx.Done():
 			t.Fatal("could not complete transfer")
 		}
 	}
+
+	// We should still have a single channel
+	channels, err = cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	availableFunds, err = cn.exch.Payments().ChannelAvailableFunds(channels[0])
+	require.NoError(t, err)
+	fmt.Println("funds", availableFunds.ConfirmedAmt)
 }

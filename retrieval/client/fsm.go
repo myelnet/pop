@@ -134,7 +134,7 @@ var FSMEvents = fsm.Events{
 		// created for an earlier deal but the initial funding for this deal
 		// was being added, then we still need to allocate a payment channel
 		// lane
-		FromMany(deal.StatusPaymentChannelCreating, deal.StatusPaymentChannelAddingInitialFunds).
+		FromMany(deal.StatusPaymentChannelCreating, deal.StatusPaymentChannelAddingInitialFunds, deal.StatusAccepted).
 		To(deal.StatusPaymentChannelAllocatingLane).
 		// If the payment channel ran out of funds and needed to be topped up,
 		// then the payment channel lane already exists so just move straight
@@ -455,6 +455,10 @@ func SetupPaymentChannelStart(ctx fsm.Context, environment DealEnvironment, ds d
 
 	if res.Channel == address.Undef {
 		return ctx.Trigger(EventPaymentChannelCreateInitiated, res.WaitSentinel)
+	}
+
+	if res.WaitSentinel == cid.Undef {
+		return ctx.Trigger(EventPaymentChannelReady, res.Channel)
 	}
 
 	return ctx.Trigger(EventPaymentChannelAddingFunds, res.WaitSentinel, res.Channel)
