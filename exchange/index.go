@@ -6,26 +6,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	"github.com/filecoin-project/go-hamt-ipld/v3"
 	blocks "github.com/ipfs/go-block-format"
+	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/ipld/go-ipld-prime"
 	dagpb "github.com/ipld/go-ipld-prime-proto"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
+	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
-	"io"
-	"sync"
-	"time"
-
-	"github.com/filecoin-project/go-hamt-ipld/v3"
-	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	cbor "github.com/ipfs/go-ipld-cbor"
-	"github.com/myelnet/pop/internal/utils"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -546,7 +546,7 @@ func (idx *Index) CleanBlockStore() error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
-	hashSet := make(map[string]struct{})
+	cidSet := cid.NewSet()
 
 	err := idx.root.ForEach(context.Background(), func(k string, val *cbg.Deferred) error {
 		ref := new(DataRef)
@@ -556,8 +556,7 @@ func (idx *Index) CleanBlockStore() error {
 		}
 
 		return idx.walkDAG(ref.PayloadCID, func(blk blocks.Block) error {
-			hash := blk.Cid().Hash()
-			hashSet[hash.String()] = struct{}{}
+			cidSet.Add(blk.Cid())
 			return nil
 		})
 	})
@@ -570,12 +569,10 @@ func (idx *Index) CleanBlockStore() error {
 		return err
 	}
 	for k := range kc {
-		hash := k.Hash()
-		_, exists := hashSet[hash.String()]
-		if exists {
+		key := cid.NewCidV1(cid.DagCBOR, k.Hash())
+		if cidSet.Has(key) {
 			continue
 		}
-
 		err = idx.Bstore().DeleteBlock(k)
 		if err != nil {
 			return err
