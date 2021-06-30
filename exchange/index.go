@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/filecoin-project/go-hamt-ipld/v3"
 	blocks "github.com/ipfs/go-block-format"
@@ -58,10 +57,8 @@ type Index struct {
 	// to trigger request for new content and refreshing the index with new popular content
 	updateFunc func()
 
-	emu              sync.Mutex
-	evictionSet      *cid.Set
-	gcLoopDuration   time.Duration
-	lastEvictionTime time.Time
+	emu         sync.Mutex
+	evictionSet *cid.Set
 
 	mu sync.Mutex
 	// current size of content committed to the store
@@ -114,13 +111,6 @@ func WithBounds(up, lo uint64) IndexOption {
 	}
 }
 
-// WithGCLoopDuration sets the duration of the Garbage Collector Loop
-func WithGCLoopDuration(d time.Duration) IndexOption {
-	return func(idx *Index) {
-		idx.gcLoopDuration = d
-	}
-}
-
 // WithUpdateFunc sets an UpdateFunc callback and a read interval after which to call it
 func WithUpdateFunc(fn func()) IndexOption {
 	return func(idx *Index) {
@@ -131,15 +121,13 @@ func WithUpdateFunc(fn func()) IndexOption {
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
 func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
-		blist:            list.New(),
-		freqs:            list.New(),
-		ds:               namespace.Wrap(ds, datastore.NewKey("/index")),
-		Refs:             make(map[string]*DataRef),
-		interest:         make(map[string]*DataRef),
-		rootCID:          cid.Undef,
-		evictionSet:      cid.NewSet(),
-		lastEvictionTime: time.Now(),
-		gcLoopDuration:   time.Minute * 5,
+		blist:       list.New(),
+		freqs:       list.New(),
+		ds:          namespace.Wrap(ds, datastore.NewKey("/index")),
+		Refs:        make(map[string]*DataRef),
+		interest:    make(map[string]*DataRef),
+		rootCID:     cid.Undef,
+		evictionSet: cid.NewSet(),
 	}
 	for _, o := range opts {
 		o(idx)
@@ -521,25 +509,6 @@ func (idx *Index) GC() {
 	}
 
 	idx.evictionSet = cid.NewSet()
-	idx.lastEvictionTime = time.Now()
-}
-
-func (idx *Index) GCLoop() {
-	go func() {
-		ticker := time.NewTicker(idx.gcLoopDuration)
-
-		for {
-			select {
-			case now := <-ticker.C:
-				// if an eviction happened within the last gcLoopDuration, no need to do one now
-				if idx.lastEvictionTime.Add(idx.gcLoopDuration).After(now) {
-					continue
-				}
-
-				idx.GC()
-			}
-		}
-	}()
 }
 
 func (idx *Index) CleanBlockStore() error {

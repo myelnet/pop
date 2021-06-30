@@ -136,9 +136,6 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 		return err
 	}
 	for k := range kchan {
-		if err != nil {
-			return err
-		}
 		blk, err := from.Get(k)
 		if err != nil {
 			return err

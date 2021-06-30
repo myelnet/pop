@@ -52,7 +52,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		// leave a 20% lower bound so we don't evict too frequently
 		WithBounds(opts.Capacity, opts.Capacity-uint64(math.Round(float64(opts.Capacity)*0.2))),
-		WithGCLoopDuration(opts.GCLoopDuration),
 	)
 	if err != nil {
 		return nil, err
@@ -65,6 +64,12 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		opts: opts,
 		idx:  idx,
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+	}
+
+	// remove unwanted blocks that might be in the blockstore but are removed from the index
+	err = exch.Index().CleanBlockStore()
+	if err != nil {
+		return nil, err
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)

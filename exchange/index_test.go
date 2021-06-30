@@ -3,12 +3,9 @@ package exchange
 import (
 	"bytes"
 	"context"
-	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	"github.com/myelnet/pop/internal/testutil"
 	"math/rand"
 	"runtime"
 	"testing"
-	"time"
 
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -21,6 +18,8 @@ import (
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/pop/internal/testutil"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
@@ -585,16 +584,12 @@ func TestGC(t *testing.T) {
 	n := testutil.NewTestNode(mn, t)
 
 	opts := Options{
-		Blockstore:     n.Bs,
-		MultiStore:     n.Ms,
-		RepoPath:       n.DTTmpDir,
-		GCLoopDuration: 500 * time.Millisecond,
+		Blockstore: n.Bs,
+		MultiStore: n.Ms,
+		RepoPath:   n.DTTmpDir,
 	}
 	exch, err := New(ctx, n.Host, n.Ds, opts)
 	require.NoError(t, err)
-
-	// start GC loop
-	exch.Index().GCLoop()
 
 	// generate random block1
 	blk1 := n.CreateRandomBlock(t, n.Bs)
@@ -638,8 +633,8 @@ func TestGC(t *testing.T) {
 	err = exch.Index().DropRef(blk1.Cid())
 	require.NoError(t, err)
 
-	// wait for GC to clean block1
-	time.Sleep(opts.GCLoopDuration + time.Second)
+	// evict all tagged nodes
+	exch.Index().GC()
 
 	// check if GC did remove tagged block1 ...
 	has, err = exch.Index().Bstore().Has(blk1.Cid())
