@@ -52,6 +52,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		// leave a 20% lower bound so we don't evict too frequently
 		WithBounds(opts.Capacity, opts.Capacity-uint64(math.Round(float64(opts.Capacity)*0.2))),
+		WithGCLoopDuration(opts.GCLoopDuration),
 	)
 	if err != nil {
 		return nil, err

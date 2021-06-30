@@ -588,38 +588,43 @@ func TestGC(t *testing.T) {
 		Blockstore:     n.Bs,
 		MultiStore:     n.Ms,
 		RepoPath:       n.DTTmpDir,
-		GCLoopDuration: 1 * time.Second,
+		GCLoopDuration: 500 * time.Millisecond,
 	}
 	exch, err := New(ctx, n.Host, n.Ds, opts)
 	require.NoError(t, err)
 
-	// generate block
-	b1 := blockGen.Next()
-	require.NoError(t, exch.Index().Bstore().Put(b1))
+	// start GC loop
+	exch.Index().GCLoop()
+
+	// generate random block
+	blk := n.CreateRandomBlock(t, n.Bs)
+	require.NoError(t, exch.Index().Bstore().Put(blk))
 
 	// set ref in index
 	require.NoError(t, exch.Index().SetRef(&DataRef{
-		PayloadCID:  b1.Cid(),
-		PayloadSize: int64(len(b1.RawData())),
+		PayloadCID:  blk.Cid(),
+		PayloadSize: int64(len(blk.RawData())),
 	}))
 
 	// check if ref is in index
-	ref, err := exch.Index().GetRef(b1.Cid())
+	ref, err := exch.Index().GetRef(blk.Cid())
 	require.NoError(t, err)
-	require.Equal(t, ref.PayloadCID, b1.Cid())
+	require.Equal(t, ref.PayloadCID, blk.Cid())
 
 	// check if bstore has block
-	has, err := exch.Index().Bstore().Has(b1.Cid())
+	has, err := exch.Index().Bstore().Has(blk.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 
-	// drop ref & tag corresponding block for eviction
-	err = exch.Index().DropRef(b1.Cid())
+	// drop ref (will tag corresponding blocks for eviction)
+	err = exch.Index().DropRef(blk.Cid())
 	require.NoError(t, err)
 
-	//time.Sleep(opts.GCLoopDuration + 1)
+	// wait for GC to clean blocks
+	time.Sleep(opts.GCLoopDuration + time.Second)
 
-	// check if GC removed tagged block
-	//err = exch.Index().Bstore().DeleteBlock(b1.Cid())
-	//require.NoError(t, err)
+	// check if GC did remove tagged block
+	has, err = exch.Index().Bstore().Has(blk.Cid())
+	require.NoError(t, err)
+	require.Equal(t, false, has)
 }

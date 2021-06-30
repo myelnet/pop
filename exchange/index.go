@@ -114,6 +114,13 @@ func WithBounds(up, lo uint64) IndexOption {
 	}
 }
 
+// WithGCLoopDuration sets the duration of the Garbage Collector Loop
+func WithGCLoopDuration(d time.Duration) IndexOption {
+	return func(idx *Index) {
+		idx.gcLoopDuration = d
+	}
+}
+
 // WithUpdateFunc sets an UpdateFunc callback and a read interval after which to call it
 func WithUpdateFunc(fn func()) IndexOption {
 	return func(idx *Index) {
