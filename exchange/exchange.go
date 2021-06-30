@@ -56,6 +56,16 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	if err != nil {
 		return nil, err
 	}
+
+	// remove potential unwanted blocks
+	err = idx.CleanBlockStore()
+	if err != nil {
+		return nil, err
+	}
+
+	// start garbage collector
+	idx.GCLoop()
+
 	// register a pubsub topic for each region
 	exch := &Exchange{
 		h:    h,

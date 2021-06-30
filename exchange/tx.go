@@ -694,6 +694,12 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 // Close removes any listeners and stream handlers related to a session
 // If the transaction was not committed, any staged content will be deleted
 func (tx *Tx) Close() error {
+	gcbl, ok := tx.bs.(blockstore.GCBlockstore)
+	if ok {
+		unlock := gcbl.GCLock()
+		defer unlock.Unlock()
+	}
+
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}

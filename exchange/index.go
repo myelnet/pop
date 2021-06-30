@@ -47,7 +47,7 @@ const KIndex = "idx"
 type Index struct {
 	ds     datastore.Batching
 	root   *hamt.Node
-	bstore blockstore.GCBlockstore
+	bstore blockstore.Blockstore
 	store  cbor.IpldStore
 	// Upper bound is the store usage amount after which we start evicting refs from the store
 	ub uint64
@@ -183,15 +183,6 @@ func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// remove potential unwanted blocks
-	err = idx.cleanBlockStore()
-	if err != nil {
-		return nil, err
-	}
-
-	// start garbage collector
-	idx.gcLoop()
 
 	return idx, nil
 }
@@ -393,7 +384,7 @@ func (idx *Index) Len() int {
 }
 
 // Bstore returns the lower level blockstore storing the hamt
-func (idx *Index) Bstore() blockstore.GCBlockstore {
+func (idx *Index) Bstore() blockstore.Blockstore {
 	return idx.bstore
 }
 
@@ -494,15 +485,10 @@ func (idx *Index) tagForEviction(ref *DataRef) error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
-	err := idx.browseDAG(ref.PayloadCID, func(blk blocks.Block) error {
+	return idx.walkDAG(ref.PayloadCID, func(blk blocks.Block) error {
 		idx.evictionSet.Add(blk.Cid())
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (idx *Index) GC() {
@@ -514,8 +500,11 @@ func (idx *Index) GC() {
 		return
 	}
 
-	unlock := idx.bstore.GCLock()
-	defer unlock.Unlock()
+	gcbl, ok := idx.bstore.(blockstore.GCBlockstore)
+	if ok {
+		unlock := gcbl.GCLock()
+		defer unlock.Unlock()
+	}
 
 	err := idx.evictionSet.ForEach(func(c cid.Cid) error {
 		return idx.bstore.DeleteBlock(c)
@@ -528,7 +517,7 @@ func (idx *Index) GC() {
 	idx.lastEvictionTime = time.Now()
 }
 
-func (idx *Index) gcLoop() {
+func (idx *Index) GCLoop() {
 	go func() {
 		ticker := time.NewTicker(idx.gcLoopDuration)
 
@@ -546,7 +535,7 @@ func (idx *Index) gcLoop() {
 	}()
 }
 
-func (idx *Index) cleanBlockStore() error {
+func (idx *Index) CleanBlockStore() error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
@@ -559,15 +548,10 @@ func (idx *Index) cleanBlockStore() error {
 			return err
 		}
 
-		err = idx.browseDAG(ref.PayloadCID, func(blk blocks.Block) error {
+		return idx.walkDAG(ref.PayloadCID, func(blk blocks.Block) error {
 			cidSet.Add(blk.Cid())
 			return nil
 		})
-		if err != nil {
-			return err
-		}
-
-		return nil
 	})
 
 	kc, err := idx.Bstore().AllKeysChan(context.Background())
@@ -585,7 +569,7 @@ func (idx *Index) cleanBlockStore() error {
 	return nil
 }
 
-func (idx *Index) browseDAG(root cid.Cid, f func(blocks.Block) error) error {
+func (idx *Index) walkDAG(root cid.Cid, f func(blocks.Block) error) error {
 	link := cidlink.Link{Cid: root}
 	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
 		return basicnode.Prototype.Any, nil
@@ -599,7 +583,7 @@ func (idx *Index) browseDAG(root cid.Cid, f func(blocks.Block) error) error {
 	builder := nodeType.NewBuilder()
 
 	// We make a custom loader to intercept when each block is read during the traversal
-	makeLoader := func(bs blockstore.GCBlockstore) ipld.Loader {
+	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
 		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
 			c, ok := lnk.(cidlink.Link)
 			if !ok {

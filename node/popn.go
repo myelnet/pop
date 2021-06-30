@@ -673,12 +673,12 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		return
 	}
 
-	// Run the garbage collector to remove tagged Refs
-	nd.exch.Index().GC()
-
 	nd.tx.Close()
 	nd.tx = nil
 	nd.txmu.Unlock()
+
+	// Run the garbage collector to remove tagged Refs
+	nd.exch.Index().GC()
 
 	nd.send(Notify{CommResult: &CommResult{
 		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),
