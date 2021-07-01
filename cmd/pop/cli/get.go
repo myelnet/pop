@@ -39,7 +39,7 @@ data to disk. Adding a miner flag will fallback to miner if content is not avail
 		fs.BoolVar(&getArgs.verbose, "verbose", false, "print the state transitions")
 		fs.StringVar(&getArgs.miner, "miner", "", "ask storage miner and use as fallback if network does not have the content")
 		fs.StringVar(&getArgs.strategy, "strategy", "SelectFirst", "strategy for selecting offers from providers")
-		fs.Int64Var(&getArgs.maxppb, "maxppb", 5, "max price per byte")
+		fs.Int64Var(&getArgs.maxppb, "maxppb", 0, "max price per byte")
 		return fs
 	})(),
 }
@@ -55,6 +55,11 @@ func runGet(ctx context.Context, args []string) error {
 		}
 	})
 	go receive(ctx, cc, c)
+
+	// if maxppb is not set, use default value
+	if getArgs.maxppb == 0 {
+		getArgs.maxppb = int64(startArgs.MaxPPB)
+	}
 
 	cc.Get(&node.GetArgs{
 		Cid:      args[0],
