@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -47,8 +49,19 @@ func runPut(ctx context.Context, args []string) error {
 	})
 	go receive(ctx, cc, c)
 
+	filePath := args[0]
+	isAbsPath := filepath.IsAbs(filePath)
+	if !isAbsPath {
+		// if path is relative, convert it to absolute
+		mydir, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		filePath = filepath.Join(mydir, filePath)
+	}
+
 	cc.Put(&node.PutArgs{
-		Path:      args[0],
+		Path:      filePath,
 		ChunkSize: putArgs.chunkSize,
 	})
 
