@@ -605,7 +605,7 @@ func TestGC(t *testing.T) {
 		PayloadSize: int64(len(blk1.RawData())),
 	}))
 
-	// set blk2 ref1 in index
+	// set blk2 ref2 in index
 	require.NoError(t, exch.Index().SetRef(&DataRef{
 		PayloadCID:  blk2.Cid(),
 		PayloadSize: int64(len(blk2.RawData())),

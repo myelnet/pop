@@ -133,7 +133,7 @@ func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 		o(idx)
 	}
 	// keep a reference of the blockstore for loading in graphsync
-	idx.bstore = blockstore.NewGCBlockstore(blockstore.NewBlockstore(idx.ds), blockstore.NewGCLocker())
+	idx.bstore = blockstore.NewBlockstore(idx.ds)
 	idx.store = cbor.NewCborStore(idx.bstore)
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
