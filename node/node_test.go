@@ -15,6 +15,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -359,6 +360,10 @@ func TestCommit(t *testing.T) {
 
 	cn := newTestNode(ctx, mn, t)
 
+	// we set an upper bound limit lower, so that when we add the 2nd file
+	// it will force an eviction
+	cn.exch.Index().UpdateOptions(exchange.WithBounds(255000, 128000))
+
 	var nds []*node
 	nds = append(nds, newTestNode(ctx, mn, t))
 	nds = append(nds, newTestNode(ctx, mn, t))
@@ -377,14 +382,13 @@ func TestCommit(t *testing.T) {
 	added := make(chan string, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.PutResult.Err, "")
-
 		added <- n.PutResult.Cid
 	}
 	cn.Put(ctx, &PutArgs{
 		Path:      p,
 		ChunkSize: 1024,
 	})
-	<-added
+	cid1 := <-added
 
 	committed := make(chan []string, 3)
 	cn.notify = func(n Notify) {
@@ -397,6 +401,56 @@ func TestCommit(t *testing.T) {
 	close(committed)
 	for range committed {
 	}
+
+	c1, err := cid.Decode(cid1)
+	require.NoError(t, err)
+
+	has, err := cn.bs.Has(c1)
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	// test Garbage Collectors by adding a new file, forcing an eviction
+	dir2 := t.TempDir()
+	data2 := make([]byte, 256000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	p2 := filepath.Join(dir2, "data2")
+	err = os.WriteFile(p2, data2, 0666)
+	require.NoError(t, err)
+
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.PutResult.Err, "")
+		added <- n.PutResult.Cid
+	}
+	cn.Put(ctx, &PutArgs{
+		Path:      p2,
+		ChunkSize: 1024,
+	})
+	cid2 := <-added
+
+	committed = make(chan []string, 3)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.CommResult.Err, "")
+		committed <- n.CommResult.Caches
+	}
+	cn.Commit(ctx, &CommArgs{
+		CacheRF: 2,
+	})
+	close(committed)
+	for range committed {
+	}
+
+	c2, err := cid.Decode(cid2)
+	require.NoError(t, err)
+
+	// check if blockstore contains new file
+	has2, err := cn.bs.Has(c2)
+	require.NoError(t, err)
+	require.Equal(t, true, has2)
+
+	// check if garbage collector evicted the first file
+	has, err = cn.bs.Has(c1)
+	require.NoError(t, err)
+	require.Equal(t, false, has)
 }
 
 func TestGet(t *testing.T) {

@@ -208,6 +208,12 @@ func (idx *Index) loadFromStore() error {
 	return nil
 }
 
+func (idx *Index) UpdateOptions(opts ...IndexOption) {
+	for _, o := range opts {
+		o(idx)
+	}
+}
+
 // LoadRoot loads a new HAMT root node from a given CID, it can be used to load a node
 // from a different root than the current one for example
 func (idx *Index) LoadRoot(r cid.Cid, store cbor.IpldStore) (*hamt.Node, error) {
@@ -248,7 +254,6 @@ func (idx *Index) Flush() error {
 }
 
 // DropRef removes all content linked to a root CID and associated Refs
-// TODO: garbage collect
 func (idx *Index) DropRef(k cid.Cid) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
