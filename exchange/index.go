@@ -133,7 +133,7 @@ func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 		o(idx)
 	}
 	// keep a reference of the blockstore for loading in graphsync
-	idx.bstore = blockstore.NewBlockstore(idx.ds)
+	idx.bstore = blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 	idx.store = cbor.NewCborStore(idx.bstore)
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
@@ -486,38 +486,42 @@ func (idx *Index) tagForEviction(ref *DataRef) error {
 	})
 }
 
-func (idx *Index) GC() {
+func (idx *Index) GC() error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
 	// exit if there is nothing to evict
 	if idx.evictionSet.Len() == 0 {
-		return
+		return nil
 	}
 
 	gcbl, ok := idx.bstore.(blockstore.GCBlockstore)
-	if ok {
-		unlock := gcbl.GCLock()
-		defer unlock.Unlock()
+	if !ok {
+		return errors.New("blockstore is not a GCBlockstore")
 	}
+
+	unlock := gcbl.GCLock()
+	defer unlock.Unlock()
 
 	err := idx.evictionSet.ForEach(func(c cid.Cid) error {
 		return idx.bstore.DeleteBlock(c)
 	})
 	if err != nil {
-		log.Error().Err(err).Msg("failed to run garbage collector")
+		return fmt.Errorf("failed to run garbage collector: %v", err)
 	}
 
 	idx.evictionSet = cid.NewSet()
+
+	return nil
 }
 
-func (idx *Index) CleanBlockStore() error {
+func (idx *Index) CleanBlockStore(ctx context.Context) error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
 	cidSet := cid.NewSet()
 
-	err := idx.root.ForEach(context.Background(), func(k string, val *cbg.Deferred) error {
+	err := idx.root.ForEach(ctx, func(k string, val *cbg.Deferred) error {
 		ref := new(DataRef)
 		err := ref.UnmarshalCBOR(bytes.NewReader(val.Raw))
 		if err != nil {
@@ -533,7 +537,7 @@ func (idx *Index) CleanBlockStore() error {
 		return err
 	}
 
-	kc, err := idx.Bstore().AllKeysChan(context.Background())
+	kc, err := idx.Bstore().AllKeysChan(ctx)
 	if err != nil {
 		return err
 	}

@@ -158,6 +158,12 @@ func run() error {
 	}
 	fmt.Printf("==> Started pop exchange\n")
 
+	// remove unwanted blocks that might be in the blockstore but are removed from the index
+	err = exch.Index().CleanBlockStore(ctx)
+	if err != nil {
+		return err
+	}
+
 	go utils.Bootstrap(ctx, host, args.bootstrapPeers)
 
 	fmt.Printf("==> Joined %s regions\n", args.regions)
@@ -207,5 +213,4 @@ func setupRepo() (string, error) {
 	fmt.Printf("==> Initialized pop repo in %s\n", path)
 
 	return path, nil
-
 }

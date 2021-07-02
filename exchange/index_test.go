@@ -577,6 +577,74 @@ func TestLoadInterest(t *testing.T) {
 	}
 }
 
+func TestEvictBlock(t *testing.T) {
+	ctx := context.Background()
+
+	mn := mocknet.New(ctx)
+	n := testutil.NewTestNode(mn, t)
+
+	opts := Options{
+		Blockstore: n.Bs,
+		MultiStore: n.Ms,
+		RepoPath:   n.DTTmpDir,
+	}
+	exch, err := New(ctx, n.Host, n.Ds, opts)
+	require.NoError(t, err)
+
+	// generate random block1
+	blk1 := n.CreateRandomBlock(t, n.Bs)
+	require.NoError(t, exch.Index().Bstore().Put(blk1))
+
+	// generate random block2
+	blk2 := n.CreateRandomBlock(t, n.Bs)
+	require.NoError(t, exch.Index().Bstore().Put(blk2))
+
+	// set blk1 ref1 in index
+	ref1 := &DataRef{
+		PayloadCID:  blk1.Cid(),
+		PayloadSize: int64(len(blk1.RawData())),
+	}
+	require.NoError(t, exch.Index().SetRef(ref1))
+
+	// set blk2 ref2 in index
+	require.NoError(t, exch.Index().SetRef(&DataRef{
+		PayloadCID:  blk2.Cid(),
+		PayloadSize: int64(len(blk2.RawData())),
+	}))
+
+	// tag only ref1 for eviction
+	err = exch.Index().tagForEviction(ref1)
+	require.NoError(t, err)
+
+	// check if bstore has blocks
+	has, err := exch.Index().Bstore().Has(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	has, err = exch.Index().Bstore().Has(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	// run garbage collector to remove tagged block from blockstore
+	err = exch.Index().GC()
+	require.NoError(t, err)
+
+	// GC does not remove ref from index
+	cid1, err := exch.Index().GetRef(ref1.PayloadCID)
+	require.NoError(t, err)
+	require.Equal(t, ref1.PayloadCID, cid1.PayloadCID)
+
+	// check if GC did remove tagged block1 ...
+	has, err = exch.Index().Bstore().Has(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, false, has)
+
+	// ... but not block2
+	has, err = exch.Index().Bstore().Has(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+}
+
 func TestGC(t *testing.T) {
 	ctx := context.Background()
 
@@ -634,7 +702,8 @@ func TestGC(t *testing.T) {
 	require.NoError(t, err)
 
 	// evict all tagged nodes
-	exch.Index().GC()
+	err = exch.Index().GC()
+	require.NoError(t, err)
 
 	// check if GC did remove tagged block1 ...
 	has, err = exch.Index().Bstore().Has(blk1.Cid())
@@ -704,7 +773,7 @@ func TestCleanBlockStore(t *testing.T) {
 	require.NoError(t, err)
 
 	// remove blocks from blockstore, which Refs were delete
-	err = exch.Index().CleanBlockStore()
+	err = exch.Index().CleanBlockStore(ctx)
 	require.NoError(t, err)
 
 	// check if CleanBlockStore did remove tagged block1 ...

@@ -238,6 +238,12 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
+	// remove unwanted blocks that might be in the blockstore but are removed from the index
+	err = nd.exch.Index().CleanBlockStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	if opts.PrivKey != "" {
 		err = nd.importPrivateKey(ctx, opts.PrivKey)
 		if err != nil {
@@ -678,7 +684,11 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	nd.txmu.Unlock()
 
 	// Run the garbage collector to remove tagged Refs
-	nd.exch.Index().GC()
+	err = nd.exch.Index().GC()
+	if err != nil {
+		sendErr(err)
+		return
+	}
 
 	nd.send(Notify{CommResult: &CommResult{
 		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),

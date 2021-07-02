@@ -66,12 +66,6 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 	}
 
-	// remove unwanted blocks that might be in the blockstore but are removed from the index
-	err = exch.Index().CleanBlockStore()
-	if err != nil {
-		return nil, err
-	}
-
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
 	if err != nil {
 		return nil, err

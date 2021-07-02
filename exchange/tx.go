@@ -694,12 +694,6 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 // Close removes any listeners and stream handlers related to a session
 // If the transaction was not committed, any staged content will be deleted
 func (tx *Tx) Close() error {
-	gcbl, ok := tx.bs.(blockstore.GCBlockstore)
-	if ok {
-		unlock := gcbl.GCLock()
-		defer unlock.Unlock()
-	}
-
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}
@@ -722,6 +716,14 @@ func (tx *Tx) SetAddress(addr address.Address) {
 // dumpStore transfers all the content from the tx store to the global blockstore
 // then deletes the store
 func (tx *Tx) dumpStore() error {
+	gcbl, ok := tx.bs.(blockstore.GCBlockstore)
+	if !ok {
+		return errors.New("blockstore is not a GCBlockstore")
+	}
+
+	unlock := gcbl.GCLock()
+	defer unlock.Unlock()
+
 	// If we dump before the transaction is committed all the content is lost
 	if tx.committed {
 		err := utils.MigrateBlocks(tx.ctx, tx.store.Bstore, tx.bs)
@@ -729,6 +731,7 @@ func (tx *Tx) dumpStore() error {
 			return err
 		}
 	}
+
 	return tx.ms.Delete(tx.storeID)
 }
 
