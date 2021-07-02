@@ -270,10 +270,10 @@ func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn 
 }
 
 // QueryProvider asks a provider directly for retrieval conditions
-func (gr *GossipRouting) QueryProvider(p peer.AddrInfo, root cid.Cid, sel ipld.Node, fn ReceiveOffer) error {
+func (gr *GossipRouting) QueryProvider(p peer.AddrInfo, root cid.Cid, sel ipld.Node) (deal.Offer, error) {
 	params, err := deal.NewQueryParams(sel)
 	if err != nil {
-		return err
+		return deal.Offer{}, err
 	}
 	m := deal.Query{
 		PayloadCID:  root,
@@ -285,18 +285,18 @@ func (gr *GossipRouting) QueryProvider(p peer.AddrInfo, root cid.Cid, sel ipld.N
 
 	err = stream.WriteQuery(m)
 	if err != nil {
-		return err
+		return deal.Offer{}, err
 	}
 
 	res, err := stream.ReadQueryResponse()
 	if err != nil {
-		return err
+		return deal.Offer{}, err
 	}
 	addrs, err := peer.AddrInfoToP2pAddrs(&p)
 	if err != nil {
-		return err
+		return deal.Offer{}, err
 	}
-	fn(deal.Offer{
+	return deal.Offer{
 		PeerAddr:                   addrs[0].Bytes(),
 		PayloadCID:                 root,
 		Size:                       res.Size,
@@ -305,8 +305,7 @@ func (gr *GossipRouting) QueryProvider(p peer.AddrInfo, root cid.Cid, sel ipld.N
 		MaxPaymentInterval:         res.MaxPaymentInterval,
 		MaxPaymentIntervalIncrease: res.MaxPaymentIntervalIncrease,
 		UnsealPrice:                res.UnsealPrice,
-	})
-	return nil
+	}, nil
 }
 
 // Query asks the gossip network of providers if anyone can provide the blocks we're looking for

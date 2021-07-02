@@ -918,6 +918,9 @@ loop:
 			if res.Status == "DealStatusCompleted" {
 				break loop
 			}
+			if res.Err != "" {
+				t.Error(res.Err)
+			}
 		case <-ctx.Done():
 			t.Fatal("could not complete transfer")
 		}
@@ -927,10 +930,6 @@ loop:
 	channels, err := cn.exch.Payments().ListChannels()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channels))
-
-	availableFunds, err := cn.exch.Payments().ChannelAvailableFunds(channels[0])
-	require.NoError(t, err)
-	fmt.Println("funds", availableFunds.ConfirmedAmt)
 
 	// from now on we should have the funds to retrieve everything progressively
 	// from the same peer using the same payment channel
@@ -952,6 +951,9 @@ loop2:
 			if res.Status == "DealStatusCompleted" {
 				break loop2
 			}
+			if res.Err != "" {
+				t.Error(res.Err)
+			}
 		case <-ctx.Done():
 			t.Fatal("could not complete transfer")
 		}
@@ -962,7 +964,65 @@ loop2:
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channels))
 
-	availableFunds, err = cn.exch.Payments().ChannelAvailableFunds(channels[0])
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%v/%s", root, "second")})
 	require.NoError(t, err)
-	fmt.Println("funds", availableFunds.ConfirmedAmt)
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+loop3:
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "DealStatusCompleted" {
+				break loop3
+			}
+			if res.Err != "" {
+				t.Error(res.Err)
+			}
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
+
+	// We should still have a single channel
+	channels, err = cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%v/%s", root, "third")})
+	require.NoError(t, err)
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+loop4:
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "DealStatusCompleted" {
+				break loop4
+			}
+			if res.Err != "" {
+				t.Error(res.Err)
+			}
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
+
+	// We should still have a single channel
+	channels, err = cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
 }

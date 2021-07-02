@@ -70,10 +70,10 @@ func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, 
 		TimeLockMax: abi.ChainEpoch(0),
 		Lane:        lane,
 		Nonce:       0,
-		Amount:      big.Sub(amt, p.chFunds.VoucherReedeemedAmt),
+		Amount:      big.Sub(amt, p.chFunds.VoucherRedeemedAmt),
 		// Signature:      sig,
 	}
-	p.chFunds.VoucherReedeemedAmt = big.Add(p.chFunds.VoucherReedeemedAmt, vouch.Amount)
+	p.chFunds.VoucherRedeemedAmt = big.Add(p.chFunds.VoucherRedeemedAmt, vouch.Amount)
 	vouchRes := &payments.VoucherCreateResult{
 		Voucher:   vouch,
 		Shortfall: filecoin.NewInt(0),

@@ -958,10 +958,12 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 				// Maybe fall back to a discovery session?
 				return err
 			}
-			err = tx.QueryFrom(*info, sl)
+			offer, err := tx.QueryOffer(*info, sl)
 			if err != nil {
-				// Maybe we shouldn't fail here, the transfer could still work with other peers
-				return err
+				// We shouldn't fail here, the transfer could still work with other peers
+				log.Error().Err(err).Str("id", info.ID.String()).Msg("querying from peer")
+			} else {
+				tx.ApplyOffer(offer)
 			}
 		}
 
@@ -987,7 +989,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 
 		// TODO: accept all by default but we should be able to pass flag to provide
 		// confirmation before retrieving
-		selection.Incline(sl)
+		selection.Exec(exchange.DealSel(sl))
 
 	} else {
 		// No need for triage we already know the offer
@@ -1000,9 +1002,11 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 		}
 
 		// Will be selected automatically in the strategy
-		if err := tx.QueryFrom(*info, sl); err != nil {
+		offer, err := tx.QueryOffer(*info, sl)
+		if err != nil {
 			return err
 		}
+		tx.ApplyOffer(offer)
 	}
 	now := time.Now()
 	discDuration := now.Sub(start)
@@ -1065,9 +1069,12 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 			return err
 		}
 
-		results <- GetResult{
+		select {
+		case results <- GetResult{
 			DiscLatSeconds:  discDuration.Seconds(),
 			TransLatSeconds: transDuration.Seconds(),
+		}:
+		default:
 		}
 		return nil
 	case <-ctx.Done():
@@ -1107,7 +1114,13 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
 				if state.PayloadCID == root {
-					fmt.Println("status", deal.Statuses[state.Status], state.Message)
+					fmt.Printf(`
+event: %s
+status: %s
+totalReceived: %d
+bytesPaidFor: %d
+totalFunds: %s
+`, client.Events[event], deal.Statuses[state.Status], state.TotalReceived, state.BytesPaidFor, state.TotalFunds.String())
 					results <- GetResult{
 						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
 						Status:        deal.Statuses[state.Status],
@@ -1134,14 +1147,21 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResult, error) {
 	results := make(chan GetResult)
 
+	sendErr := func(err error) {
+		select {
+		case results <- GetResult{
+			Err: err.Error(),
+		}:
+		default:
+		}
+	}
+
 	go func() {
 		defer close(results)
 		// Only a CID is allowed here.
 		root, err := cid.Decode(args.Cid)
 		if err != nil {
-			results <- GetResult{
-				Err: err.Error(),
-			}
+			sendErr(err)
 			return
 		}
 		//TODO: strategy option
@@ -1154,7 +1174,6 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
 				if state.PayloadCID == root {
-					fmt.Println("status", deal.Statuses[state.Status], state.Message)
 					results <- GetResult{
 						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
 						Status:        deal.Statuses[state.Status],
@@ -1173,9 +1192,7 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 		// Ask for all content
 		err = tx.Query(sel.All())
 		if err != nil {
-			results <- GetResult{
-				Err: err.Error(),
-			}
+			sendErr(err)
 			return
 		}
 
@@ -1184,9 +1201,7 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 		// The selection comes back for ALL the content
 		selection, err := tx.Triage()
 		if err != nil {
-			results <- GetResult{
-				Err: err.Error(),
-			}
+			sendErr(err)
 			return
 		}
 		resp := selection.Offer
@@ -1201,17 +1216,37 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
 		}
 
-		// Changing the selector here means the funds will still be loaded for the response size
-		// and amounts but we are partially retrieving the DAG so we won't use up everything
-		selection.Incline(sel.Entries())
+		// We need to query the provider again for a better idea of the size of the index
+		pinfo, err := resp.AddrInfo()
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		indoffer, err := tx.QueryOffer(*pinfo, sel.Entries())
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		// Apply the offer to be executed next
+		tx.ApplyOffer(indoffer)
+
+		// decline the initial because we don't want to retrieve everything immediately
+		selection.Next()
+
+		// grab the next offer which should be for the entries
+		selection, err = tx.Triage()
+		if err != nil {
+			sendErr(err)
+			return
+		}
+
+		selection.Exec(exchange.DealSel(sel.Entries()), exchange.DealFunds(abi.NewTokenAmount(0)))
 
 		var dref exchange.DealRef
 		select {
 		case dref = <-tx.Ongoing():
 		case <-ctx.Done():
-			results <- GetResult{
-				Err: err.Error(),
-			}
+			sendErr(ctx.Err())
 			return
 		}
 

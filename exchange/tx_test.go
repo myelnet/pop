@@ -315,7 +315,9 @@ func TestMapFieldSelector(t *testing.T) {
 
 	// We skip discovery and request an offer directly
 	info := host.InfoFromHost(n1.Host)
-	require.NoError(t, gtx.QueryFrom(*info, sel.Key(key)))
+	offer, err := gtx.QueryOffer(*info, sel.Key(key))
+	require.NoError(t, err)
+	gtx.ApplyOffer(offer)
 
 loop:
 	for {

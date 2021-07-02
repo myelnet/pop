@@ -125,7 +125,7 @@ func WithStrategy(strategy SelectionStrategy) TxOption {
 	return func(tx *Tx) {
 		tx.worker = strategy(tx)
 		tx.worker.Start()
-		tx.rou.SetReceiver(tx.worker.ReceiveOffer)
+		tx.rou.SetReceiver(tx.worker.PushBack)
 	}
 }
 
@@ -544,8 +544,26 @@ type DealRef struct {
 // Can be used to assign different parameters than the defaults in the offer
 // while respecting the offer conditions otherwise it will fail
 type DealExecParams struct {
-	Accepted bool
-	Selector ipld.Node
+	Accepted   bool
+	Selector   ipld.Node
+	TotalFunds abi.TokenAmount
+}
+
+// DealParam is a functional paramter to set a value on DealExecParams
+type DealParam func(*DealExecParams)
+
+// DealSel sets a Deal Selector parameter when executing an offer
+func DealSel(sel ipld.Node) DealParam {
+	return func(params *DealExecParams) {
+		params.Selector = sel
+	}
+}
+
+// DealFunds sets a total amount to load in payment channel when executing an offer
+func DealFunds(amount abi.TokenAmount) DealParam {
+	return func(params *DealExecParams) {
+		params.TotalFunds = amount
+	}
 }
 
 // DealSelection sends the selected offer with a channel to expect confirmation on
@@ -554,17 +572,19 @@ type DealSelection struct {
 	confirm chan DealExecParams
 }
 
-// Incline accepts execution for an offer
-// @NOTE: maybe make optional param as it could be verbose when repeating the same selector
-func (ds DealSelection) Incline(sel ipld.Node) {
-	ds.confirm <- DealExecParams{
+// Exec accepts execution for an offer
+func (ds DealSelection) Exec(pms ...DealParam) {
+	params := DealExecParams{
 		Accepted: true,
-		Selector: sel,
 	}
+	for _, p := range pms {
+		p(&params)
+	}
+	ds.confirm <- params
 }
 
-// Decline an offer
-func (ds DealSelection) Decline() {
+// Next declines an offer and moves on to the next one if available
+func (ds DealSelection) Next() {
 	ds.confirm <- DealExecParams{
 		Accepted: false,
 	}
@@ -579,18 +599,17 @@ func (tx *Tx) Query(sel ipld.Node) error {
 	return ErrNoStrategy
 }
 
-// QueryFrom allows querying directly from a given peer
-func (tx *Tx) QueryFrom(info peer.AddrInfo, sel ipld.Node) error {
+// QueryOffer allows querying directly from a given peer
+func (tx *Tx) QueryOffer(info peer.AddrInfo, sel ipld.Node) (deal.Offer, error) {
 	tx.sel = sel
-	if tx.worker != nil {
-		return tx.rou.QueryProvider(info, tx.root, sel, tx.worker.ReceiveOffer)
-	}
-	return ErrNoStrategy
+	return tx.rou.QueryProvider(info, tx.root, sel)
 }
 
 // ApplyOffer allows executing a transaction based on an existing offer without querying the routing service
+// By the default the offer is added at the front of the queue. If there is already an offer in progress it will
+// thus execute after it or if not will execute immediately.
 func (tx *Tx) ApplyOffer(offer deal.Offer) {
-	tx.worker.ReceiveOffer(offer)
+	tx.worker.PushFront(offer)
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
@@ -623,6 +642,9 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 		return TxResult{
 			Err: err,
 		}
+	}
+	if p.Selector == nil {
+		p.Selector = tx.sel
 	}
 	// Make sure our provider is in our peerstore
 	tx.rou.AddAddrs(info.ID, info.Addrs)
@@ -772,7 +794,8 @@ var ErrUserDeniedOffer = errors.New("user denied offer")
 // OfferWorker is a generic interface to manage the lifecycle of offers
 type OfferWorker interface {
 	Start()
-	ReceiveOffer(deal.Offer)
+	PushFront(deal.Offer)
+	PushBack(deal.Offer)
 	Close() []deal.Offer
 }
 
@@ -794,7 +817,8 @@ type SelectionStrategy func(OfferExecutor) OfferWorker
 func SelectFirst(oe OfferExecutor) OfferWorker {
 	return sessionWorker{
 		executor:      oe,
-		offersIn:      make(chan deal.Offer),
+		offersFront:   make(chan deal.Offer),
+		offersBack:    make(chan deal.Offer),
 		closing:       make(chan chan []deal.Offer, 1),
 		numThreshold:  -1,
 		timeThreshold: -1,
@@ -809,7 +833,8 @@ func SelectCheapest(after int, t time.Duration) func(OfferExecutor) OfferWorker 
 	return func(oe OfferExecutor) OfferWorker {
 		return sessionWorker{
 			executor:      oe,
-			offersIn:      make(chan deal.Offer),
+			offersFront:   make(chan deal.Offer),
+			offersBack:    make(chan deal.Offer),
 			closing:       make(chan chan []deal.Offer, 1),
 			numThreshold:  after,
 			timeThreshold: t,
@@ -824,7 +849,8 @@ func SelectFirstLowerThan(amount abi.TokenAmount) func(oe OfferExecutor) OfferWo
 	return func(oe OfferExecutor) OfferWorker {
 		return sessionWorker{
 			executor:      oe,
-			offersIn:      make(chan deal.Offer),
+			offersFront:   make(chan deal.Offer),
+			offersBack:    make(chan deal.Offer),
 			closing:       make(chan chan []deal.Offer, 1),
 			numThreshold:  -1,
 			timeThreshold: -1,
@@ -834,9 +860,10 @@ func SelectFirstLowerThan(amount abi.TokenAmount) func(oe OfferExecutor) OfferWo
 }
 
 type sessionWorker struct {
-	executor OfferExecutor
-	offersIn chan deal.Offer
-	closing  chan chan []deal.Offer
+	executor    OfferExecutor
+	offersFront chan deal.Offer
+	offersBack  chan deal.Offer
+	closing     chan chan []deal.Offer
 	// numThreshold is the number of offers after which we can start execution
 	// if -1 we execute as soon as the first offer gets in
 	numThreshold int
@@ -873,6 +900,7 @@ func (s sessionWorker) Start() {
 	// Start a routine to collect a set of offers
 	go func() {
 		// Offers are queued in this slice
+		// TODO: replace with "container/list"
 		var q []deal.Offer
 		var execDone chan TxResult
 		for {
@@ -880,7 +908,7 @@ func (s sessionWorker) Start() {
 			case resc := <-s.closing:
 				resc <- q
 				return
-			case of := <-s.offersIn:
+			case of := <-s.offersBack:
 				if useCeiling && of.MinPricePerByte.LessThan(s.priceCeiling) {
 					continue
 				}
@@ -902,6 +930,14 @@ func (s sessionWorker) Start() {
 					go s.exec(q[0], execDone)
 					q = q[1:]
 				}
+			case of := <-s.offersFront:
+				if execDone == nil {
+					execDone = make(chan TxResult, 1)
+					go s.exec(of, execDone)
+					continue
+				}
+
+				q = append([]deal.Offer{of}, q...)
 			case <-delay:
 				// We may already be executing if we've reached another threshold
 				if execDone != nil {
@@ -939,10 +975,15 @@ func (s sessionWorker) Close() []deal.Offer {
 	}
 }
 
-// ReceiveOffer sends a new offer to the queue
-func (s sessionWorker) ReceiveOffer(offer deal.Offer) {
+// PushBack sends a new offer to the end of the queue
+func (s sessionWorker) PushBack(offer deal.Offer) {
 	// This never blocks as our queue is always receiving and decides when to drop offers
-	s.offersIn <- offer
+	s.offersBack <- offer
+}
+
+// PushFront sends a new offer to the front of the queue
+func (s sessionWorker) PushFront(offer deal.Offer) {
+	s.offersFront <- offer
 }
 
 func sortOffers(offers []deal.Offer) {

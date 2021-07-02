@@ -123,7 +123,7 @@ func TestSelectionStrategies(t *testing.T) {
 
 			for i := 0; i < testCase.offers; i++ {
 				go func() {
-					wq.ReceiveOffer(deal.Offer{
+					wq.PushBack(deal.Offer{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -182,7 +182,7 @@ func BenchmarkStrategies(b *testing.B) {
 
 			for i := 0; i < 30+b.N; i++ {
 				go func() {
-					wq.ReceiveOffer(deal.Offer{
+					wq.PushBack(deal.Offer{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -286,7 +286,7 @@ func TestExchangeE2E(t *testing.T) {
 			selected, err := tx.Triage()
 			require.NoError(t, err)
 
-			selected.Incline(sel.All())
+			selected.Exec(DealSel(sel.All()))
 
 			ref := <-tx.Ongoing()
 			require.NoError(t, err)

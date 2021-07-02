@@ -588,7 +588,7 @@ func CheckFunds(ctx fsm.Context, env DealEnvironment, ds deal.ClientState) error
 	}
 
 	total := calcAmountToSend(ds)
-	unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherReedeemedAmt)
+	unredeemedFunds := big.Sub(availableFunds.ConfirmedAmt, availableFunds.VoucherRedeemedAmt)
 	shortfall := big.Sub(total, unredeemedFunds)
 
 	// The shortfall is negative when there is more funds in the channel than the requested payment amount

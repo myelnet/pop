@@ -818,6 +818,8 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 		return nil, fmt.Errorf("totalRedeemedWithVoucher: %w", err)
 	}
 
+	fmt.Println("availableFunds", totalRedeemed, act.Balance)
+
 	// Total required balance must not exceed actor balance
 	if act.Balance.LessThan(totalRedeemed) {
 		return nil, newErrInsufficientFunds(filecoin.BigSub(totalRedeemed, act.Balance))
@@ -997,7 +999,7 @@ func (ch *channel) currentAvailableFunds(channelID string, queuedAmt filecoin.Bi
 		PendingAmt:          channelInfo.PendingAmount,
 		PendingWaitSentinel: waitSentinel,
 		QueuedAmt:           queuedAmt,
-		VoucherReedeemedAmt: totalRedeemed,
+		VoucherRedeemedAmt:  totalRedeemed,
 	}, nil
 }
 
@@ -1197,7 +1199,7 @@ type AvailableFunds struct {
 	QueuedAmt filecoin.BigInt
 	// VoucherRedeemedAmt is the amount that is redeemed by vouchers on-chain
 	// and in the local datastore
-	VoucherReedeemedAmt filecoin.BigInt
+	VoucherRedeemedAmt filecoin.BigInt
 }
 
 // VoucherCreateResult is the response to createVoucher method

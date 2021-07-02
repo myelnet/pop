@@ -103,10 +103,9 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 }
 
 func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.Offer, error) {
-	_, err := e.idx.GetRef(q.PayloadCID)
-	if err != nil {
-		return deal.Offer{}, err
-	}
+	// This is used to increment LFU cache if the node is available
+	// the Stat method actually checks if the content is available.
+	_, _ = e.idx.GetRef(q.PayloadCID)
 	if q.Selector == nil {
 		return deal.Offer{}, fmt.Errorf("no selector provided")
 	}
@@ -115,7 +114,6 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 		sel = selectors.All()
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
-	// TODO: support selector in Query
 	stats, err := utils.Stat(ctx, &multistore.Store{Bstore: e.opts.Blockstore}, q.PayloadCID, sel)
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
