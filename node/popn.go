@@ -330,7 +330,7 @@ func (nd *node) send(n Notify) {
 	}
 }
 
-// Off
+// Off shutdown the node gracefully
 func (nd *node) Off(ctx context.Context) {
 	nd.send(Notify{OffResult: &OffResult{}})
 	fmt.Println("Gracefully shutdown node")
