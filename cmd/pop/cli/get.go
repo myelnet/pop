@@ -56,11 +56,6 @@ func runGet(ctx context.Context, args []string) error {
 	})
 	go receive(ctx, cc, c)
 
-	// if maxppb is not set, use default value
-	if getArgs.maxppb == 0 {
-		getArgs.maxppb = int64(startArgs.MaxPPB)
-	}
-
 	cc.Get(&node.GetArgs{
 		Cid:      args[0],
 		Timeout:  getArgs.timeout,

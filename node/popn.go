@@ -88,6 +88,8 @@ type Options struct {
 	FilToken string
 	// PrivKey is a hex encoded private key to use for default address
 	PrivKey string
+	// MaxPPB is the maximum price per byte
+	MaxPPB int64
 	// Regions is a list of regions a provider chooses to support.
 	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
 	Regions []string
@@ -105,14 +107,15 @@ type RemoteStorer interface {
 }
 
 type node struct {
-	host host.Host
-	ds   datastore.Batching
-	bs   blockstore.Blockstore
-	ms   *multistore.MultiStore
-	is   cbor.IpldStore
-	dag  ipldformat.DAGService
-	exch *exchange.Exchange
-	rs   RemoteStorer
+	host   host.Host
+	ds     datastore.Batching
+	bs     blockstore.Blockstore
+	ms     *multistore.MultiStore
+	is     cbor.IpldStore
+	dag    ipldformat.DAGService
+	exch   *exchange.Exchange
+	rs     RemoteStorer
+	maxPPB int64
 
 	// root of any pending HAMT for storage. This HAMT indexes multiple transactions to
 	// be stored in a single CAR for storage.
@@ -248,6 +251,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	} else if addr.Empty() {
 		fmt.Printf("==> Loaded default FIL address: %s\n", nd.exch.Wallet().DefaultAddress())
 	}
+
+	// set Max Price Per Byte
+	nd.maxPPB = opts.MaxPPB
+	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.maxPPB)
 
 	nd.rs, err = storage.New(
 		nd.host,
@@ -784,6 +791,16 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		sendErr(err)
 		return
 	}
+
+	// if maxppb is not set during get(), use default node's value
+	if args.MaxPPB == 0 {
+		args.MaxPPB = nd.maxPPB
+
+		if args.MaxPPB == 0 {
+			log.Error().Msg("Max Price Per Byte is 0")
+		}
+	}
+
 	// Check if we're trying to get from an ongoing transaction
 	nd.txmu.Lock()
 	if nd.tx != nil && nd.tx.Root() == root {
