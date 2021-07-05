@@ -16,9 +16,6 @@ var offCmd = &ffcli.Command{
 }
 
 func runOff(ctx context.Context, args []string) error {
-	//GracefulShutdown <- struct{}{}
-	fmt.Println("Sent shutdown")
-
 	c, cc, ctx, cancel := connect(ctx)
 	defer cancel()
 
@@ -28,13 +25,13 @@ func runOff(ctx context.Context, args []string) error {
 			prc <- pr
 		}
 	})
-
 	go receive(ctx, cc, c)
+
+	cc.Off()
 
 	select {
 	case <-prc:
-		fmt.Println("W OffResult")
-		GracefulShutdown <- struct{}{}
+		fmt.Println("Successfully sent Graceful Shutdown command")
 
 	case <-ctx.Done():
 		return ctx.Err()

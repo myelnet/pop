@@ -74,8 +74,6 @@ var ErrQuoteNotFound = errors.New("quote not found")
 // ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
 var ErrInvalidPeer = errors.New("invalid peer ID or address")
 
-var GracefulShutdown = make(chan struct{})
-
 // Options determines configurations for the IPFS node
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
@@ -99,6 +97,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
+	// GracefulShutdown is the CancelFunc used for gracefully shutting down the node
+	GracefulShutdown context.CancelFunc
 }
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
@@ -131,6 +131,9 @@ type node struct {
 	// keep track of an ongoing transaction
 	txmu sync.Mutex
 	tx   *exchange.Tx
+
+	// Save context cancelFunc for graceful node shutdown
+	gracefulShutdown context.CancelFunc
 }
 
 // New puts together all the components of the ipfs node
@@ -261,6 +264,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// set Max Price Per Byte
 	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
 
+	nd.gracefulShutdown = opts.GracefulShutdown
+
 	nd.rs, err = storage.New(
 		nd.host,
 		nd.exch.DataTransfer(),
@@ -328,7 +333,9 @@ func (nd *node) send(n Notify) {
 // Off
 func (nd *node) Off(ctx context.Context) {
 	nd.send(Notify{OffResult: &OffResult{}})
-	GracefulShutdown <- struct{}{}
+	fmt.Println("Gracefully shutdown node")
+
+	nd.gracefulShutdown()
 }
 
 // Ping the node for sanity check more than anything
