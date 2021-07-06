@@ -818,8 +818,6 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 		return nil, fmt.Errorf("totalRedeemedWithVoucher: %w", err)
 	}
 
-	fmt.Println("availableFunds", totalRedeemed, act.Balance)
-
 	// Total required balance must not exceed actor balance
 	if act.Balance.LessThan(totalRedeemed) {
 		return nil, newErrInsufficientFunds(filecoin.BigSub(totalRedeemed, act.Balance))

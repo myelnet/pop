@@ -187,7 +187,7 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			return res.Err
 		}
 
-		keys, err := utils.MapKeys(ctx, root, tx.Store().Loader)
+		keys, err := utils.MapLoadableKeys(ctx, root, tx.Store().Loader)
 		if err != nil {
 			return err
 		}

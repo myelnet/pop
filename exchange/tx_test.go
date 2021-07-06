@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-multistore"
+	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	"github.com/ipfs/go-path"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -492,4 +493,9 @@ loop:
 	entries, err := gtx.Entries()
 	require.NoError(t, err)
 	require.Equal(t, len(filepaths)+1, len(entries))
+
+	// We can access the root of an entry to fetch individually
+	eroot, err := gtx.RootFor("line8.txt")
+	require.NoError(t, err)
+	require.Equal(t, uint64(cid.Raw), eroot.Type())
 }

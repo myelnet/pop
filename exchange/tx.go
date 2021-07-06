@@ -32,6 +32,7 @@ import (
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
 )
 
@@ -291,12 +292,12 @@ func (tx *Tx) buildRoot() error {
 func (tx *Tx) Ref() *DataRef {
 	var keys [][]byte
 
-	if len(tx.entries) == 0 {
+	if len(tx.entries) > 0 {
 		for k := range tx.entries {
 			keys = append(keys, []byte(k))
 		}
 	} else {
-		kl, err := utils.MapKeys(context.TODO(), tx.root, tx.Store().Loader)
+		kl, err := utils.MapLoadableKeys(context.TODO(), tx.root, tx.Store().Loader)
 		if err != nil {
 			tx.Err = err
 		} else {
@@ -376,7 +377,16 @@ func (tx *Tx) IsLocal(key string) bool {
 		return true
 	}
 	if ref != nil {
-		return ref.Has(key)
+		has := ref.Has(key)
+		if has {
+			return has
+		}
+		// If we don't have it, let's warm up the mutistore with the index so we don't pay for it twice
+		err := utils.MigrateSelectBlocks(tx.ctx, tx.bs, tx.store.Bstore, tx.root, selectors.Entries())
+		if err != nil {
+			log.Error().Err(err).Msg("warming up index blocks")
+		}
+		return false
 	}
 
 	return false
@@ -402,7 +412,7 @@ func (tx *Tx) Keys() ([]string, error) {
 		loader = tx.store.Loader
 	}
 
-	keys, err := utils.MapKeys(
+	keys, err := utils.MapLoadableKeys(
 		tx.ctx,
 		tx.root,
 		loader,
@@ -411,6 +421,40 @@ func (tx *Tx) Keys() ([]string, error) {
 		return nil, fmt.Errorf("failed to get keys: %w", err)
 	}
 	return keys, nil
+}
+
+// RootFor returns the root of a given key
+// @TODO: improve scaling and performance for accessing subroots
+func (tx *Tx) RootFor(key string) (cid.Cid, error) {
+	loader := storeutil.LoaderForBlockstore(tx.bs)
+	if _, err := tx.index.GetRef(tx.root); err != nil {
+		// Keys might still be in multistore
+		loader = tx.store.Loader
+	}
+
+	lk := cidlink.Link{Cid: tx.root}
+	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
+	nb := basicnode.Prototype.Map.NewBuilder()
+	// Use a loader from the link to read all the children blocks from the global store
+	err := lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return cid.Undef, err
+	}
+	// load the IPLD tree
+	nd := nb.Build()
+	entry, err := nd.LookupByString(key)
+	if err != nil {
+		return cid.Undef, err
+	}
+	vnd, err := entry.LookupByString("Value")
+	if err != nil {
+		return cid.Undef, err
+	}
+	l, err := vnd.AsLink()
+	if err != nil {
+		return cid.Undef, err
+	}
+	return l.(cidlink.Link).Cid, nil
 }
 
 // Entries returns all the entries in the root map of this transaction
@@ -575,7 +619,8 @@ type DealSelection struct {
 // Exec accepts execution for an offer
 func (ds DealSelection) Exec(pms ...DealParam) {
 	params := DealExecParams{
-		Accepted: true,
+		Accepted:   true,
+		TotalFunds: ds.Offer.RetrievalPrice(),
 	}
 	for _, p := range pms {
 		p(&params)
@@ -666,7 +711,7 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 		tx.ctx,
 		tx.root,
 		params,
-		of.RetrievalPrice(),
+		p.TotalFunds,
 		info.ID,
 		tx.clientAddr,
 		of.PaymentAddress,
@@ -714,8 +759,9 @@ func (tx *Tx) Confirm(of deal.Offer) DealExecParams {
 		}
 	}
 	return DealExecParams{
-		Accepted: true,
-		Selector: tx.sel,
+		Accepted:   true,
+		Selector:   tx.sel,
+		TotalFunds: of.RetrievalPrice(),
 	}
 }
 
@@ -954,6 +1000,7 @@ func (s sessionWorker) Start() {
 					execDone = make(chan TxResult, 1)
 					go s.exec(q[0], execDone)
 					q = q[1:]
+					continue
 				}
 				if res.Err == nil || len(q) == 0 {
 					s.executor.Finish(res)

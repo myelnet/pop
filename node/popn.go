@@ -17,6 +17,7 @@ import (
 	"github.com/filecoin-project/go-hamt-ipld/v3"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -948,6 +949,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 			return err
 		}
 		// We can query a specific miner on top of gossip
+		// that offer will be at the top of the list if we receive it
 		if args.Miner != "" {
 			miner, err := address.NewFromString(args.Miner)
 			if err != nil {
@@ -1047,7 +1049,7 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 		if args.Key != "" {
 			keys = append(keys, []byte(args.Key))
 		} else {
-			mk, err := utils.MapKeys(ctx, c, tx.Store().Loader)
+			mk, err := utils.MapLoadableKeys(ctx, c, tx.Store().Loader)
 			if err != nil {
 				return err
 			}
@@ -1087,6 +1089,15 @@ func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<
 func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error) {
 	results := make(chan GetResult)
 
+	sendErr := func(err error) {
+		select {
+		case results <- GetResult{
+			Err: err.Error(),
+		}:
+		default:
+		}
+	}
+
 	go func() {
 		defer close(results)
 
@@ -1103,67 +1114,6 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			args.Key = segs[0]
 		}
 
-		if args.Strategy == "" {
-			args.Strategy = "SelectFirst"
-		}
-
-		if args.Strategy == "" && args.MaxPPB > 0 {
-			args.Strategy = "SelectFirstLowerThan"
-		}
-
-		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
-			func(event client.Event, state deal.ClientState) {
-				if state.PayloadCID == root {
-					fmt.Printf(`
-event: %s
-status: %s
-totalReceived: %d
-bytesPaidFor: %d
-totalFunds: %s
-`, client.Events[event], deal.Statuses[state.Status], state.TotalReceived, state.BytesPaidFor, state.TotalFunds.String())
-					results <- GetResult{
-						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
-						Status:        deal.Statuses[state.Status],
-						TotalReceived: int64(state.TotalReceived),
-					}
-				}
-			},
-		)
-		defer unsub()
-
-		err = nd.get(ctx, root, args, results)
-		if err != nil {
-			results <- GetResult{
-				Err: err.Error(),
-			}
-		}
-	}()
-
-	return results, nil
-}
-
-// PreloadEntries is an RPC method that retrieves all the entries associated with a root CID
-// and loads up a payment channel to pay for retrieving the entire DAG.
-func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResult, error) {
-	results := make(chan GetResult)
-
-	sendErr := func(err error) {
-		select {
-		case results <- GetResult{
-			Err: err.Error(),
-		}:
-		default:
-		}
-	}
-
-	go func() {
-		defer close(results)
-		// Only a CID is allowed here.
-		root, err := cid.Decode(args.Cid)
-		if err != nil {
-			sendErr(err)
-			return
-		}
 		//TODO: strategy option
 		strategy := exchange.SelectFirst
 
@@ -1189,8 +1139,16 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 		tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithStrategy(strategy), exchange.WithTriage())
 		defer tx.Close()
 
-		// Ask for all content
-		err = tx.Query(sel.All())
+		var s ipld.Node
+		switch args.Key {
+		// If we're looking to retrieve entries, we still ask for the price for everything
+		case "", "*":
+			s = sel.All()
+		default:
+			s = sel.Key(args.Key)
+		}
+
+		err = tx.Query(s)
 		if err != nil {
 			sendErr(err)
 			return
@@ -1208,39 +1166,29 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 
 		log.Info().Msg("selected an offer")
 
+		funds := resp.RetrievalPrice()
+		// If we're fetching entries, the selector and funds need to be updated
+		if args.Key == "" {
+			// for now we must pad the funds quite a bit to account for overlapping blocks
+			// because data-transfer doesn't dedup them yet
+			// added funds are based on an average of 100bytes per key and 10 keys per tx so:
+			// (indexSize = 100 * 10) * (numTransfers = 10) * ppb
+			funds = big.Add(resp.RetrievalPrice(), big.Mul(abi.NewTokenAmount(10000), resp.MinPricePerByte))
+			// Select blocks for the index only
+			s = sel.Entries()
+		}
+
 		results <- GetResult{
 			Size:         int64(resp.Size),
 			Status:       "DealStatusSelectedOffer",
 			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-			TotalPrice:   filecoin.FIL(resp.RetrievalPrice()).Short(),
+			TotalPrice:   filecoin.FIL(funds).String(),
 			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
 		}
 
-		// We need to query the provider again for a better idea of the size of the index
-		pinfo, err := resp.AddrInfo()
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		indoffer, err := tx.QueryOffer(*pinfo, sel.Entries())
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		// Apply the offer to be executed next
-		tx.ApplyOffer(indoffer)
-
-		// decline the initial because we don't want to retrieve everything immediately
-		selection.Next()
-
-		// grab the next offer which should be for the entries
-		selection, err = tx.Triage()
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		selection.Exec(exchange.DealSel(sel.Entries()), exchange.DealFunds(abi.NewTokenAmount(0)))
+		// The offer will execute retrieval of the index only but load the payment channel for
+		// retrieving everything
+		selection.Exec(exchange.DealSel(s), exchange.DealFunds(funds))
 
 		var dref exchange.DealRef
 		select {
@@ -1260,16 +1208,17 @@ func (nd *node) PreloadEntries(ctx context.Context, args *GetArgs) (chan GetResu
 		case res := <-tx.Done():
 			log.Info().Msg("finished transfer")
 			if res.Err != nil {
-				results <- GetResult{
-					Err: res.Err.Error(),
-				}
-
+				sendErr(res.Err)
 				return
 			}
 			// transfer was successful so we keep the offer around
 			err := nd.omg.SetOffer(root, resp)
 			if err != nil {
 				log.Error().Err(err).Msg("setting offer")
+			}
+			nd.exch.Index().SetRef(tx.Ref())
+			results <- GetResult{
+				Status: "Completed",
 			}
 			return
 		case <-ctx.Done():
