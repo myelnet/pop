@@ -107,15 +107,17 @@ type RemoteStorer interface {
 }
 
 type node struct {
-	host   host.Host
-	ds     datastore.Batching
-	bs     blockstore.Blockstore
-	ms     *multistore.MultiStore
-	is     cbor.IpldStore
-	dag    ipldformat.DAGService
-	exch   *exchange.Exchange
-	rs     RemoteStorer
-	maxPPB int64
+	host host.Host
+	ds   datastore.Batching
+	bs   blockstore.Blockstore
+	ms   *multistore.MultiStore
+	is   cbor.IpldStore
+	dag  ipldformat.DAGService
+	exch *exchange.Exchange
+	rs   RemoteStorer
+
+	// opts keeps all the node params set when starting the node
+	opts Options
 
 	// root of any pending HAMT for storage. This HAMT indexes multiple transactions to
 	// be stored in a single CAR for storage.
@@ -132,7 +134,9 @@ type node struct {
 // New puts together all the components of the ipfs node
 func New(ctx context.Context, opts Options) (*node, error) {
 	var err error
-	nd := &node{}
+	nd := &node{
+		opts: opts,
+	}
 
 	dsopts := badgerds.DefaultOptions
 	dsopts.SyncWrites = false
@@ -253,8 +257,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	// set Max Price Per Byte
-	nd.maxPPB = opts.MaxPPB
-	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.maxPPB)
+	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
 
 	nd.rs, err = storage.New(
 		nd.host,
@@ -265,6 +268,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
@@ -794,11 +798,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 
 	// if maxppb is not set during get(), use default node's value
 	if args.MaxPPB == 0 {
-		args.MaxPPB = nd.maxPPB
-
-		if args.MaxPPB == 0 {
-			log.Error().Msg("Max Price Per Byte is 0")
-		}
+		args.MaxPPB = nd.opts.MaxPPB
 	}
 
 	// Check if we're trying to get from an ongoing transaction
