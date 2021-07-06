@@ -3,6 +3,7 @@ package filecoin
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -45,8 +46,9 @@ func testBlockHeader() *BlockHeader {
 
 // MockLotusAPI is for testing purposes only
 type MockLotusAPI struct {
-	act         *Actor               // actor to return when calling StateGetActor
-	head        *TipSet              // head returned when calling ChainHead
+	act         *Actor  // actor to return when calling StateGetActor
+	head        *TipSet // head returned when calling ChainHead
+	actMu       sync.Mutex
 	actState    *ActorState          // state returned when calling StateReadState
 	obj         []byte               // bytes returned when calling ChainReadObj
 	objReader   func(cid.Cid) []byte // bytes to return given a specific cid
@@ -76,6 +78,8 @@ func (m *MockLotusAPI) GasEstimateMessageGas(ctx context.Context, msg *Message, 
 }
 
 func (m *MockLotusAPI) StateGetActor(ctx context.Context, addr address.Address, tsk TipSetKey) (*Actor, error) {
+	m.actMu.Lock()
+	defer m.actMu.Unlock()
 	return m.act, nil
 }
 
@@ -151,7 +155,9 @@ func (m *MockLotusAPI) SetActor(act *Actor) {
 }
 
 func (m *MockLotusAPI) SetActorState(state *ActorState) {
+	m.actMu.Lock()
 	m.actState = state
+	m.actMu.Unlock()
 }
 
 func (m *MockLotusAPI) SetObject(obj []byte) {

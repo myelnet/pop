@@ -523,27 +523,17 @@ func TestGet(t *testing.T) {
 	})
 	<-committed
 
-	got := make(chan GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res := <-got
-	require.Equal(t, int64(256189), res.Size)
-
-	res = <-got
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got
-	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// We should be able to request again this time from local storage
-	got = make(chan GetResult, 1)
+	got := make(chan GetResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 		got <- *n.GetResult
@@ -664,64 +654,29 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-committed
 
-	// check cn received data1
-	got1 := make(chan GetResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got1 <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res := <-got1
-	require.Equal(t, int64(256265), res.Size)
 
-	res = <-got1
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got1
-	require.Greater(t, res.TransLatSeconds, 0.0)
-
-	// check cn received data2
-	got2 := make(chan GetResult, 3)
-	cn.notify = func(n Notify) {
-		require.Equal(t, n.GetResult.Err, "")
-		got2 <- *n.GetResult
-	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res = <-got2
-	require.Equal(t, int64(124153), res.Size)
 
-	res = <-got2
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got2
-	require.Greater(t, res.TransLatSeconds, 0.0)
-
-	got3 := make(chan GetResult, 2)
 	cn2.notify = func(n Notify) {
 		require.Equal(t, "", n.GetResult.Err)
-		got3 <- *n.GetResult
 	}
 	cn2.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res = <-got3
-	require.Equal(t, int64(124153), res.Size)
-
-	res = <-got3
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got3
-	require.Greater(t, res.TransLatSeconds, 0.0)
 }
 
 //todo TesExportKey
@@ -836,7 +791,7 @@ func TestPreload(t *testing.T) {
 		// Prepare the payment channel mocks
 		from := cn.exch.Wallet().DefaultAddress()
 
-		price, err := filecoin.ParseFIL(res.TotalPrice)
+		price, err := filecoin.ParseFIL(res.TotalFunds)
 		require.NoError(t, err)
 
 		createAmt := big.NewFromGo(price.Int)
@@ -882,43 +837,37 @@ loop:
 
 	// from now on we should have the funds to retrieve everything progressively
 	// from the same peer using the same payment channel
-	results = make(chan GetResult)
-	go func() {
-		for res := range results {
-			require.Equal(t, "", res.Err)
-		}
-	}()
 
-	err = cn.get(ctx, root, &GetArgs{Key: "first", Strategy: "SelectFirst"}, results)
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%s/first", root)})
 	require.NoError(t, err)
+
+	for res := range results {
+		require.Equal(t, "", res.Err)
+	}
 
 	// We should still have a single channel
 	channels, err = cn.exch.Payments().ListChannels()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channels))
 
-	results = make(chan GetResult)
-	go func() {
-		for res := range results {
-			require.Equal(t, "", res.Err)
-		}
-	}()
-	err = cn.get(ctx, root, &GetArgs{Key: "second", Strategy: "SelectFirst"}, results)
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%s/second", root)})
 	require.NoError(t, err)
+
+	for res := range results {
+		require.Equal(t, "", res.Err)
+	}
 
 	// We should still have a single channel
 	channels, err = cn.exch.Payments().ListChannels()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channels))
 
-	results = make(chan GetResult)
-	go func() {
-		for res := range results {
-			require.Equal(t, "", res.Err)
-		}
-	}()
-	err = cn.get(ctx, root, &GetArgs{Key: "third", Strategy: "SelectFirst"}, results)
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%s/third", root)})
 	require.NoError(t, err)
+
+	for res := range results {
+		require.Equal(t, "", res.Err)
+	}
 
 	// We should still have a single channel
 	channels, err = cn.exch.Payments().ListChannels()
@@ -1022,7 +971,7 @@ func TestLoadKey(t *testing.T) {
 	case res := <-results:
 		require.Equal(t, "DealStatusSelectedOffer", res.Status)
 
-		price, err := filecoin.ParseFIL(res.TotalPrice)
+		price, err := filecoin.ParseFIL(res.TotalFunds)
 		require.NoError(t, err)
 
 		createAmt := big.NewFromGo(price.Int)
@@ -1162,7 +1111,7 @@ func TestLoadAll(t *testing.T) {
 	case res := <-results:
 		require.Equal(t, "DealStatusSelectedOffer", res.Status)
 
-		price, err := filecoin.ParseFIL(res.TotalPrice)
+		price, err := filecoin.ParseFIL(res.TotalFunds)
 		require.NoError(t, err)
 
 		createAmt := big.NewFromGo(price.Int)

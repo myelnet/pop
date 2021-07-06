@@ -840,12 +840,12 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 	// Check if we're trying to get from an ongoing transaction
 	nd.txmu.Lock()
 	if nd.tx != nil && nd.tx.Root() == root {
-		f, err := nd.tx.GetFile(segs[0])
-		if err != nil {
-			sendErr(err)
-			return
-		}
 		if args.Out != "" {
+			f, err := nd.tx.GetFile(segs[0])
+			if err != nil {
+				sendErr(err)
+				return
+			}
 			err = files.WriteTo(f, args.Out)
 			if err != nil {
 				sendErr(err)
@@ -863,224 +863,43 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 
 	// Only support a single segment for now
 	args.Key = segs[0]
-	// Log progress
-	if args.Verbose {
-		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
-			func(event client.Event, state deal.ClientState) {
-				log.Info().
-					Str("event", client.Events[event]).
-					Str("status", deal.Statuses[state.Status]).
-					Uint64("bytes received", state.TotalReceived).
-					Msg("Retrieving")
-			},
-		)
-		defer unsub()
-	}
-	results := make(chan GetResult)
-	go func() {
-		for res := range results {
-			nd.send(Notify{
-				GetResult: &res,
-			})
-		}
-	}()
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
-	defer cancel()
-	err = nd.get(ctx, root, args, results)
-	if err != nil {
-		sendErr(err)
-	}
-	close(results)
-}
 
-// get is a synchronous content retrieval operation which can be called by a CLI request or HTTP
-func (nd *node) get(ctx context.Context, c cid.Cid, args *GetArgs, results chan<- GetResult) error {
-	// Check our supply if we may already have it
-	tx := nd.exch.Tx(ctx, exchange.WithRoot(c))
+	// Check our supply if we may already have it from a different tx
+	tx := nd.exch.Tx(ctx, exchange.WithRoot(root))
 	local := tx.IsLocal(args.Key)
-	if local && args.Out != "" {
+	if !local {
+		// The content is not available locally so we must load it
+		results, err := nd.Load(ctx, args)
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		for res := range results {
+			if args.Verbose || res.Status != "" {
+				nd.send(Notify{
+					GetResult: &res,
+				})
+			}
+		}
+	} else {
+		nd.send(Notify{
+			GetResult: &GetResult{
+				Local: local,
+			},
+		})
+	}
+
+	if args.Out != "" {
 		f, err := tx.GetFile(args.Key)
 		if err != nil {
-			return err
+			sendErr(err)
+			return
 		}
 		err = files.WriteTo(f, args.Out)
 		if err != nil {
-			return err
+			sendErr(err)
+			return
 		}
-	}
-	if local {
-		log.Info().Msg("content is available locally")
-		results <- GetResult{
-			Local: true,
-		}
-		return nil
-	}
-
-	var strategy exchange.SelectionStrategy
-	switch args.Strategy {
-	case "SelectFirst":
-		strategy = exchange.SelectFirst
-	case "SelectCheapest":
-		strategy = exchange.SelectCheapest(5, 4*time.Second)
-	case "SelectFirstLowerThan":
-		strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
-	default:
-		return errors.New("unknown strategy")
-	}
-
-	var sl ipld.Node
-	if args.Key != "" {
-		sl = sel.Key(args.Key)
-	} else {
-		sl = sel.All()
-	}
-	start := time.Now()
-
-	// If we already have an offer we can skip routing queries
-	offer, err := nd.omg.GetOffer(c)
-	if err != nil {
-
-		tx = nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy), exchange.WithTriage())
-		defer tx.Close()
-
-		log.Info().Msg("starting query")
-
-		if err := tx.Query(sl); err != nil {
-			return err
-		}
-		// We can query a specific miner on top of gossip
-		// that offer will be at the top of the list if we receive it
-		if args.Miner != "" {
-			miner, err := address.NewFromString(args.Miner)
-			if err != nil {
-				return err
-			}
-			info, err := nd.rs.PeerInfo(ctx, miner)
-			if err != nil {
-				// Maybe fall back to a discovery session?
-				return err
-			}
-			offer, err := tx.QueryOffer(*info, sl)
-			if err != nil {
-				// We shouldn't fail here, the transfer could still work with other peers
-				log.Error().Err(err).Str("id", info.ID.String()).Msg("querying from peer")
-			} else {
-				tx.ApplyOffer(offer)
-			}
-		}
-
-		log.Info().Msg("waiting for triage")
-
-		// Triage waits until we select the first offer it might not mean the first
-		// offer that we receive depending on the strategy used
-		selection, err := tx.Triage()
-		if err != nil {
-			return err
-		}
-		resp := selection.Offer
-
-		log.Info().Msg("selected an offer")
-
-		results <- GetResult{
-			Size:         int64(resp.Size),
-			Status:       "DealStatusSelectedOffer",
-			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-			TotalPrice:   filecoin.FIL(resp.RetrievalPrice()).Short(),
-			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
-		}
-
-		// TODO: accept all by default but we should be able to pass flag to provide
-		// confirmation before retrieving
-		selection.Exec(exchange.DealSel(sl))
-
-	} else {
-		// No need for triage we already know the offer
-		tx = nd.exch.Tx(ctx, exchange.WithRoot(c), exchange.WithStrategy(strategy))
-		defer tx.Close()
-
-		info, err := offer.AddrInfo()
-		if err != nil {
-			return err
-		}
-
-		// Will be selected automatically in the strategy
-		offer, err := tx.QueryOffer(*info, sl)
-		if err != nil {
-			return err
-		}
-		tx.ApplyOffer(offer)
-	}
-	now := time.Now()
-	discDuration := now.Sub(start)
-
-	var dref exchange.DealRef
-	select {
-	case dref = <-tx.Ongoing():
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	log.Info().Msg("started transfer")
-
-	results <- GetResult{
-		DealID: dref.ID.String(),
-	}
-
-	select {
-	case res := <-tx.Done():
-		log.Info().Msg("finished transfer")
-		if res.Err != nil {
-			return res.Err
-		}
-		end := time.Now()
-		transDuration := end.Sub(start) - discDuration
-		if args.Out != "" {
-			f, err := tx.GetFile(args.Key)
-			if err != nil {
-				return err
-			}
-			err = files.WriteTo(f, args.Out)
-			if err != nil {
-				return err
-			}
-		}
-
-		var keys [][]byte
-		if args.Key != "" {
-			keys = append(keys, []byte(args.Key))
-		} else {
-			mk, err := utils.MapLoadableKeys(ctx, c, tx.Store().Loader)
-			if err != nil {
-				return err
-			}
-			keys = mk.AsBytes()
-		}
-
-		ref := &exchange.DataRef{
-			PayloadCID:  c,
-			PayloadSize: int64(res.Size),
-			Keys:        keys,
-		}
-
-		err = nd.exch.Index().SetRef(ref)
-		if err == exchange.ErrRefAlreadyExists {
-			if err := nd.exch.Index().UpdateRef(ref); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
-
-		select {
-		case results <- GetResult{
-			DiscLatSeconds:  discDuration.Seconds(),
-			TransLatSeconds: transDuration.Seconds(),
-		}:
-		default:
-		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 
@@ -1104,9 +923,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		p := path.FromString(args.Cid)
 		root, segs, err := path.SplitAbsPath(p)
 		if err != nil {
-			results <- GetResult{
-				Err: err.Error(),
-			}
+			sendErr(err)
 			return
 		}
 
@@ -1114,9 +931,20 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			args.Key = segs[0]
 		}
 
-		//TODO: strategy option
+		// default to SelectFirst
 		strategy := exchange.SelectFirst
-
+		if args.Strategy != "" {
+			switch args.Strategy {
+			case "SelectFirst":
+				strategy = exchange.SelectFirst
+			case "SelectCheapest":
+				strategy = exchange.SelectCheapest(5, 4*time.Second)
+			case "SelectFirstLowerThan":
+				strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
+			default:
+				sendErr(errors.New("unknown strategy"))
+			}
+		}
 		if args.Strategy == "" && args.MaxPPB > 0 {
 			strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
 		}
@@ -1124,10 +952,14 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
 				if state.PayloadCID == root {
-					results <- GetResult{
-						TotalPrice:    filecoin.FIL(state.TotalFunds).Short(),
+					select {
+					case results <- GetResult{
+						TotalFunds:    filecoin.FIL(state.TotalFunds).Short(),
+						TotalSpent:    filecoin.FIL(state.FundsSpent).Short(),
 						Status:        deal.Statuses[state.Status],
 						TotalReceived: int64(state.TotalReceived),
+					}:
+					default:
 					}
 				}
 			},
@@ -1135,6 +967,8 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		defer unsub()
 
 		log.Info().Msg("starting query")
+
+		start := time.Now()
 
 		tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithStrategy(strategy), exchange.WithTriage())
 		defer tx.Close()
@@ -1148,47 +982,105 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			s = sel.Key(args.Key)
 		}
 
-		err = tx.Query(s)
+		// If we already have an offer we can skip routing queries
+		offer, err := nd.omg.GetOffer(root)
 		if err != nil {
-			sendErr(err)
-			return
+
+			err = tx.Query(s)
+			if err != nil {
+				sendErr(err)
+				return
+			}
+			// We can query a specific miner on top of gossip
+			// that offer will be at the top of the list if we receive it
+			if args.Miner != "" {
+				miner, err := address.NewFromString(args.Miner)
+				if err != nil {
+					sendErr(err)
+				}
+				info, err := nd.rs.PeerInfo(ctx, miner)
+				if err != nil {
+					sendErr(err)
+				}
+				offer, err := tx.QueryOffer(*info, s)
+				if err != nil {
+					// We shouldn't fail here, the transfer could still work with other peers
+					log.Error().Err(err).Str("id", info.ID.String()).Msg("querying from peer")
+				} else {
+					tx.ApplyOffer(offer)
+				}
+			}
+
+			log.Info().Msg("waiting for triage")
+
+			// The selection comes back for ALL the content
+			selection, err := tx.Triage()
+			if err != nil {
+				sendErr(err)
+				return
+			}
+			offer = selection.Offer
+
+			log.Info().Msg("selected an offer")
+
+			funds := offer.RetrievalPrice()
+			// If we're fetching entries, the selector and funds need to be updated
+			if args.Key == "" {
+				// for now we must pad the funds quite a bit to account for overlapping blocks
+				// because data-transfer doesn't dedup them yet
+				// added funds are based on an average of 100bytes per key and 10 keys per tx so:
+				// (indexSize = 100 * 10) * (numTransfers = 10) * ppb
+				funds = big.Add(offer.RetrievalPrice(), big.Mul(abi.NewTokenAmount(10000), offer.MinPricePerByte))
+				// Select blocks for the index only
+				s = sel.Entries()
+			}
+
+			results <- GetResult{
+				Size:         int64(offer.Size),
+				Status:       "DealStatusSelectedOffer",
+				UnsealPrice:  filecoin.FIL(offer.UnsealPrice).Short(),
+				TotalFunds:   filecoin.FIL(funds).String(),
+				PricePerByte: filecoin.FIL(offer.MinPricePerByte).Short(),
+			}
+
+			// The offer will execute retrieval of the index only but load the payment channel for
+			// retrieving everything
+			selection.Exec(exchange.DealSel(s), exchange.DealFunds(funds))
+		} else {
+			info, err := offer.AddrInfo()
+			if err != nil {
+				sendErr(err)
+				// TODO: fallback to regular query?
+				return
+			}
+
+			// Will be selected automatically in the strategy
+			offer, err := tx.QueryOffer(*info, s)
+			if err != nil {
+				// TODO: fallback to regular query?
+				sendErr(err)
+				return
+			}
+			tx.ApplyOffer(offer)
+
+			results <- GetResult{
+				Size:         int64(offer.Size),
+				Status:       "DealStatusSelectedOffer",
+				UnsealPrice:  filecoin.FIL(offer.UnsealPrice).Short(),
+				TotalFunds:   filecoin.FIL(offer.RetrievalPrice()).String(),
+				PricePerByte: filecoin.FIL(offer.MinPricePerByte).Short(),
+			}
+
+			selection, err := tx.Triage()
+			if err != nil {
+				sendErr(err)
+				return
+			}
+			selection.Exec()
 		}
 
-		log.Info().Msg("waiting for triage")
-
-		// The selection comes back for ALL the content
-		selection, err := tx.Triage()
-		if err != nil {
-			sendErr(err)
-			return
-		}
-		resp := selection.Offer
-
-		log.Info().Msg("selected an offer")
-
-		funds := resp.RetrievalPrice()
-		// If we're fetching entries, the selector and funds need to be updated
-		if args.Key == "" {
-			// for now we must pad the funds quite a bit to account for overlapping blocks
-			// because data-transfer doesn't dedup them yet
-			// added funds are based on an average of 100bytes per key and 10 keys per tx so:
-			// (indexSize = 100 * 10) * (numTransfers = 10) * ppb
-			funds = big.Add(resp.RetrievalPrice(), big.Mul(abi.NewTokenAmount(10000), resp.MinPricePerByte))
-			// Select blocks for the index only
-			s = sel.Entries()
-		}
-
-		results <- GetResult{
-			Size:         int64(resp.Size),
-			Status:       "DealStatusSelectedOffer",
-			UnsealPrice:  filecoin.FIL(resp.UnsealPrice).Short(),
-			TotalPrice:   filecoin.FIL(funds).String(),
-			PricePerByte: filecoin.FIL(resp.MinPricePerByte).Short(),
-		}
-
-		// The offer will execute retrieval of the index only but load the payment channel for
-		// retrieving everything
-		selection.Exec(exchange.DealSel(s), exchange.DealFunds(funds))
+		now := time.Now()
+		discDuration := now.Sub(start)
 
 		var dref exchange.DealRef
 		select {
@@ -1211,14 +1103,37 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				sendErr(res.Err)
 				return
 			}
-			// transfer was successful so we keep the offer around
-			err := nd.omg.SetOffer(root, resp)
-			if err != nil {
-				log.Error().Err(err).Msg("setting offer")
+
+			if args.Key == "" {
+				// transfer was successful so we keep the offer around
+				// we were just retrieving the index
+				err := nd.omg.SetOffer(root, offer)
+				if err != nil {
+					log.Error().Err(err).Msg("setting offer")
+				}
 			}
-			nd.exch.Index().SetRef(tx.Ref())
-			results <- GetResult{
-				Status: "Completed",
+
+			ref := tx.Ref()
+			err = nd.exch.Index().SetRef(tx.Ref())
+			if err == exchange.ErrRefAlreadyExists {
+				if err := nd.exch.Index().UpdateRef(ref); err != nil {
+					log.Error().Err(err).Msg("updating ref")
+				}
+			} else if err != nil {
+				sendErr(err)
+				return
+			}
+
+			end := time.Now()
+			transDuration := end.Sub(start) - discDuration
+
+			select {
+			case results <- GetResult{
+				Status:          "Completed",
+				DiscLatSeconds:  discDuration.Seconds(),
+				TransLatSeconds: transDuration.Seconds(),
+			}:
+			default:
 			}
 			return
 		case <-ctx.Done():

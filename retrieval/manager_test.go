@@ -271,8 +271,8 @@ totalFunds: %s
 				case deal.StatusInsufficientFunds:
 					// Simulate reaprovisioning the payment channel
 					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
-						ConfirmedAmt:        big.Add(pay1.chFunds.ConfirmedAmt, state.VoucherShortfall),
-						VoucherReedeemedAmt: pay1.chFunds.VoucherReedeemedAmt,
+						ConfirmedAmt:       big.Add(pay1.chFunds.ConfirmedAmt, state.VoucherShortfall),
+						VoucherRedeemedAmt: pay1.chFunds.VoucherRedeemedAmt,
 					})
 					// Need to wait a bit for status to update in state machine
 					time.Sleep(10 * time.Millisecond)
@@ -348,8 +348,8 @@ func addZeroesToAvailableFunds(channelAvailableFunds payments.AvailableFunds) pa
 	if channelAvailableFunds.QueuedAmt.Nil() {
 		channelAvailableFunds.QueuedAmt = big.Zero()
 	}
-	if channelAvailableFunds.VoucherReedeemedAmt.Nil() {
-		channelAvailableFunds.VoucherReedeemedAmt = big.Zero()
+	if channelAvailableFunds.VoucherRedeemedAmt.Nil() {
+		channelAvailableFunds.VoucherRedeemedAmt = big.Zero()
 	}
 	return channelAvailableFunds
 }
