@@ -51,9 +51,8 @@ type Index struct {
 	updateFunc func()
 
 	emu sync.Mutex
-	// evictionSet is a cid Set where we put all the cid that will be evicted when calling the
-	// Garbage Collector GC()
-	evictionSet *cid.Set
+	// gcSet is a cid Set where we put all the cid that will be evicted when calling the Garbage Collector GC()
+	gcSet *cid.Set
 
 	mu sync.Mutex
 	// current size of content committed to the store
@@ -113,23 +112,16 @@ func WithUpdateFunc(fn func()) IndexOption {
 	}
 }
 
-// UpdateOptions takes IndexOption parameters to change Index behavior
-func (idx *Index) UpdateOptions(opts ...IndexOption) {
-	for _, o := range opts {
-		o(idx)
-	}
-}
-
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
 func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
-		blist:       list.New(),
-		freqs:       list.New(),
-		ds:          namespace.Wrap(ds, datastore.NewKey("/index")),
-		Refs:        make(map[string]*DataRef),
-		interest:    make(map[string]*DataRef),
-		rootCID:     cid.Undef,
-		evictionSet: cid.NewSet(),
+		blist:    list.New(),
+		freqs:    list.New(),
+		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
+		Refs:     make(map[string]*DataRef),
+		interest: make(map[string]*DataRef),
+		rootCID:  cid.Undef,
+		gcSet:    cid.NewSet(),
 	}
 	for _, o := range opts {
 		o(idx)
@@ -260,7 +252,7 @@ func (idx *Index) DropRef(k cid.Cid) error {
 	}
 	ref := idx.Refs[k.String()]
 
-	err := idx.tagForEviction(ref)
+	err := idx.tagForGC(ref)
 	if err != nil {
 		log.Error().Err(err).Msgf("failed to tag ref %s for eviction", ref.PayloadCID.String())
 	}
@@ -460,7 +452,7 @@ func (idx *Index) evict(size uint64) uint64 {
 	var evicted uint64
 	for place := idx.blist.Front(); place != nil; place = place.Next() {
 		for entry := range place.Value.(*bucket).entries {
-			err := idx.tagForEviction(entry)
+			err := idx.tagForGC(entry)
 			if err != nil {
 				log.Error().Err(err).Msgf("failed to tag ref %s for eviction", entry.PayloadCID.String())
 			}
@@ -477,13 +469,13 @@ func (idx *Index) evict(size uint64) uint64 {
 	return evicted
 }
 
-// tagForEviction tags CIDs that will be evicted during garbage collection
-func (idx *Index) tagForEviction(ref *DataRef) error {
+// tagForGC tags CIDs that will be evicted during garbage collection
+func (idx *Index) tagForGC(ref *DataRef) error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
 	return utils.WalkDAG(context.TODO(), ref.PayloadCID, idx.bstore, sel.All(), func(block blocks.Block) error {
-		idx.evictionSet.Add(block.Cid())
+		idx.gcSet.Add(block.Cid())
 		return nil
 	})
 }
@@ -494,7 +486,7 @@ func (idx *Index) GC() error {
 	defer idx.emu.Unlock()
 
 	// exit if there is nothing to evict
-	if idx.evictionSet.Len() == 0 {
+	if idx.gcSet.Len() == 0 {
 		return nil
 	}
 
@@ -506,14 +498,14 @@ func (idx *Index) GC() error {
 	unlock := gcbl.GCLock()
 	defer unlock.Unlock()
 
-	err := idx.evictionSet.ForEach(func(c cid.Cid) error {
+	err := idx.gcSet.ForEach(func(c cid.Cid) error {
 		return idx.bstore.DeleteBlock(c)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to run garbage collector: %v", err)
 	}
 
-	idx.evictionSet = cid.NewSet()
+	idx.gcSet = cid.NewSet()
 
 	return nil
 }

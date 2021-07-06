@@ -355,14 +355,28 @@ func TestQuote(t *testing.T) {
 }
 
 func TestCommit(t *testing.T) {
+	var err error
 	ctx := context.Background()
 	mn := mocknet.New(ctx)
+	tn := testutil.NewTestNode(mn, t)
 
-	cn := newTestNode(ctx, mn, t)
+	cn := &node{}
+	cn.ds = tn.Ds
+	cn.bs = tn.Bs
+	cn.ms = tn.Ms
+	cn.dag = tn.DAG
+	cn.host = tn.Host
+	opts := exchange.Options{
+		Blockstore:  cn.bs,
+		MultiStore:  cn.ms,
+		RepoPath:    t.TempDir(),
+		FilecoinAPI: filecoin.NewMockLotusAPI(),
+		Capacity:    255000,
+	}
+	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
 
-	// we set an upper bound limit lower, so that when we add the 2nd file
-	// it will force an eviction
-	cn.exch.Index().UpdateOptions(exchange.WithBounds(255000, 128000))
+	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, opts)
+	require.NoError(t, err)
 
 	var nds []*node
 	nds = append(nds, newTestNode(ctx, mn, t))
@@ -373,10 +387,11 @@ func TestCommit(t *testing.T) {
 
 	dir := t.TempDir()
 
+	// we create a file larger than the node.Capacity to force eviction when adding later the second file
 	data := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
 	p := filepath.Join(dir, "data1")
-	err := os.WriteFile(p, data, 0666)
+	err = os.WriteFile(p, data, 0666)
 	require.NoError(t, err)
 
 	added := make(chan string, 1)
@@ -411,7 +426,7 @@ func TestCommit(t *testing.T) {
 
 	// test Garbage Collectors by adding a new file, forcing an eviction
 	dir2 := t.TempDir()
-	data2 := make([]byte, 256000)
+	data2 := make([]byte, 1000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
 	p2 := filepath.Join(dir2, "data2")
 	err = os.WriteFile(p2, data2, 0666)

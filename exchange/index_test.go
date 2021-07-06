@@ -18,7 +18,6 @@ import (
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
@@ -577,212 +576,128 @@ func TestLoadInterest(t *testing.T) {
 	}
 }
 
-func TestEvictBlock(t *testing.T) {
-	ctx := context.Background()
+func TestUnitGC(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
 
-	mn := mocknet.New(ctx)
-	n := testutil.NewTestNode(mn, t)
-
-	opts := Options{
-		Blockstore: n.Bs,
-		MultiStore: n.Ms,
-		RepoPath:   n.DTTmpDir,
-	}
-	exch, err := New(ctx, n.Host, n.Ds, opts)
+	idx, err := NewIndex(ds)
 	require.NoError(t, err)
 
 	// generate random block1
-	blk1 := n.CreateRandomBlock(t, n.Bs)
-	require.NoError(t, exch.Index().Bstore().Put(blk1))
+	blk1 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk1))
 
 	// generate random block2
-	blk2 := n.CreateRandomBlock(t, n.Bs)
-	require.NoError(t, exch.Index().Bstore().Put(blk2))
+	blk2 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk2))
 
-	// set blk1 ref1 in index
-	ref1 := &DataRef{
-		PayloadCID:  blk1.Cid(),
-		PayloadSize: int64(len(blk1.RawData())),
-	}
-	require.NoError(t, exch.Index().SetRef(ref1))
-
-	// set blk2 ref2 in index
-	require.NoError(t, exch.Index().SetRef(&DataRef{
-		PayloadCID:  blk2.Cid(),
-		PayloadSize: int64(len(blk2.RawData())),
-	}))
-
-	// tag only ref1 for eviction
-	err = exch.Index().tagForEviction(ref1)
-	require.NoError(t, err)
-
-	// check if bstore has blocks
-	has, err := exch.Index().Bstore().Has(blk1.Cid())
-	require.NoError(t, err)
-	require.Equal(t, true, has)
-
-	has, err = exch.Index().Bstore().Has(blk2.Cid())
-	require.NoError(t, err)
-	require.Equal(t, true, has)
-
-	// run garbage collector to remove tagged block from blockstore
-	err = exch.Index().GC()
-	require.NoError(t, err)
-
-	// GC does not remove ref from index
-	cid1, err := exch.Index().GetRef(ref1.PayloadCID)
-	require.NoError(t, err)
-	require.Equal(t, ref1.PayloadCID, cid1.PayloadCID)
-
-	// check if GC did remove tagged block1 ...
-	has, err = exch.Index().Bstore().Has(blk1.Cid())
-	require.NoError(t, err)
-	require.Equal(t, false, has)
-
-	// ... but not block2
-	has, err = exch.Index().Bstore().Has(blk2.Cid())
-	require.NoError(t, err)
-	require.Equal(t, true, has)
-}
-
-func TestGC(t *testing.T) {
-	ctx := context.Background()
-
-	mn := mocknet.New(ctx)
-	n := testutil.NewTestNode(mn, t)
-
-	opts := Options{
-		Blockstore: n.Bs,
-		MultiStore: n.Ms,
-		RepoPath:   n.DTTmpDir,
-	}
-	exch, err := New(ctx, n.Host, n.Ds, opts)
-	require.NoError(t, err)
-
-	// generate random block1
-	blk1 := n.CreateRandomBlock(t, n.Bs)
-	require.NoError(t, exch.Index().Bstore().Put(blk1))
-
-	// generate random block2
-	blk2 := n.CreateRandomBlock(t, n.Bs)
-	require.NoError(t, exch.Index().Bstore().Put(blk2))
-
-	// set blk1 ref1 in index
-	require.NoError(t, exch.Index().SetRef(&DataRef{
+	// set blk1-ref1 in index
+	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID:  blk1.Cid(),
 		PayloadSize: int64(len(blk1.RawData())),
 	}))
 
-	// set blk2 ref2 in index
-	require.NoError(t, exch.Index().SetRef(&DataRef{
+	// set blk2-ref2 in index
+	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID:  blk2.Cid(),
 		PayloadSize: int64(len(blk2.RawData())),
 	}))
 
 	// check if refs are in index
-	ref1, err := exch.Index().GetRef(blk1.Cid())
+	ref1, err := idx.GetRef(blk1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, ref1.PayloadCID, blk1.Cid())
 
-	ref2, err := exch.Index().GetRef(blk2.Cid())
+	ref2, err := idx.GetRef(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, ref2.PayloadCID, blk2.Cid())
 
-	// check if bstore has blocks
-	has, err := exch.Index().Bstore().Has(blk1.Cid())
+	// check if bstore has blocks blk1 & blk2
+	has, err := idx.Bstore().Has(blk1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 
-	has, err = exch.Index().Bstore().Has(blk2.Cid())
+	has, err = idx.Bstore().Has(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 
-	// drop only ref1 (will tag corresponding blocks for eviction)
-	err = exch.Index().DropRef(blk1.Cid())
+	// drop only ref1 (will tag corresponding blocks for GC)
+	err = idx.DropRef(blk1.Cid())
 	require.NoError(t, err)
 
 	// evict all tagged nodes
-	err = exch.Index().GC()
+	err = idx.GC()
 	require.NoError(t, err)
 
 	// check if GC did remove tagged block1 ...
-	has, err = exch.Index().Bstore().Has(blk1.Cid())
+	has, err = idx.Bstore().Has(blk1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, false, has)
 
 	// ... but not block2
-	has, err = exch.Index().Bstore().Has(blk2.Cid())
+	has, err = idx.Bstore().Has(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 }
 
 func TestCleanBlockStore(t *testing.T) {
-	ctx := context.Background()
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
 
-	mn := mocknet.New(ctx)
-	n := testutil.NewTestNode(mn, t)
-
-	opts := Options{
-		Blockstore: n.Bs,
-		MultiStore: n.Ms,
-		RepoPath:   n.DTTmpDir,
-	}
-	exch, err := New(ctx, n.Host, n.Ds, opts)
+	idx, err := NewIndex(ds)
 	require.NoError(t, err)
 
 	// generate random block1
-	blk1 := n.CreateRandomBlock(t, n.Bs)
-	require.NoError(t, exch.Index().Bstore().Put(blk1))
+	blk1 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk1))
 
 	// generate random block2
-	blk2 := n.CreateRandomBlock(t, n.Bs)
-	require.NoError(t, exch.Index().Bstore().Put(blk2))
+	blk2 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk2))
 
-	// set blk1 ref1 in index
-	require.NoError(t, exch.Index().SetRef(&DataRef{
+	// set blk1-ref1 in index
+	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID:  blk1.Cid(),
 		PayloadSize: int64(len(blk1.RawData())),
 	}))
 
-	// set blk2 ref2 in index
-	require.NoError(t, exch.Index().SetRef(&DataRef{
+	// set blk2-ref2 in index
+	require.NoError(t, idx.SetRef(&DataRef{
 		PayloadCID:  blk2.Cid(),
 		PayloadSize: int64(len(blk2.RawData())),
 	}))
 
 	// check if refs are in index
-	ref1, err := exch.Index().GetRef(blk1.Cid())
+	ref1, err := idx.GetRef(blk1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, ref1.PayloadCID, blk1.Cid())
 
-	ref2, err := exch.Index().GetRef(blk2.Cid())
+	ref2, err := idx.GetRef(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, ref2.PayloadCID, blk2.Cid())
 
 	// check if bstore has blocks
-	has, err := exch.Index().Bstore().Has(blk1.Cid())
+	has, err := idx.Bstore().Has(blk1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 
-	has, err = exch.Index().Bstore().Has(blk2.Cid())
+	has, err = idx.Bstore().Has(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 
 	// drop only ref1 (will tag corresponding blocks for eviction)
-	err = exch.Index().DropRef(blk1.Cid())
+	err = idx.DropRef(blk1.Cid())
 	require.NoError(t, err)
 
 	// remove blocks from blockstore, which Refs were delete
-	err = exch.Index().CleanBlockStore(ctx)
+	err = idx.CleanBlockStore(context.TODO())
 	require.NoError(t, err)
 
 	// check if CleanBlockStore did remove tagged block1 ...
-	has, err = exch.Index().Bstore().Has(blk1.Cid())
+	has, err = idx.Bstore().Has(blk1.Cid())
 	require.NoError(t, err)
 	require.Equal(t, false, has)
 
 	// ... but not block2
-	has, err = exch.Index().Bstore().Has(blk2.Cid())
+	has, err = idx.Bstore().Has(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
 }

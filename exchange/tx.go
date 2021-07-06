@@ -716,16 +716,16 @@ func (tx *Tx) SetAddress(addr address.Address) {
 // dumpStore transfers all the content from the tx store to the global blockstore
 // then deletes the store
 func (tx *Tx) dumpStore() error {
-	gcbl, ok := tx.bs.(blockstore.GCBlockstore)
-	if !ok {
-		return errors.New("blockstore is not a GCBlockstore")
-	}
-
-	unlock := gcbl.GCLock()
-	defer unlock.Unlock()
-
 	// If we dump before the transaction is committed all the content is lost
 	if tx.committed {
+		gcbl, ok := tx.bs.(blockstore.GCBlockstore)
+		if !ok {
+			return errors.New("blockstore is not a GCBlockstore")
+		}
+
+		unlock := gcbl.GCLock()
+		defer unlock.Unlock()
+
 		err := utils.MigrateBlocks(tx.ctx, tx.store.Bstore, tx.bs)
 		if err != nil {
 			return err

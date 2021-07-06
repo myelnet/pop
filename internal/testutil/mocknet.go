@@ -184,7 +184,7 @@ func (tn *TestNode) CreateRandomFile(t testing.TB, size int) string {
 	return file.Name()
 }
 
-func (tn *TestNode) CreateRandomBlock(t testing.TB, bs bstore.Blockstore) *blocks.BasicBlock {
+func CreateRandomBlock(t testing.TB, bs bstore.Blockstore) *blocks.BasicBlock {
 	lb := cidlink.LinkBuilder{
 		Prefix: cid.Prefix{
 			Version:  1,
