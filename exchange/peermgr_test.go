@@ -19,7 +19,7 @@ func TestHeyEvtPeerMgr(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	n2 := testutil.NewTestNode(mn, t)
 
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 
 	p1 := NewPeerMgr(n1.Host, idx, []Region{global})
@@ -53,7 +53,7 @@ func TestRecordLatency(t *testing.T) {
 	mn := mocknet.New(ctx)
 	n1 := testutil.NewTestNode(mn, t)
 	n2 := testutil.NewTestNode(mn, t)
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 
 	p1 := NewPeerMgr(n1.Host, idx, []Region{global})

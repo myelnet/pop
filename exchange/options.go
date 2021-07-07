@@ -75,7 +75,9 @@ type Options struct {
 func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.Batching) (Options, error) {
 	var err error
 	if opts.Blockstore == nil {
-		opts.Blockstore = blockstore.NewBlockstore(ds)
+		opts.Blockstore = blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
+	} else if _, ok := opts.Blockstore.(blockstore.GCBlockstore); !ok {
+		opts.Blockstore = blockstore.NewGCBlockstore(opts.Blockstore, blockstore.NewGCLocker())
 	}
 	if opts.MultiStore == nil {
 		opts.MultiStore, err = multistore.NewMultiDstore(ds)
@@ -131,6 +133,7 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 	if opts.ReplInterval == 0 {
 		opts.ReplInterval = 60 * time.Second
 	}
+
 	return opts, nil
 }
 

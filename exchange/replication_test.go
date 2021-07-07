@@ -99,7 +99,7 @@ func TestReplication(t *testing.T) {
 		n := testutil.NewTestNode(mn, t, withSwarmT)
 		names[name] = n.Host.ID()
 		n.SetupDataTransfer(ctx, t)
-		idx, err := NewIndex(n.Ds, WithBounds(2000000, 1800000))
+		idx, err := NewIndex(n.Ds, n.Bs, WithBounds(2000000, 1800000))
 		require.NoError(t, err)
 		rtv := NewMockRetriever(n.Dt, idx)
 		repl, err := NewReplication(
@@ -337,7 +337,7 @@ func TestConcurrentReplication(t *testing.T) {
 			newNode := func() (*testutil.TestNode, *Replication, *mockRetriever) {
 				n := testutil.NewTestNode(mn, t)
 				n.SetupDataTransfer(ctx, t)
-				idx, err := NewIndex(n.Ds, WithBounds(8000000, 7800000))
+				idx, err := NewIndex(n.Ds, n.Bs, WithBounds(8000000, 7800000))
 				require.NoError(t, err)
 				rtv := NewMockRetriever(n.Dt, idx)
 				repl, err := NewReplication(
@@ -467,7 +467,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 	}
 	opts := Options{Regions: regions, MultiStore: n1.Ms, Blockstore: n1.Bs}
 
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 	hn, err := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
@@ -489,7 +489,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 			err := tnode.Dt.Stop(ctx)
 			require.NoError(t, err)
 		})
-		idx, err := NewIndex(tnode.Ds)
+		idx, err := NewIndex(tnode.Ds, tnode.Bs)
 		require.NoError(t, err)
 		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 		hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
@@ -507,7 +507,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 		require.NoError(t, err)
 	})
 	tnode.LoadFileToNewStore(ctx, t, fname)
-	idx2, err := NewIndex(tnode.Ds)
+	idx2, err := NewIndex(tnode.Ds, tnode.Bs)
 	require.NoError(t, err)
 	opts2 := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 	hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx2), opts2)
@@ -576,7 +576,7 @@ func TestSendDispatchNoPeers(t *testing.T) {
 	}
 	opts := Options{Regions: regions, MultiStore: n1.Ms, Blockstore: n1.Bs}
 
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 	supply, err := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
@@ -624,7 +624,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		Regions["Asia"],
 	}
 
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 	supply, err := NewReplication(
 		n1.Host,
@@ -649,7 +649,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		idx, err := NewIndex(n.Ds)
+		idx, err := NewIndex(n.Ds, n.Bs)
 		require.NoError(t, err)
 		s, err := NewReplication(
 			n.Host,
@@ -680,7 +680,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		idx, err := NewIndex(n.Ds)
+		idx, err := NewIndex(n.Ds, n.Bs)
 		require.NoError(t, err)
 
 		s, err := NewReplication(
@@ -763,7 +763,7 @@ func TestPeerMgr(t *testing.T) {
 			err := tnode.Dt.Stop(ctx)
 			require.NoError(t, err)
 		})
-		idx, err := NewIndex(tnode.Ds)
+		idx, err := NewIndex(tnode.Ds, tnode.Bs)
 		require.NoError(t, err)
 		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 		hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)

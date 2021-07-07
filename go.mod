@@ -31,7 +31,7 @@ require (
 	github.com/ipfs/go-datastore v0.4.5
 	github.com/ipfs/go-ds-badger v0.2.6
 	github.com/ipfs/go-graphsync v0.6.4
-	github.com/ipfs/go-ipfs-blockstore v1.0.3
+	github.com/ipfs/go-ipfs-blockstore v1.0.4
 	github.com/ipfs/go-ipfs-blocksutil v0.0.1
 	github.com/ipfs/go-ipfs-chunker v0.0.5
 	github.com/ipfs/go-ipfs-exchange-offline v0.0.1

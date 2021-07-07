@@ -165,6 +165,12 @@ func run() error {
 		fmt.Printf("==> Connected to Filecoin RPC at %s\n", args.filEndpoint)
 	}
 
+	// remove unwanted blocks that might be in the blockstore but are removed from the index
+	err = exch.Index().CleanBlockStore(ctx)
+	if err != nil {
+		return err
+	}
+
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
 
@@ -207,5 +213,4 @@ func setupRepo() (string, error) {
 	fmt.Printf("==> Initialized pop repo in %s\n", path)
 
 	return path, nil
-
 }

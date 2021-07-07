@@ -27,7 +27,9 @@ import (
 	"github.com/ipfs/go-graphsync"
 	graphsyncimpl "github.com/ipfs/go-graphsync/impl"
 	"github.com/ipfs/go-graphsync/network"
+	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	bstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	files "github.com/ipfs/go-ipfs-files"
@@ -37,7 +39,9 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-peer"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
@@ -114,7 +118,7 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 
 	testNode.Ds = dss.MutexWrap(datastore.NewMapDatastore())
 
-	testNode.Bs = blockstore.NewBlockstore(testNode.Ds)
+	testNode.Bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(testNode.Ds), blockstore.NewGCLocker())
 
 	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
 	require.NoError(t, err)
@@ -178,6 +182,36 @@ func (tn *TestNode) CreateRandomFile(t testing.TB, size int) string {
 
 	tn.OrigBytes = data
 	return file.Name()
+}
+
+func CreateRandomBlock(t testing.TB, bs bstore.Blockstore) *blocks.BasicBlock {
+	lb := cidlink.LinkBuilder{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    0x71, // dag-cbor as per multicodec
+			MhType:   uint64(mh.BLAKE2B_MIN + 31),
+			MhLength: -1,
+		},
+	}
+
+	data := make([]byte, 10)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
+
+	b1 := basicnode.NewBytes(data)
+	lnk, err := lb.Build(
+		context.TODO(),
+		ipld.LinkContext{},
+		b1,
+		storeutil.StorerForBlockstore(bs),
+	)
+	var buffer bytes.Buffer
+	require.NoError(t, dagcbor.Encoder(b1, &buffer))
+	require.NoError(t, err)
+
+	blk, err := blocks.NewBlockWithCid(buffer.Bytes(), lnk.(cidlink.Link).Cid)
+	require.NoError(t, err)
+
+	return blk
 }
 
 const unixfsChunkSize uint64 = 1 << 10

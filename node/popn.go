@@ -272,6 +272,12 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
+	// remove unwanted blocks that might be in the blockstore but are removed from the index
+	err = nd.exch.Index().CleanBlockStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return nd, nil
 }
 
@@ -683,9 +689,17 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		sendErr(err)
 		return
 	}
+
 	nd.tx.Close()
 	nd.tx = nil
 	nd.txmu.Unlock()
+
+	// Run the garbage collector to remove tagged Refs
+	err = nd.exch.Index().GC()
+	if err != nil {
+		sendErr(err)
+		return
+	}
 
 	nd.send(Notify{CommResult: &CommResult{
 		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),

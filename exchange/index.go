@@ -9,12 +9,15 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-hamt-ipld/v3"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/pop/internal/utils"
+	sel "github.com/myelnet/pop/selectors"
+	"github.com/rs/zerolog/log"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -46,6 +49,10 @@ type Index struct {
 	// updateFunc, if not nil, is called after every read transactions. The hook can be used
 	// to trigger request for new content and refreshing the index with new popular content
 	updateFunc func()
+
+	emu sync.Mutex
+	// gcSet is a cid Set where we put all the cid that will be evicted when calling the Garbage Collector GC()
+	gcSet *cid.Set
 
 	mu sync.Mutex
 	// current size of content committed to the store
@@ -106,20 +113,21 @@ func WithUpdateFunc(fn func()) IndexOption {
 }
 
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
-func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
+func NewIndex(ds datastore.Batching, bstore blockstore.Blockstore, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
 		blist:    list.New(),
 		freqs:    list.New(),
 		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
+		bstore:   bstore,
 		Refs:     make(map[string]*DataRef),
 		interest: make(map[string]*DataRef),
 		rootCID:  cid.Undef,
+		gcSet:    cid.NewSet(),
 	}
 	for _, o := range opts {
 		o(idx)
 	}
 	// keep a reference of the blockstore for loading in graphsync
-	idx.bstore = blockstore.NewBlockstore(idx.ds)
 	idx.store = cbor.NewCborStore(idx.bstore)
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
@@ -234,7 +242,6 @@ func (idx *Index) Flush() error {
 }
 
 // DropRef removes all content linked to a root CID and associated Refs
-// TODO: garbage collect
 func (idx *Index) DropRef(k cid.Cid) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -244,6 +251,12 @@ func (idx *Index) DropRef(k cid.Cid) error {
 		return ErrRefNotFound
 	}
 	ref := idx.Refs[k.String()]
+
+	err := idx.tagForGC(ref)
+	if err != nil {
+		return err
+	}
+
 	idx.remBlistEntry(ref.bucketNode, ref)
 
 	delete(idx.Refs, k.String())
@@ -439,9 +452,12 @@ func (idx *Index) evict(size uint64) uint64 {
 	var evicted uint64
 	for place := idx.blist.Front(); place != nil; place = place.Next() {
 		for entry := range place.Value.(*bucket).entries {
-			delete(idx.Refs, entry.PayloadCID.String())
-			// TODO: figure out when to trigger garbage collection
+			err := idx.tagForGC(entry)
+			if err != nil {
+				log.Error().Err(err).Msgf("failed to tag ref %s for eviction", entry.PayloadCID.String())
+			}
 
+			delete(idx.Refs, entry.PayloadCID.String())
 			idx.remBlistEntry(place, entry)
 			evicted += uint64(entry.PayloadSize)
 			idx.size -= uint64(entry.PayloadSize)
@@ -451,6 +467,109 @@ func (idx *Index) evict(size uint64) uint64 {
 		}
 	}
 	return evicted
+}
+
+// tagForGC tags CIDs that will be evicted during garbage collection
+func (idx *Index) tagForGC(ref *DataRef) error {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
+	return utils.WalkDAG(context.TODO(), ref.PayloadCID, idx.bstore, sel.All(), func(block blocks.Block) error {
+		idx.gcSet.Add(block.Cid())
+		return nil
+	})
+}
+
+// GC removes tagged CIDs
+func (idx *Index) GC() error {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
+	// exit if there is nothing to evict
+	if idx.gcSet.Len() == 0 {
+		return nil
+	}
+
+	// GC Blockstore
+	gcbs, ok := idx.bstore.(blockstore.GCBlockstore)
+	if !ok {
+		return errors.New("blockstore is not a GCBlockstore")
+	}
+
+	unlock := gcbs.GCLock()
+	defer unlock.Unlock()
+
+	err := idx.gcSet.ForEach(func(c cid.Cid) error {
+		return idx.bstore.DeleteBlock(c)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to run garbage collector: %v", err)
+	}
+
+	idx.gcSet = cid.NewSet()
+
+	// GC Datastore
+	gcds, ok := idx.ds.(datastore.GCDatastore)
+	if !ok {
+		return errors.New("datastore is not a GCDatastore")
+	}
+	err = gcds.CollectGarbage()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// CleanBlockStore removes blocks from blockstore which CIDs are not in index
+func (idx *Index) CleanBlockStore(ctx context.Context) error {
+	idx.emu.Lock()
+	defer idx.emu.Unlock()
+
+	cidSet := cid.NewSet()
+
+	err := idx.root.ForEach(ctx, func(k string, val *cbg.Deferred) error {
+		ref := new(DataRef)
+		err := ref.UnmarshalCBOR(bytes.NewReader(val.Raw))
+		if err != nil {
+			return err
+		}
+
+		return utils.WalkDAG(ctx, ref.PayloadCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
+			cidSet.Add(blk.Cid())
+			return nil
+		})
+	})
+	if err != nil {
+		return err
+	}
+
+	kc, err := idx.Bstore().AllKeysChan(ctx)
+	if err != nil {
+		return err
+	}
+	for k := range kc {
+		key := cid.NewCidV1(cid.DagCBOR, k.Hash())
+		if cidSet.Has(key) {
+			continue
+		}
+		err = idx.Bstore().DeleteBlock(k)
+		if err != nil {
+			return err
+		}
+	}
+
+	// GC Datastore
+	gcds, ok := idx.ds.(datastore.GCDatastore)
+	if !ok {
+		return errors.New("datastore is not a GCDatastore")
+	}
+	err = gcds.CollectGarbage()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ---------- Interest --------------

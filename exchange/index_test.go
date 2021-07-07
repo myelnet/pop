@@ -13,11 +13,13 @@ import (
 	dss "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-graphsync/ipldutil"
 	"github.com/ipfs/go-graphsync/storeutil"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/myelnet/pop/internal/testutil"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
@@ -26,8 +28,9 @@ var blockGen = blocksutil.NewBlockGenerator()
 
 func TestIndexLFU(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-	idx, err := NewIndex(ds, WithBounds(512000, 500000))
+	idx, err := NewIndex(ds, bs, WithBounds(512000, 500000))
 
 	ref1 := &DataRef{
 		PayloadCID:  blockGen.Next().Cid(),
@@ -60,7 +63,8 @@ func TestIndexLFU(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test reinitializing the list from the stored frequencies
-	idx, err = NewIndex(ds, WithBounds(512000, 500000))
+	bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
+	idx, err = NewIndex(ds, bs, WithBounds(512000, 500000))
 	require.NoError(t, err)
 
 	// Add another read to ref2
@@ -91,8 +95,9 @@ func TestIndexLFU(t *testing.T) {
 // This test verifies refs are moving correctly across buckets when incrementing reads and writes
 func TestIndexRanking(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-	idx, err := NewIndex(ds, WithBounds(512000, 500000))
+	idx, err := NewIndex(ds, bs, WithBounds(512000, 500000))
 
 	write := func() *DataRef {
 		ref := &DataRef{
@@ -105,7 +110,6 @@ func TestIndexRanking(t *testing.T) {
 	read := func(ref *DataRef) {
 		_, err = idx.GetRef(ref.PayloadCID)
 		require.NoError(t, err)
-
 	}
 
 	// t1
@@ -240,12 +244,14 @@ func TestIndexRanking(t *testing.T) {
 
 func TestIndexDropRef(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-	idx, err := NewIndex(ds)
+	idx, err := NewIndex(ds, bs)
 	require.NoError(t, err)
 
+	blk := testutil.CreateRandomBlock(t, idx.Bstore())
 	ref := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  blk.Cid(),
 		PayloadSize: 256000,
 	}
 	require.NoError(t, idx.SetRef(ref))
@@ -259,8 +265,9 @@ func TestIndexDropRef(t *testing.T) {
 
 func TestIndexUpdateRef(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-	idx, err := NewIndex(ds)
+	idx, err := NewIndex(ds, bs)
 	require.NoError(t, err)
 
 	// create a ref with 1 Key (out of 2) & add it to the index
@@ -299,8 +306,9 @@ func TestIndexUpdateRef(t *testing.T) {
 
 func TestIndexListRefs(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-	idx, err := NewIndex(ds, WithBounds(1000, 900))
+	idx, err := NewIndex(ds, bs, WithBounds(1000, 900))
 
 	var refs []*DataRef
 	// this loop sets 100 refs for 24 bytes = 2400 bytes
@@ -338,8 +346,9 @@ func TestIndexListRefs(t *testing.T) {
 func BenchmarkFlush(b *testing.B) {
 	b.Run("SetRef", func(b *testing.B) {
 		ds := dss.MutexWrap(datastore.NewMapDatastore())
+		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-		idx, err := NewIndex(ds, WithBounds(1000, 900))
+		idx, err := NewIndex(ds, bs, WithBounds(1000, 900))
 		require.NoError(b, err)
 
 		b.ReportAllocs()
@@ -359,8 +368,9 @@ func BenchmarkFlush(b *testing.B) {
 // This selector should query a HAMT without following the links
 func TestIndexSelector(t *testing.T) {
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-	idx, err := NewIndex(ds)
+	idx, err := NewIndex(ds, bs)
 	require.NoError(t, err)
 
 	lb := cidlink.LinkBuilder{
@@ -421,8 +431,9 @@ func TestIndexSelector(t *testing.T) {
 func TestIndexInterest(t *testing.T) {
 	newIndex := func(n int) *Index {
 		ds := dss.MutexWrap(datastore.NewMapDatastore())
+		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-		idx, err := NewIndex(ds, WithBounds(1000, 900))
+		idx, err := NewIndex(ds, bs, WithBounds(1000, 900))
 		require.NoError(t, err)
 
 		var refs []*DataRef
@@ -455,8 +466,9 @@ func TestIndexInterest(t *testing.T) {
 func TestLoadInterest(t *testing.T) {
 	newIndex := func() *Index {
 		ds := dss.MutexWrap(datastore.NewMapDatastore())
+		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 
-		idx, err := NewIndex(ds, WithBounds(1000, 900))
+		idx, err := NewIndex(ds, bs, WithBounds(1000, 900))
 		require.NoError(t, err)
 		return idx
 	}
@@ -573,4 +585,132 @@ func TestLoadInterest(t *testing.T) {
 	for k := range in {
 		require.Equal(t, reflist2[0].PayloadCID, k.PayloadCID)
 	}
+}
+
+func TestUnitGC(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
+
+	idx, err := NewIndex(ds, bs)
+	require.NoError(t, err)
+
+	// generate random block1
+	blk1 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk1))
+
+	// generate random block2
+	blk2 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk2))
+
+	// set blk1-ref1 in index
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  blk1.Cid(),
+		PayloadSize: int64(len(blk1.RawData())),
+	}))
+
+	// set blk2-ref2 in index
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  blk2.Cid(),
+		PayloadSize: int64(len(blk2.RawData())),
+	}))
+
+	// check if refs are in index
+	ref1, err := idx.GetRef(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, ref1.PayloadCID, blk1.Cid())
+
+	ref2, err := idx.GetRef(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, ref2.PayloadCID, blk2.Cid())
+
+	// check if bstore has blocks blk1 & blk2
+	has, err := idx.Bstore().Has(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	has, err = idx.Bstore().Has(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	// drop only ref1 (will tag corresponding blocks for GC)
+	err = idx.DropRef(blk1.Cid())
+	require.NoError(t, err)
+
+	// evict all tagged nodes
+	err = idx.GC()
+	require.NoError(t, err)
+
+	// check if GC did remove tagged block1 ...
+	has, err = idx.Bstore().Has(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, false, has)
+
+	// ... but not block2
+	has, err = idx.Bstore().Has(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+}
+
+func TestCleanBlockStore(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
+
+	idx, err := NewIndex(ds, bs)
+	require.NoError(t, err)
+
+	// generate random block1
+	blk1 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk1))
+
+	// generate random block2
+	blk2 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk2))
+
+	// set blk1-ref1 in index
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  blk1.Cid(),
+		PayloadSize: int64(len(blk1.RawData())),
+	}))
+
+	// set blk2-ref2 in index
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  blk2.Cid(),
+		PayloadSize: int64(len(blk2.RawData())),
+	}))
+
+	// check if refs are in index
+	ref1, err := idx.GetRef(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, ref1.PayloadCID, blk1.Cid())
+
+	ref2, err := idx.GetRef(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, ref2.PayloadCID, blk2.Cid())
+
+	// check if bstore has blocks
+	has, err := idx.Bstore().Has(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	has, err = idx.Bstore().Has(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
+
+	// drop only ref1 (will tag corresponding blocks for eviction)
+	err = idx.DropRef(blk1.Cid())
+	require.NoError(t, err)
+
+	// remove blocks from blockstore, which Refs were delete
+	err = idx.CleanBlockStore(context.TODO())
+	require.NoError(t, err)
+
+	// check if CleanBlockStore did remove tagged block1 ...
+	has, err = idx.Bstore().Has(blk1.Cid())
+	require.NoError(t, err)
+	require.Equal(t, false, has)
+
+	// ... but not block2
+	has, err = idx.Bstore().Has(blk2.Cid())
+	require.NoError(t, err)
+	require.Equal(t, true, has)
 }
