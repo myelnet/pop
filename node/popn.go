@@ -796,8 +796,11 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		return
 	}
 
-	// if maxppb is not set during get(), use default node's value
-	if args.MaxPPB == 0 {
+	if args.MaxPPB == -1 {
+		// if maxppb is set at -1, force MaxPPB at 0
+		args.MaxPPB = 0
+	} else if args.MaxPPB == 0 {
+		// if maxppb is set at 0, use default node's value
 		args.MaxPPB = nd.opts.MaxPPB
 	}
 
