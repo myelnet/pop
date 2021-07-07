@@ -88,6 +88,8 @@ type Options struct {
 	FilToken string
 	// PrivKey is a hex encoded private key to use for default address
 	PrivKey string
+	// MaxPPB is the maximum price per byte
+	MaxPPB int64
 	// Regions is a list of regions a provider chooses to support.
 	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
 	Regions []string
@@ -114,6 +116,9 @@ type node struct {
 	exch *exchange.Exchange
 	rs   RemoteStorer
 
+	// opts keeps all the node params set when starting the node
+	opts Options
+
 	// root of any pending HAMT for storage. This HAMT indexes multiple transactions to
 	// be stored in a single CAR for storage.
 	pieceHAMT *hamt.Node
@@ -129,7 +134,9 @@ type node struct {
 // New puts together all the components of the ipfs node
 func New(ctx context.Context, opts Options) (*node, error) {
 	var err error
-	nd := &node{}
+	nd := &node{
+		opts: opts,
+	}
 
 	dsopts := badgerds.DefaultOptions
 	dsopts.SyncWrites = false
@@ -249,6 +256,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		fmt.Printf("==> Loaded default FIL address: %s\n", nd.exch.Wallet().DefaultAddress())
 	}
 
+	// set Max Price Per Byte
+	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
+
 	nd.rs, err = storage.New(
 		nd.host,
 		nd.exch.DataTransfer(),
@@ -258,6 +268,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
@@ -784,6 +795,15 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 		sendErr(err)
 		return
 	}
+
+	if args.MaxPPB == -1 {
+		// if maxppb is set at -1, force MaxPPB at 0
+		args.MaxPPB = 0
+	} else if args.MaxPPB == 0 {
+		// if maxppb is set at 0, use default node's value
+		args.MaxPPB = nd.opts.MaxPPB
+	}
+
 	// Check if we're trying to get from an ongoing transaction
 	nd.txmu.Lock()
 	if nd.tx != nil && nd.tx.Root() == root {

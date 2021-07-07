@@ -31,6 +31,7 @@ type PopConfig struct {
 	replInterval time.Duration
 	// Exported fields can be set by survey.Ask
 	Bootstrap    string `json:"bootstrap"`
+	MaxPPB       int    `json:"maxppb"`
 	FilEndpoint  string `json:"fil-endpoint"`
 	FilToken     string `json:"fil-token"`
 	FilTokenType string `json:"fil-token-type"`
@@ -58,6 +59,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.capacity, "capacity", "10GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
+		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
 		return fs
 	})(),
@@ -174,6 +176,7 @@ Manage your Myel point of presence from the command line.
 		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,
 		PrivKey:        privKey,
+		MaxPPB:         int64(startArgs.MaxPPB),
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
@@ -256,6 +259,13 @@ func setupRepo() (string, bool, error) {
 			Prompt: &survey.Multiline{
 				Message: "Bootstrap peers",
 				Default: "/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
+			},
+		},
+		{
+			Name: "maxppb",
+			Prompt: &survey.Input{
+				Message: "Max Price Per Byte in attoFIL",
+				Default: "5",
 			},
 		},
 	}
