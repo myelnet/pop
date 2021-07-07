@@ -483,13 +483,12 @@ loop:
 		}
 	}
 
-	// @NOTE: even when selecting a specific key the operation will retrieve all other the entries
-	// without the linked data. We may need to alter this behavior in cases where there is a large
-	// number of entries
+	// @NOTE: Keys() returns the keys for the entries for which the linked data is actually available
 	keys, err = gtx.Keys()
 	require.NoError(t, err)
-	require.Equal(t, len(filepaths)+1, len(keys))
+	require.Equal(t, 0, len(keys))
 
+	// Entries returns all the entries regardless of if the links are loadable
 	entries, err := gtx.Entries()
 	require.NoError(t, err)
 	require.Equal(t, len(filepaths)+1, len(entries))

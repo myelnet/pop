@@ -73,12 +73,12 @@ func runGet(ctx context.Context, args []string) error {
 			if gr.Err != "" {
 				return errors.New(gr.Err)
 			}
-			if gr.DealID != "" && gr.TotalPrice == "0" {
+			if gr.DealID != "" && gr.TotalFunds == "0" {
 				fmt.Printf("==> Started free transfer\n")
 				continue
 			}
 			if gr.DealID != "" {
-				fmt.Printf("==> Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalPrice, gr.PricePerByte)
+				fmt.Printf("==> Started retrieval deal %s for a total of %s (%s/b)\n", gr.DealID, gr.TotalFunds, gr.PricePerByte)
 				continue
 			}
 			if gr.Local {
@@ -87,7 +87,7 @@ func runGet(ctx context.Context, args []string) error {
 			}
 
 			fmt.Printf("==> Completed\n")
-			if gr.TotalPrice != "0" {
+			if gr.TotalFunds != "0" {
 				fmt.Printf("Routing: %fs, Transfer: %fs, Total: %fs\n", gr.DiscLatSeconds, gr.TransLatSeconds, gr.DiscLatSeconds+gr.TransLatSeconds)
 			}
 
