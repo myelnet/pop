@@ -113,11 +113,12 @@ func WithUpdateFunc(fn func()) IndexOption {
 }
 
 // NewIndex creates a new Index instance, loading entries into a doubly linked list for faster read and writes
-func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
+func NewIndex(ds datastore.Batching, bstore blockstore.Blockstore, opts ...IndexOption) (*Index, error) {
 	idx := &Index{
 		blist:    list.New(),
 		freqs:    list.New(),
 		ds:       namespace.Wrap(ds, datastore.NewKey("/index")),
+		bstore:   bstore,
 		Refs:     make(map[string]*DataRef),
 		interest: make(map[string]*DataRef),
 		rootCID:  cid.Undef,
@@ -127,7 +128,6 @@ func NewIndex(ds datastore.Batching, opts ...IndexOption) (*Index, error) {
 		o(idx)
 	}
 	// keep a reference of the blockstore for loading in graphsync
-	idx.bstore = blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
 	idx.store = cbor.NewCborStore(idx.bstore)
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
@@ -490,15 +490,24 @@ func (idx *Index) GC() error {
 		return nil
 	}
 
-	gcbl, ok := idx.bstore.(blockstore.GCBlockstore)
+	gcds, ok := idx.ds.(datastore.GCDatastore)
+	if !ok {
+		return errors.New("datastore is not a GCDatastore")
+	}
+	err := gcds.CollectGarbage()
+	if err != nil {
+		return err
+	}
+
+	gcbs, ok := idx.bstore.(blockstore.GCBlockstore)
 	if !ok {
 		return errors.New("blockstore is not a GCBlockstore")
 	}
 
-	unlock := gcbl.GCLock()
+	unlock := gcbs.GCLock()
 	defer unlock.Unlock()
 
-	err := idx.gcSet.ForEach(func(c cid.Cid) error {
+	err = idx.gcSet.ForEach(func(c cid.Cid) error {
 		return idx.bstore.DeleteBlock(c)
 	})
 	if err != nil {

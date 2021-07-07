@@ -238,12 +238,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	// remove unwanted blocks that might be in the blockstore but are removed from the index
-	err = nd.exch.Index().CleanBlockStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	if opts.PrivKey != "" {
 		err = nd.importPrivateKey(ctx, opts.PrivKey)
 		if err != nil {
@@ -266,6 +260,12 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
+
+	// remove unwanted blocks that might be in the blockstore but are removed from the index
+	err = nd.exch.Index().CleanBlockStore(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return nd, nil
 }

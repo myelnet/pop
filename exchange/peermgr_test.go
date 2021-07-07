@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/libp2p/go-eventbus"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
@@ -19,7 +20,7 @@ func TestHeyEvtPeerMgr(t *testing.T) {
 	n1 := testutil.NewTestNode(mn, t)
 	n2 := testutil.NewTestNode(mn, t)
 
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, blockstore.NewGCBlockstore(blockstore.NewBlockstore(n1.Ds), blockstore.NewGCLocker()))
 	require.NoError(t, err)
 
 	p1 := NewPeerMgr(n1.Host, idx, []Region{global})
@@ -53,7 +54,7 @@ func TestRecordLatency(t *testing.T) {
 	mn := mocknet.New(ctx)
 	n1 := testutil.NewTestNode(mn, t)
 	n2 := testutil.NewTestNode(mn, t)
-	idx, err := NewIndex(n1.Ds)
+	idx, err := NewIndex(n1.Ds, blockstore.NewGCBlockstore(blockstore.NewBlockstore(n1.Ds), blockstore.NewGCLocker()))
 	require.NoError(t, err)
 
 	p1 := NewPeerMgr(n1.Host, idx, []Region{global})
