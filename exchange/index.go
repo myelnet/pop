@@ -254,7 +254,7 @@ func (idx *Index) DropRef(k cid.Cid) error {
 
 	err := idx.tagForGC(ref)
 	if err != nil {
-		log.Error().Err(err).Msgf("failed to tag ref %s for eviction", ref.PayloadCID.String())
+		return err
 	}
 
 	idx.remBlistEntry(ref.bucketNode, ref)
@@ -490,15 +490,7 @@ func (idx *Index) GC() error {
 		return nil
 	}
 
-	gcds, ok := idx.ds.(datastore.GCDatastore)
-	if !ok {
-		return errors.New("datastore is not a GCDatastore")
-	}
-	err := gcds.CollectGarbage()
-	if err != nil {
-		return err
-	}
-
+	// GC Blockstore
 	gcbs, ok := idx.bstore.(blockstore.GCBlockstore)
 	if !ok {
 		return errors.New("blockstore is not a GCBlockstore")
@@ -507,7 +499,7 @@ func (idx *Index) GC() error {
 	unlock := gcbs.GCLock()
 	defer unlock.Unlock()
 
-	err = idx.gcSet.ForEach(func(c cid.Cid) error {
+	err := idx.gcSet.ForEach(func(c cid.Cid) error {
 		return idx.bstore.DeleteBlock(c)
 	})
 	if err != nil {
@@ -515,6 +507,16 @@ func (idx *Index) GC() error {
 	}
 
 	idx.gcSet = cid.NewSet()
+
+	// GC Datastore
+	gcds, ok := idx.ds.(datastore.GCDatastore)
+	if !ok {
+		return errors.New("datastore is not a GCDatastore")
+	}
+	err = gcds.CollectGarbage()
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

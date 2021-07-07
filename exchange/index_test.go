@@ -249,8 +249,9 @@ func TestIndexDropRef(t *testing.T) {
 	idx, err := NewIndex(ds, bs)
 	require.NoError(t, err)
 
+	blk := testutil.CreateRandomBlock(t, idx.Bstore())
 	ref := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  blk.Cid(),
 		PayloadSize: 256000,
 	}
 	require.NoError(t, idx.SetRef(ref))

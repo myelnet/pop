@@ -118,7 +118,7 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 
 	testNode.Ds = dss.MutexWrap(datastore.NewMapDatastore())
 
-	testNode.Bs = blockstore.NewBlockstore(testNode.Ds)
+	testNode.Bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(testNode.Ds), blockstore.NewGCLocker())
 
 	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
 	require.NoError(t, err)

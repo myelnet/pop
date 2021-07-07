@@ -19,6 +19,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/deal"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
@@ -242,6 +243,10 @@ func TestExchangeE2E(t *testing.T) {
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
+			bss, err := cnode.Ms.Get(storeID)
+			require.NoError(t, err)
+			err = utils.MigrateBlocks(ctx, bss.Bstore, client.Index().bstore)
+			require.NoError(t, err)
 			require.NoError(t, client.Index().SetRef(&DataRef{
 				PayloadCID:  rootCid,
 				PayloadSize: int64(len(origBytes)),
