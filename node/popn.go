@@ -22,6 +22,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	badgerds "github.com/ipfs/go-ds-badger"
+	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
@@ -1113,20 +1114,6 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				}
 			}
 
-			if res.PayCh != address.Undef {
-				leftover, err := nd.exch.Payments().ChannelAvailableFunds(res.PayCh)
-				if err != nil {
-					log.Error().Err(err).Msg("checking available funds")
-				}
-				leftAmt := big.Sub(leftover.ConfirmedAmt, leftover.VoucherRedeemedAmt)
-				if leftAmt.IsZero() {
-					err := nd.omg.RemoveOffer(root)
-					if err != nil {
-						log.Error().Err(err).Msg("removing offer")
-					}
-				}
-			}
-
 			ref := tx.Ref()
 			err = nd.exch.Index().SetRef(tx.Ref())
 			if err == exchange.ErrRefAlreadyExists {
@@ -1148,6 +1135,31 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				TransLatSeconds: transDuration.Seconds(),
 			}:
 			default:
+			}
+
+			if res.PayCh != address.Undef {
+				err := tx.Close()
+				if err != nil {
+					log.Error().Err(err).Msg("closing tx")
+				}
+				mk, err := utils.MapMissingKeys(ctx, root, storeutil.LoaderForBlockstore(nd.bs))
+				if err != nil {
+					log.Error().Err(err).Msg("getting missing keys")
+				}
+				funds, err := nd.exch.Payments().ChannelAvailableFunds(res.PayCh)
+				if err != nil {
+					log.Error().Err(err).Msg("getting available funds")
+				}
+				remain := big.Sub(funds.ConfirmedAmt, funds.VoucherRedeemedAmt)
+				// If we fetched all the keys we can remove the offer
+				// TODO: when blocks are properly deduplicated we can check if paych
+				// available funds are 0.
+				if len(mk) == 0 || remain.IsZero() {
+					err := nd.omg.RemoveOffer(root)
+					if err != nil {
+						log.Error().Err(err).Msg("removing offer")
+					}
+				}
 			}
 			return
 		case <-ctx.Done():

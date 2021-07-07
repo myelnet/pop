@@ -873,6 +873,10 @@ loop:
 	channels, err = cn.exch.Payments().ListChannels()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channels))
+
+	// We retrieved all the keys so the offer should be removed
+	_, err = cn.omg.GetOffer(root)
+	require.Error(t, err)
 }
 
 // LoadKey tests loading a single key in a transaction

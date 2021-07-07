@@ -117,6 +117,8 @@ type Tx struct {
 	committed bool
 	// Err exposes any error reported by the session during use
 	Err error
+	// closed keeps track whether the tx was already closed
+	closed bool
 }
 
 // TxOption sets optional fields on a Tx struct
@@ -799,6 +801,10 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 // Close removes any listeners and stream handlers related to a session
 // If the transaction was not committed, any staged content will be deleted
 func (tx *Tx) Close() error {
+	if tx.closed {
+		return tx.Err
+	}
+	tx.closed = true
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}
@@ -810,7 +816,7 @@ func (tx *Tx) Close() error {
 		return err
 	}
 	tx.cancelCtx()
-	return nil
+	return tx.Err
 }
 
 // SetAddress to use for funding the retriebal
