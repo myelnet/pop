@@ -58,6 +58,7 @@ type TxResult struct {
 	Err   error
 	Size  uint64 // Size is the total amount of bytes exchanged during this transaction
 	Spent abi.TokenAmount
+	PayCh address.Address
 }
 
 // Tx is an exchange transaction which may contain multiple DAGs to be exchanged with a set of connected peers
@@ -663,10 +664,15 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 	tx.unsub = tx.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
 		case deal.StatusCompleted:
+			payCh := address.Undef
+			if state.PaymentInfo != nil {
+				payCh = state.PaymentInfo.PayCh
+			}
 			select {
 			case result <- TxResult{
 				Size:  state.TotalReceived,
 				Spent: state.FundsSpent,
+				PayCh: payCh,
 			}:
 			default:
 			}

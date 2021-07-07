@@ -151,8 +151,8 @@ func (s *server) addUserHeaders(w http.ResponseWriter) {
 	w.Header()["Access-Control-Expose-Headers"] = []string{"IPFS-Hash"}
 }
 
-// HTTP get does not retrieve content but only serves content already cached locally
-// to make sure content is loaded use JSON RPC method Load available via websocket
+// HTTP get does not retrieve content but only serves content already cached locally or for which a loaded
+// paychannel already exists to make sure content is loaded use JSON RPC method Load available via websocket
 func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 

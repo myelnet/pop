@@ -44,3 +44,17 @@ func (omg *OfferMgr) GetOffer(k cid.Cid) (deal.Offer, error) {
 
 	return o, nil
 }
+
+// RemoveOffer clears the offer for a given root CID for example if the offer is expired
+func (omg *OfferMgr) RemoveOffer(k cid.Cid) error {
+	omg.mu.Lock()
+	defer omg.mu.Unlock()
+
+	_, ok := omg.offers[k]
+	if !ok {
+		return errors.New("no existing offer")
+	}
+
+	delete(omg.offers, k)
+	return nil
+}

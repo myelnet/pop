@@ -136,9 +136,8 @@ func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (Key
 	// load the IPLD tree
 	nd := nb.Build()
 	// Gather the keys in an array
-	entries := make([]string, nd.Length())
+	var entries []string
 	it := nd.MapIterator()
-	i := 0
 	// Iterate over all the map entries
 	for !it.Done() {
 		k, v, err := it.Next()
@@ -170,8 +169,56 @@ func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (Key
 		if err != nil {
 			return nil, err
 		}
-		entries[i] = key
-		i++
+		entries = append(entries, key)
+	}
+	return KeyList(entries), nil
+}
+
+// MapMissingKeys returns keys for values for which the links are not loadable
+func MapMissingKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) { // Turn the CID into an ipld Link interface, this will link to all the children
+	lk := cidlink.Link{Cid: root}
+	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
+	nb := basicnode.Prototype.Map.NewBuilder()
+	// Use a loader from the link to read all the children blocks from a given store
+	err := lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return nil, err
+	}
+	// load the IPLD tree
+	nd := nb.Build()
+	// Gather the keys in an array
+	var entries []string
+	it := nd.MapIterator()
+	// Iterate over all the map entries
+	for !it.Done() {
+		k, v, err := it.Next()
+		// all succeed or fail
+		if err != nil {
+			return nil, err
+		}
+		vnd, err := v.LookupByString("Value")
+		if err != nil {
+			return nil, err
+		}
+		l, err := vnd.AsLink()
+		if err != nil {
+			return nil, err
+		}
+		nodeType, err := Chooser(l, ipld.LinkContext{})
+		if err != nil {
+			return nil, err
+		}
+		builder := nodeType.NewBuilder()
+		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
+		if err != nil {
+			// The block is not available in the store
+			key, err := k.AsString()
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, key)
+		}
+
 	}
 	return KeyList(entries), nil
 }

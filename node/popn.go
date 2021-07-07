@@ -1113,6 +1113,20 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				}
 			}
 
+			if res.PayCh != address.Undef {
+				leftover, err := nd.exch.Payments().ChannelAvailableFunds(res.PayCh)
+				if err != nil {
+					log.Error().Err(err).Msg("checking available funds")
+				}
+				leftAmt := big.Sub(leftover.ConfirmedAmt, leftover.VoucherRedeemedAmt)
+				if leftAmt.IsZero() {
+					err := nd.omg.RemoveOffer(root)
+					if err != nil {
+						log.Error().Err(err).Msg("removing offer")
+					}
+				}
+			}
+
 			ref := tx.Ref()
 			err = nd.exch.Index().SetRef(tx.Ref())
 			if err == exchange.ErrRefAlreadyExists {
