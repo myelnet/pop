@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	gopath "path"
+	"strconv"
 	"sync"
 	"time"
 
@@ -226,11 +227,9 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ctype)
 		http.ServeContent(w, r, name, modtime, content)
 	}
-
 }
 
 func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
-
 	mediatype, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
 		http.Error(w, "unable to parse content type", http.StatusInternalServerError)
@@ -242,8 +241,17 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		mr := multipart.NewReader(r.Body, params["boundary"])
 		tx := s.node.exch.Tx(r.Context())
 		defer tx.Close()
-		// Set 0 replication for now. TODO: set cache strategy in HTTP header
-		tx.SetCacheRF(0)
+
+		// Set Cache Replication-Factor
+		cacheRF, err := parseContentReplication(r.Header.Get("Content-Replication"))
+		if err != nil {
+			http.Error(w, "failed to parse Content-Replication", http.StatusInternalServerError)
+			return
+		}
+		if cacheRF > 12 {
+			cacheRF = 12
+		}
+		s.node.tx.SetCacheRF(cacheRF)
 
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			c, err := s.node.Add(r.Context(), tx.Store().DAG, part)
@@ -267,7 +275,7 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		err := tx.Commit()
+		err = tx.Commit()
 		if err != nil {
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
 			return
@@ -290,6 +298,19 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 	s.addUserHeaders(w)
 	w.Header().Set("IPFS-Hash", root.String())
 	http.Redirect(w, r, root.String(), http.StatusCreated)
+}
+
+func parseContentReplication(contentReplication string) (int, error) {
+	if contentReplication == "" {
+		return 0, nil
+	}
+
+	contentReplicationInt, err := strconv.ParseInt(contentReplication, 10, 64)
+	if err != nil {
+		return 0, errors.New("unable to parse content replication")
+	}
+
+	return int(contentReplicationInt), nil
 }
 
 // Run runs a pop IPFS node
