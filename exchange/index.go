@@ -559,6 +559,16 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 		}
 	}
 
+	// GC Datastore
+	gcds, ok := idx.ds.(datastore.GCDatastore)
+	if !ok {
+		return errors.New("datastore is not a GCDatastore")
+	}
+	err = gcds.CollectGarbage()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

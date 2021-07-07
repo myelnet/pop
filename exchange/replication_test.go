@@ -10,7 +10,6 @@ import (
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-eventbus"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
@@ -100,8 +99,7 @@ func TestReplication(t *testing.T) {
 		n := testutil.NewTestNode(mn, t, withSwarmT)
 		names[name] = n.Host.ID()
 		n.SetupDataTransfer(ctx, t)
-		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n.Ds), blockstore.NewGCLocker())
-		idx, err := NewIndex(n.Ds, bs, WithBounds(2000000, 1800000))
+		idx, err := NewIndex(n.Ds, n.Bs, WithBounds(2000000, 1800000))
 		require.NoError(t, err)
 		rtv := NewMockRetriever(n.Dt, idx)
 		repl, err := NewReplication(
@@ -339,8 +337,7 @@ func TestConcurrentReplication(t *testing.T) {
 			newNode := func() (*testutil.TestNode, *Replication, *mockRetriever) {
 				n := testutil.NewTestNode(mn, t)
 				n.SetupDataTransfer(ctx, t)
-				bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n.Ds), blockstore.NewGCLocker())
-				idx, err := NewIndex(n.Ds, bs, WithBounds(8000000, 7800000))
+				idx, err := NewIndex(n.Ds, n.Bs, WithBounds(8000000, 7800000))
 				require.NoError(t, err)
 				rtv := NewMockRetriever(n.Dt, idx)
 				repl, err := NewReplication(
@@ -470,8 +467,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 	}
 	opts := Options{Regions: regions, MultiStore: n1.Ms, Blockstore: n1.Bs}
 
-	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n1.Ds), blockstore.NewGCLocker())
-	idx, err := NewIndex(n1.Ds, bs)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 	hn, err := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
@@ -493,8 +489,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 			err := tnode.Dt.Stop(ctx)
 			require.NoError(t, err)
 		})
-		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(tnode.Ds), blockstore.NewGCLocker())
-		idx, err := NewIndex(tnode.Ds, bs)
+		idx, err := NewIndex(tnode.Ds, tnode.Bs)
 		require.NoError(t, err)
 		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 		hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
@@ -512,8 +507,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 		require.NoError(t, err)
 	})
 	tnode.LoadFileToNewStore(ctx, t, fname)
-	bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(tnode.Ds), blockstore.NewGCLocker())
-	idx2, err := NewIndex(tnode.Ds, bs)
+	idx2, err := NewIndex(tnode.Ds, tnode.Bs)
 	require.NoError(t, err)
 	opts2 := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 	hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx2), opts2)
@@ -582,8 +576,7 @@ func TestSendDispatchNoPeers(t *testing.T) {
 	}
 	opts := Options{Regions: regions, MultiStore: n1.Ms, Blockstore: n1.Bs}
 
-	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n1.Ds), blockstore.NewGCLocker())
-	idx, err := NewIndex(n1.Ds, bs)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 	supply, err := NewReplication(n1.Host, idx, n1.Dt, NewMockRetriever(n1.Dt, idx), opts)
 	require.NoError(t, idx.SetRef(&DataRef{
@@ -631,8 +624,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 		Regions["Asia"],
 	}
 
-	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n1.Ds), blockstore.NewGCLocker())
-	idx, err := NewIndex(n1.Ds, bs)
+	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 	supply, err := NewReplication(
 		n1.Host,
@@ -657,8 +649,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n.Ds), blockstore.NewGCLocker())
-		idx, err := NewIndex(n.Ds, bs)
+		idx, err := NewIndex(n.Ds, n.Bs)
 		require.NoError(t, err)
 		s, err := NewReplication(
 			n.Host,
@@ -689,8 +680,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 			require.NoError(t, err)
 		})
 
-		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(n.Ds), blockstore.NewGCLocker())
-		idx, err := NewIndex(n.Ds, bs)
+		idx, err := NewIndex(n.Ds, n.Bs)
 		require.NoError(t, err)
 
 		s, err := NewReplication(
@@ -773,8 +763,7 @@ func TestPeerMgr(t *testing.T) {
 			err := tnode.Dt.Stop(ctx)
 			require.NoError(t, err)
 		})
-		bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(tnode.Ds), blockstore.NewGCLocker())
-		idx, err := NewIndex(tnode.Ds, bs)
+		idx, err := NewIndex(tnode.Ds, tnode.Bs)
 		require.NoError(t, err)
 		opts := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
 		hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx), opts)
