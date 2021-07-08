@@ -33,13 +33,13 @@ func TestIndexLFU(t *testing.T) {
 	idx, err := NewIndex(ds, bs, WithBounds(512000, 500000))
 
 	ref1 := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 		PayloadSize: 256000,
 	}
 	require.NoError(t, idx.SetRef(ref1))
 
 	ref2 := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 		PayloadSize: 110000,
 	}
 	require.NoError(t, idx.SetRef(ref2))
@@ -49,7 +49,7 @@ func TestIndexLFU(t *testing.T) {
 	_, err = idx.GetRef(ref2.PayloadCID)
 
 	ref3 := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 		PayloadSize: 356000,
 	}
 	require.NoError(t, idx.SetRef(ref3))
@@ -72,13 +72,13 @@ func TestIndexLFU(t *testing.T) {
 	require.NoError(t, err)
 
 	ref4 := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 		PayloadSize: 20000,
 	}
 	require.NoError(t, idx.SetRef(ref4))
 
 	ref5 := &DataRef{
-		PayloadCID:  blockGen.Next().Cid(),
+		PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 		PayloadSize: 60000,
 	}
 	require.NoError(t, idx.SetRef(ref5))
@@ -314,7 +314,7 @@ func TestIndexListRefs(t *testing.T) {
 	// this loop sets 100 refs for 24 bytes = 2400 bytes
 	for i := 0; i < 103; i++ {
 		ref := &DataRef{
-			PayloadCID:  blockGen.Next().Cid(),
+			PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 			PayloadSize: 24,
 		}
 		require.NoError(t, idx.SetRef(ref))
@@ -440,7 +440,7 @@ func TestIndexInterest(t *testing.T) {
 		// this loop sets 100 refs for 24 bytes = 2400 bytes
 		for i := 0; i < n; i++ {
 			ref := &DataRef{
-				PayloadCID:  blockGen.Next().Cid(),
+				PayloadCID:  testutil.CreateRandomBlock(t, bs).Cid(),
 				PayloadSize: 24,
 			}
 			require.NoError(t, idx.SetRef(ref))

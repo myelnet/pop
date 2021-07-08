@@ -400,7 +400,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				keys, err := utils.MapLoadableKeys(ctx, req.PayloadCID, store.Loader)
 				if err != nil {
-					log.Debug().Err(err).Msg("error when fetching keys")
+					log.Debug().Err(err).Msg("error when loading keys")
 				}
 
 				ref := &DataRef{
