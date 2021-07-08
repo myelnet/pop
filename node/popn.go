@@ -1125,6 +1125,8 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				return
 			}
 
+			log.Info().Msg("set ref")
+
 			end := time.Now()
 			transDuration := end.Sub(start) - discDuration
 
@@ -1135,6 +1137,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				TransLatSeconds: transDuration.Seconds(),
 			}:
 			default:
+				log.Info().Msg("could not send completed msg")
 			}
 
 			if res.PayCh != address.Undef {
@@ -1161,6 +1164,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 					}
 				}
 			}
+			log.Info().Msg("return")
 			return
 		case <-ctx.Done():
 			return
