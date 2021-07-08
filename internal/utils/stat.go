@@ -44,6 +44,7 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	return res, err
 }
 
+// WalkDAG executes a DAG traversal for a given root and selector and calls a callback function for every block loaded during the traversal
 func WalkDAG(
 	ctx context.Context,
 	root cid.Cid,
@@ -244,50 +245,7 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 
 // MigrateSelectBlocks transfers blocks from a blockstore to another for a given block selection
 func MigrateSelectBlocks(ctx context.Context, from blockstore.Blockstore, to blockstore.Blockstore, root cid.Cid, sel ipld.Node) error {
-	link := cidlink.Link{Cid: root}
-	// The root node could be a raw node so we need to select the builder accordingly
-	nodeType, err := Chooser(link, ipld.LinkContext{})
-	if err != nil {
-		return err
-	}
-	builder := nodeType.NewBuilder()
-	// We make a custom loader to intercept when each block is read during the traversal
-	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
-		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
-			c, ok := lnk.(cidlink.Link)
-			if !ok {
-				return nil, fmt.Errorf("incorrect Link Type")
-			}
-			fmt.Println("migrating", c)
-			block, err := from.Get(c.Cid)
-			if err != nil {
-				return nil, err
-			}
-			if err := to.Put(block); err != nil {
-				return nil, err
-			}
-			reader := bytes.NewReader(block.RawData())
-			return reader, nil
-		}
-	}
-	// Load the root node
-	err = link.Load(ctx, ipld.LinkContext{}, builder, makeLoader(from))
-	if err != nil {
-		return fmt.Errorf("unable to load link: %v", err)
-	}
-	nd := builder.Build()
-
-	s, err := selector.ParseSelector(sel)
-	if err != nil {
-		return err
-	}
-	// Traverse any links from the root node
-	return traversal.Progress{
-		Cfg: &traversal.Config{
-			LinkLoader:                     makeLoader(from),
-			LinkTargetNodePrototypeChooser: Chooser,
-		},
-	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
-		return nil
+	return WalkDAG(ctx, root, from, sel, func(block blocks.Block) error {
+		return to.Put(block)
 	})
 }
