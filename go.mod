@@ -81,5 +81,3 @@ require (
 )
 
 replace github.com/filecoin-project/filecoin-ffi => ./extern/filecoin-ffi
-
-replace github.com/filecoin-project/go-data-transfer => ../go-data-transfer
