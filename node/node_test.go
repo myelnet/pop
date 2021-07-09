@@ -779,6 +779,7 @@ func TestPreload(t *testing.T) {
 	require.NoError(t, tx.Close())
 
 	var chAddr address.Address
+	var settle func()
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String()})
 	require.NoError(t, err)
@@ -790,12 +791,13 @@ func TestPreload(t *testing.T) {
 
 		// Prepare the payment channel mocks
 		from := cn.exch.Wallet().DefaultAddress()
+		to := pn.exch.Wallet().DefaultAddress()
 
 		price, err := filecoin.ParseFIL(res.TotalFunds)
 		require.NoError(t, err)
 
 		createAmt := big.NewFromGo(price.Int)
-		chAddr = prepChannel(t, from, cfapi, pfapi, createAmt)
+		chAddr, settle = prepChannel(t, from, to, cfapi, pfapi, createAmt)
 
 	case <-ctx.Done():
 		t.Fatal("could not select an offer")
@@ -877,6 +879,9 @@ loop:
 	// We retrieved all the keys so the offer should be removed
 	_, err = cn.omg.GetOffer(root)
 	require.Error(t, err)
+
+	// update the actor state so the manager can settle things
+	settle()
 }
 
 // LoadKey tests loading a single key in a transaction
@@ -964,8 +969,9 @@ func TestLoadKey(t *testing.T) {
 
 	// Prepare the payment channel mocks
 	from := cn.exch.Wallet().DefaultAddress()
+	to := pn.exch.Wallet().DefaultAddress()
 	var chAddr address.Address
-	// to := pn.exch.Wallet().DefaultAddress()
+	var settle func()
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "second"})
 	require.NoError(t, err)
@@ -980,7 +986,7 @@ func TestLoadKey(t *testing.T) {
 
 		createAmt := big.NewFromGo(price.Int)
 
-		chAddr = prepChannel(t, from, cfapi, pfapi, createAmt)
+		chAddr, settle = prepChannel(t, from, to, cfapi, pfapi, createAmt)
 	case <-ctx.Done():
 		t.Fatal("could not select an offer")
 	}
@@ -1018,6 +1024,8 @@ loop:
 	ref, err = cn.exch.Index().GetRef(root)
 	require.NoError(t, err)
 	require.Equal(t, true, ref.Has("second"))
+
+	settle()
 }
 
 // LoadAll tests loading all the content from a transaction
@@ -1105,7 +1113,9 @@ func TestLoadAll(t *testing.T) {
 
 	// Prepare the payment channel mocks
 	from := cn.exch.Wallet().DefaultAddress()
+	to := pn.exch.Wallet().DefaultAddress()
 	var chAddr address.Address
+	var settle func()
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "*"})
 	require.NoError(t, err)
@@ -1120,7 +1130,7 @@ func TestLoadAll(t *testing.T) {
 
 		createAmt := big.NewFromGo(price.Int)
 
-		chAddr = prepChannel(t, from, cfapi, pfapi, createAmt)
+		chAddr, settle = prepChannel(t, from, to, cfapi, pfapi, createAmt)
 	case <-ctx.Done():
 		t.Fatal("could not select an offer")
 	}
@@ -1160,9 +1170,11 @@ loop:
 	require.Equal(t, true, ref.Has("first"))
 	require.Equal(t, true, ref.Has("second"))
 	require.Equal(t, true, ref.Has("third"))
+
+	settle()
 }
 
-func prepChannel(t *testing.T, from address.Address, c, p *filecoin.MockLotusAPI, createAmt big.Int) address.Address {
+func prepChannel(t *testing.T, from, to address.Address, c, p *filecoin.MockLotusAPI, createAmt big.Int) (address.Address, func()) {
 	var blockGen = blocksutil.NewBlockGenerator()
 	payerAddr := tutils.NewIDAddr(t, 102)
 	payeeAddr := tutils.NewIDAddr(t, 103)
@@ -1188,6 +1200,8 @@ func prepChannel(t *testing.T, from address.Address, c, p *filecoin.MockLotusAPI
 		WithActorType(payerAddr, builtin.AccountActorCodeID).
 		WithHasher(hasher)
 
+	// We need this mutex so we can read the actor state from inside goroutines
+	var mu sync.Mutex
 	rt := builder.Build(t)
 	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
 	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
@@ -1207,6 +1221,8 @@ func prepChannel(t *testing.T, from address.Address, c, p *filecoin.MockLotusAPI
 	p.SetActorState(&actState)
 	// See channel tests for note about this
 	objReader := func(c cid.Cid) []byte {
+		mu.Lock()
+		defer mu.Unlock()
 		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
@@ -1214,9 +1230,10 @@ func prepChannel(t *testing.T, from address.Address, c, p *filecoin.MockLotusAPI
 	c.SetObjectReader(objReader)
 	p.SetObjectReader(objReader)
 
-	c.SetAccountKey(from)
+	c.SetAccountKey(payerAddr, from)
 	// provider is resolving the account key to verify the voucher signature
-	p.SetAccountKey(from)
+	p.SetAccountKey(payerAddr, from)
+	p.SetAccountKey(payeeAddr, to)
 
 	// Return success exit code from calls to check if voucher is spendable
 	p.SetInvocResult(&filecoin.InvocResult{
@@ -1225,5 +1242,32 @@ func prepChannel(t *testing.T, from address.Address, c, p *filecoin.MockLotusAPI
 		},
 	})
 
-	return chAddr
+	collect := func() {
+		mu.Lock()
+		var st paych.State
+		ep := abi.ChainEpoch(10)
+		rt.SetEpoch(ep)
+
+		rt.GetState(&st)
+		rt.SetCaller(st.From, builtin.AccountActorCodeID)
+		rt.ExpectValidateCallerAddr(st.From, st.To)
+		rt.Call(actor.Settle, nil)
+
+		rt.GetState(&st)
+		mu.Unlock()
+		actState := filecoin.ActorState{
+			Balance: createAmt,
+			State:   st,
+		}
+		// update our actor state to the api so it's queryable
+		p.SetActorState(&actState)
+
+		lookup := testutil.FormatMsgLookup(t, chAddr)
+		// We should have 2 chain txs we're waiting for
+		for i := 0; i < 2; i++ {
+			p.SetMsgLookup(lookup)
+		}
+	}
+
+	return chAddr, collect
 }

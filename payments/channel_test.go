@@ -199,7 +199,7 @@ func TestChannel(t *testing.T) {
 	}
 	api.SetObjectReader(objReader)
 
-	api.SetAccountKey(ch.from)
+	api.SetAccountKey(payerAddr, ch.from)
 
 	voucher := paych.SignedVoucher{Amount: fil.NewInt(123), Lane: 1}
 	res, err := ch.createVoucher(ctx, chAddr, voucher)

@@ -53,9 +53,10 @@ type MockLotusAPI struct {
 	obj         []byte               // bytes returned when calling ChainReadObj
 	objReader   func(cid.Cid) []byte // bytes to return given a specific cid
 	msgLookup   chan *MsgLookup      // msgLookup to return when calling StateWaitMsg
-	accountKey  address.Address      // address returned when calling StateAccountKey
-	lookupID    address.Address      // address returned when calling StateLookupID
-	invocResult *InvocResult         // invocResult returned when calling StateCall
+	accMu       sync.Mutex
+	accountKeys map[address.Address]address.Address // address returned when calling StateAccountKey
+	lookupID    address.Address                     // address returned when calling StateLookupID
+	invocResult *InvocResult                        // invocResult returned when calling StateCall
 }
 
 func NewMockLotusAPI() *MockLotusAPI {
@@ -64,8 +65,9 @@ func NewMockLotusAPI() *MockLotusAPI {
 		panic(err)
 	}
 	return &MockLotusAPI{
-		msgLookup: make(chan *MsgLookup),
-		head:      head,
+		msgLookup:   make(chan *MsgLookup),
+		accountKeys: make(map[address.Address]address.Address),
+		head:        head,
 	}
 }
 
@@ -97,8 +99,10 @@ func (m *MockLotusAPI) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64)
 }
 
 func (m *MockLotusAPI) StateAccountKey(ctx context.Context, addr address.Address, tsk TipSetKey) (address.Address, error) {
-	if m.accountKey != address.Undef {
-		return m.accountKey, nil
+	m.accMu.Lock()
+	defer m.accMu.Unlock()
+	if key, ok := m.accountKeys[addr]; ok {
+		return key, nil
 	}
 	return addr, nil
 }
@@ -168,8 +172,10 @@ func (m *MockLotusAPI) SetObjectReader(r func(cid.Cid) []byte) {
 	m.objReader = r
 }
 
-func (m *MockLotusAPI) SetAccountKey(addr address.Address) {
-	m.accountKey = addr
+func (m *MockLotusAPI) SetAccountKey(addr address.Address, key address.Address) {
+	m.accMu.Lock()
+	m.accountKeys[addr] = key
+	m.accMu.Unlock()
 }
 
 // SetMsgLookup to release the StateWaitMsg request

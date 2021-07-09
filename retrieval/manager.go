@@ -290,10 +290,29 @@ func SettlePaymentChannels(ctx context.Context, pay payments.Manager, pro *Provi
 		case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
 			// If state.PayCh isn't nil we should have some vouchers to redeem
 			if state.PayCh != nil {
-				err := pay.Settle(ctx, *state.PayCh)
-				if err != nil {
-					log.Error().Err(err).Msg("settling payment channel")
-				}
+				go func() {
+					funds, err := pay.ChannelAvailableFunds(*state.PayCh)
+					if err != nil {
+						log.Error().Err(err).Msg("checking available funds")
+						return
+					}
+					// SubmitAllVouchers as one transaction
+					if err := pay.SubmitAllVouchers(ctx, *state.PayCh); err != nil {
+						log.Error().Err(err).Msg("submitting vouchers")
+						return
+					}
+
+					log.Info().Msg("redeemed payment vouchers")
+					// For now let's assume we'd like to settle things when all the funds have been spent
+					if big.Sub(funds.ConfirmedAmt, funds.VoucherRedeemedAmt).LessThanEqual(big.Zero()) {
+						err := pay.Settle(ctx, *state.PayCh)
+						if err != nil {
+							log.Error().Err(err).Msg("settling payment channel")
+						} else {
+							log.Info().Str("addr", state.PayCh.String()).Msg("settled payment channel")
+						}
+					}
+				}()
 			}
 			return
 		}
