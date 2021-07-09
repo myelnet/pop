@@ -151,8 +151,8 @@ func (s *server) addUserHeaders(w http.ResponseWriter) {
 	w.Header()["Access-Control-Expose-Headers"] = []string{"IPFS-Hash"}
 }
 
-// HTTP get does not retrieve content but only serves content already cached locally
-// to make sure content is loaded use JSON RPC method Load available via websocket
+// HTTP get does not retrieve content but only serves content already cached locally or for which a loaded
+// paychannel already exists to make sure content is loaded use JSON RPC method Load available via websocket
 func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 
@@ -175,8 +175,20 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 
 	has := tx.IsLocal(key)
 	if !has {
-		http.Error(w, "content not cached on this node", http.StatusNotFound)
-		return
+		// If there is already a payment channel open we can handle it
+		// else the delay for loading a payment channel is not reasonnable for an HTTP request
+		_, err = s.node.omg.GetOffer(root)
+		if err != nil {
+			http.Error(w, "content not cached on this node", http.StatusNotFound)
+			return
+		}
+		results, err := s.node.Load(r.Context(), &GetArgs{Cid: urlPath})
+		if err != nil {
+			http.Error(w, "failed to load", http.StatusInternalServerError)
+			return
+		}
+		for range results {
+		}
 	}
 
 	if key == "" {

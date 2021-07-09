@@ -18,6 +18,7 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
@@ -41,6 +42,12 @@ func TestAddFunds(t *testing.T) {
 	addr2, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
 
+	payerAddr := tutils.NewIDAddr(t, 102)
+	payeeAddr := tutils.NewIDAddr(t, 103)
+
+	api.SetAccountKey(payerAddr, addr1)
+	api.SetAccountKey(payeeAddr, addr2)
+
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
 
 	mgr := New(bgCtx, api, w, ds, &mockBlocks{make(map[cid.Cid]block.Block)})
@@ -63,7 +70,7 @@ func TestAddFunds(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cis, 0)
 
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -109,7 +116,8 @@ func TestAddFunds(t *testing.T) {
 		require.EqualValues(t, 0, ci.PendingAmount.Int64())
 		require.Nil(t, ci.AddFundsMsg)
 	}()
-
+	// simulate confirmation delay
+	time.Sleep(time.Second)
 	// Send message confirmation to create channel
 	api.SetMsgLookup(lookup)
 
@@ -162,7 +170,7 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	createRes, err := mgr.GetChannel(ctx, from, to, createAmt)
 	require.NoError(t, err)
 
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 	// Send message confirmation to create channel
 	api.SetMsgLookup(lookup)
 
@@ -199,13 +207,13 @@ func TestPaychAddVoucherAfterAddFunds(t *testing.T) {
 	api.SetActorState(&actState)
 	// See channel tests for note about this
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
 	api.SetObjectReader(objReader)
 
-	api.SetAccountKey(from)
+	api.SetAccountKey(payerAddr, from)
 
 	// Create a voucher with a value equal to the channel balance
 	vouchRes, err := mgr.CreateVoucher(ctx, chAddr, createAmt, 1)
@@ -266,6 +274,9 @@ func TestBestSpendable(t *testing.T) {
 	from, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
 
+	to, err := w.NewKey(ctx, wallet.KTSecp256k1)
+	require.NoError(t, err)
+
 	payerAddr := tutils.NewIDAddr(t, 102)
 	payeeAddr := tutils.NewIDAddr(t, 103)
 
@@ -312,13 +323,14 @@ func TestBestSpendable(t *testing.T) {
 	api.SetActorState(&actState)
 	// object reader to send a serialized object
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
 	api.SetObjectReader(objReader)
 
-	api.SetAccountKey(from)
+	api.SetAccountKey(payerAddr, from)
+	api.SetAccountKey(payeeAddr, to)
 
 	// Add vouchers to lane 1 with amounts: [1, 2, 3]
 	voucherLane := uint64(1)
@@ -409,6 +421,8 @@ func TestCollectChannel(t *testing.T) {
 
 	from, err := w.NewKey(ctx, wallet.KTSecp256k1)
 	require.NoError(t, err)
+	to, err := w.NewKey(ctx, wallet.KTSecp256k1)
+	require.NoError(t, err)
 
 	payerAddr := tutils.NewIDAddr(t, 102)
 	payeeAddr := tutils.NewIDAddr(t, 103)
@@ -456,13 +470,14 @@ func TestCollectChannel(t *testing.T) {
 	api.SetActorState(&actState)
 	// object reader to send a serialized object
 	objReader := func(c cid.Cid) []byte {
-		var bg bytesGetter
+		var bg testutil.BytesGetter
 		rt.StoreGet(c, &bg)
 		return bg.Bytes()
 	}
 	api.SetObjectReader(objReader)
 
-	api.SetAccountKey(from)
+	api.SetAccountKey(payerAddr, from)
+	api.SetAccountKey(payeeAddr, to)
 
 	// Add vouchers to lane 1 with amounts: [1, 2, 3]
 	voucherLane := uint64(1)
@@ -500,8 +515,13 @@ func TestCollectChannel(t *testing.T) {
 		},
 	})
 
-	err = mgr.Settle(ctx, chAddr)
-	require.NoError(t, err)
+	go func() {
+		require.NoError(t, mgr.SubmitAllVouchers(ctx, chAddr))
+	}()
+
+	go func() {
+		require.NoError(t, mgr.Settle(ctx, chAddr))
+	}()
 
 	ep := abi.ChainEpoch(10)
 	rt.SetEpoch(ep)
@@ -519,7 +539,7 @@ func TestCollectChannel(t *testing.T) {
 	// update our actor state to the api so it's queryable
 	api.SetActorState(&actState)
 
-	lookup := formatMsgLookup(t, chAddr)
+	lookup := testutil.FormatMsgLookup(t, chAddr)
 	// We should have 3 chain txs we're waiting for
 	for i := 0; i < 3; i++ {
 		api.SetMsgLookup(lookup)

@@ -32,6 +32,7 @@ import (
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
 )
 
@@ -57,6 +58,7 @@ type TxResult struct {
 	Err   error
 	Size  uint64 // Size is the total amount of bytes exchanged during this transaction
 	Spent abi.TokenAmount
+	PayCh address.Address
 }
 
 // Tx is an exchange transaction which may contain multiple DAGs to be exchanged with a set of connected peers
@@ -115,6 +117,8 @@ type Tx struct {
 	committed bool
 	// Err exposes any error reported by the session during use
 	Err error
+	// closed keeps track whether the tx was already closed
+	closed bool
 }
 
 // TxOption sets optional fields on a Tx struct
@@ -125,7 +129,7 @@ func WithStrategy(strategy SelectionStrategy) TxOption {
 	return func(tx *Tx) {
 		tx.worker = strategy(tx)
 		tx.worker.Start()
-		tx.rou.SetReceiver(tx.worker.ReceiveResponse)
+		tx.rou.SetReceiver(tx.worker.PushBack)
 	}
 }
 
@@ -291,12 +295,12 @@ func (tx *Tx) buildRoot() error {
 func (tx *Tx) Ref() *DataRef {
 	var keys [][]byte
 
-	if len(tx.entries) == 0 {
+	if len(tx.entries) > 0 {
 		for k := range tx.entries {
 			keys = append(keys, []byte(k))
 		}
 	} else {
-		kl, err := utils.MapKeys(context.TODO(), tx.root, tx.Store().Loader)
+		kl, err := utils.MapLoadableKeys(context.TODO(), tx.root, tx.Store().Loader)
 		if err != nil {
 			tx.Err = err
 		} else {
@@ -376,7 +380,16 @@ func (tx *Tx) IsLocal(key string) bool {
 		return true
 	}
 	if ref != nil {
-		return ref.Has(key)
+		has := ref.Has(key)
+		if has {
+			return has
+		}
+		// If we don't have it, let's warm up the mutistore with the index so we don't pay for it twice
+		err := utils.MigrateSelectBlocks(tx.ctx, tx.bs, tx.store.Bstore, tx.root, selectors.Entries())
+		if err != nil {
+			log.Error().Err(err).Msg("warming up index blocks")
+		}
+		return false
 	}
 
 	return false
@@ -402,7 +415,7 @@ func (tx *Tx) Keys() ([]string, error) {
 		loader = tx.store.Loader
 	}
 
-	keys, err := utils.MapKeys(
+	keys, err := utils.MapLoadableKeys(
 		tx.ctx,
 		tx.root,
 		loader,
@@ -411,6 +424,40 @@ func (tx *Tx) Keys() ([]string, error) {
 		return nil, fmt.Errorf("failed to get keys: %w", err)
 	}
 	return keys, nil
+}
+
+// RootFor returns the root of a given key
+// @TODO: improve scaling and performance for accessing subroots
+func (tx *Tx) RootFor(key string) (cid.Cid, error) {
+	loader := storeutil.LoaderForBlockstore(tx.bs)
+	if _, err := tx.index.GetRef(tx.root); err != nil {
+		// Keys might still be in multistore
+		loader = tx.store.Loader
+	}
+
+	lk := cidlink.Link{Cid: tx.root}
+	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
+	nb := basicnode.Prototype.Map.NewBuilder()
+	// Use a loader from the link to read all the children blocks from the global store
+	err := lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return cid.Undef, err
+	}
+	// load the IPLD tree
+	nd := nb.Build()
+	entry, err := nd.LookupByString(key)
+	if err != nil {
+		return cid.Undef, err
+	}
+	vnd, err := entry.LookupByString("Value")
+	if err != nil {
+		return cid.Undef, err
+	}
+	l, err := vnd.AsLink()
+	if err != nil {
+		return cid.Undef, err
+	}
+	return l.(cidlink.Link).Cid, nil
 }
 
 // Entries returns all the entries in the root map of this transaction
@@ -540,20 +587,55 @@ type DealRef struct {
 	Offer deal.Offer
 }
 
+// DealExecParams are params to apply when executing a selected deal
+// Can be used to assign different parameters than the defaults in the offer
+// while respecting the offer conditions otherwise it will fail
+type DealExecParams struct {
+	Accepted   bool
+	Selector   ipld.Node
+	TotalFunds abi.TokenAmount
+}
+
+// DealParam is a functional paramter to set a value on DealExecParams
+type DealParam func(*DealExecParams)
+
+// DealSel sets a Deal Selector parameter when executing an offer
+func DealSel(sel ipld.Node) DealParam {
+	return func(params *DealExecParams) {
+		params.Selector = sel
+	}
+}
+
+// DealFunds sets a total amount to load in payment channel when executing an offer
+func DealFunds(amount abi.TokenAmount) DealParam {
+	return func(params *DealExecParams) {
+		params.TotalFunds = amount
+	}
+}
+
 // DealSelection sends the selected offer with a channel to expect confirmation on
 type DealSelection struct {
 	Offer   deal.Offer
-	confirm chan bool
+	confirm chan DealExecParams
 }
 
-// Incline accepts execution for an offer
-func (ds DealSelection) Incline() {
-	ds.confirm <- true
+// Exec accepts execution for an offer
+func (ds DealSelection) Exec(pms ...DealParam) {
+	params := DealExecParams{
+		Accepted:   true,
+		TotalFunds: ds.Offer.RetrievalPrice(),
+	}
+	for _, p := range pms {
+		p(&params)
+	}
+	ds.confirm <- params
 }
 
-// Decline an offer
-func (ds DealSelection) Decline() {
-	ds.confirm <- false
+// Next declines an offer and moves on to the next one if available
+func (ds DealSelection) Next() {
+	ds.confirm <- DealExecParams{
+		Accepted: false,
+	}
 }
 
 // Query the discovery service for offers
@@ -565,24 +647,34 @@ func (tx *Tx) Query(sel ipld.Node) error {
 	return ErrNoStrategy
 }
 
-// QueryFrom allows querying directly from a given peer
-func (tx *Tx) QueryFrom(info peer.AddrInfo, key string) error {
-	if tx.worker != nil {
-		return tx.rou.QueryPeer(info, tx.root, tx.worker.ReceiveResponse)
-	}
-	return ErrNoStrategy
+// QueryOffer allows querying directly from a given peer
+func (tx *Tx) QueryOffer(info peer.AddrInfo, sel ipld.Node) (deal.Offer, error) {
+	tx.sel = sel
+	return tx.rou.QueryProvider(info, tx.root, sel)
+}
+
+// ApplyOffer allows executing a transaction based on an existing offer without querying the routing service
+// By the default the offer is added at the front of the queue. If there is already an offer in progress it will
+// thus execute after it or if not will execute immediately.
+func (tx *Tx) ApplyOffer(offer deal.Offer) {
+	tx.worker.PushFront(offer)
 }
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
-func (tx *Tx) Execute(of deal.Offer) TxResult {
+func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 	result := make(chan TxResult, 1)
 	tx.unsub = tx.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
 		case deal.StatusCompleted:
+			payCh := address.Undef
+			if state.PaymentInfo != nil {
+				payCh = state.PaymentInfo.PayCh
+			}
 			select {
 			case result <- TxResult{
 				Size:  state.TotalReceived,
 				Spent: state.FundsSpent,
+				PayCh: payCh,
 			}:
 			default:
 			}
@@ -598,15 +690,24 @@ func (tx *Tx) Execute(of deal.Offer) TxResult {
 		}
 	})
 
+	info, err := of.AddrInfo()
+	if err != nil {
+		return TxResult{
+			Err: err,
+		}
+	}
+	if p.Selector == nil {
+		p.Selector = tx.sel
+	}
 	// Make sure our provider is in our peerstore
-	tx.rou.AddAddrs(of.Provider.ID, of.Provider.Addrs)
+	tx.rou.AddAddrs(info.ID, info.Addrs)
 	params, err := deal.NewParams(
-		of.Response.MinPricePerByte,
-		of.Response.MaxPaymentInterval,
-		of.Response.MaxPaymentIntervalIncrease,
-		tx.sel,
+		of.MinPricePerByte,
+		of.MaxPaymentInterval,
+		of.MaxPaymentIntervalIncrease,
+		p.Selector,
 		nil,
-		of.Response.UnsealPrice,
+		of.UnsealPrice,
 	)
 	if err != nil {
 		return TxResult{
@@ -618,10 +719,10 @@ func (tx *Tx) Execute(of deal.Offer) TxResult {
 		tx.ctx,
 		tx.root,
 		params,
-		of.Response.PieceRetrievalPrice(),
-		of.Provider.ID,
+		p.TotalFunds,
+		info.ID,
 		tx.clientAddr,
-		of.Response.PaymentAddress,
+		of.PaymentAddress,
 		&tx.storeID,
 	)
 	if err != nil {
@@ -649,9 +750,9 @@ func (tx *Tx) Execute(of deal.Offer) TxResult {
 }
 
 // Confirm takes an offer and blocks to wait for user confirmation before returning true or false
-func (tx *Tx) Confirm(of deal.Offer) bool {
+func (tx *Tx) Confirm(of deal.Offer) DealExecParams {
 	if tx.triage != nil {
-		dch := make(chan bool, 1)
+		dch := make(chan DealExecParams, 1)
 		tx.triage <- DealSelection{
 			Offer:   of,
 			confirm: dch,
@@ -660,10 +761,16 @@ func (tx *Tx) Confirm(of deal.Offer) bool {
 		case d := <-dch:
 			return d
 		case <-tx.ctx.Done():
-			return false
+			return DealExecParams{
+				Accepted: false,
+			}
 		}
 	}
-	return true
+	return DealExecParams{
+		Accepted:   true,
+		Selector:   tx.sel,
+		TotalFunds: of.RetrievalPrice(),
+	}
 }
 
 // Triage allows manually triaging the next selection
@@ -694,6 +801,10 @@ func (tx *Tx) Ongoing() <-chan DealRef {
 // Close removes any listeners and stream handlers related to a session
 // If the transaction was not committed, any staged content will be deleted
 func (tx *Tx) Close() error {
+	if tx.closed {
+		return tx.Err
+	}
+	tx.closed = true
 	if tx.worker != nil {
 		_ = tx.worker.Close()
 	}
@@ -705,7 +816,7 @@ func (tx *Tx) Close() error {
 		return err
 	}
 	tx.cancelCtx()
-	return nil
+	return tx.Err
 }
 
 // SetAddress to use for funding the retriebal
@@ -741,14 +852,15 @@ var ErrUserDeniedOffer = errors.New("user denied offer")
 // OfferWorker is a generic interface to manage the lifecycle of offers
 type OfferWorker interface {
 	Start()
-	ReceiveResponse(peer.AddrInfo, deal.QueryResponse)
+	PushFront(deal.Offer)
+	PushBack(deal.Offer)
 	Close() []deal.Offer
 }
 
 // OfferExecutor exposes the methods required to execute offers
 type OfferExecutor interface {
-	Execute(deal.Offer) TxResult
-	Confirm(deal.Offer) bool
+	Execute(deal.Offer, DealExecParams) TxResult
+	Confirm(deal.Offer) DealExecParams
 	Finish(TxResult)
 }
 
@@ -763,7 +875,8 @@ type SelectionStrategy func(OfferExecutor) OfferWorker
 func SelectFirst(oe OfferExecutor) OfferWorker {
 	return sessionWorker{
 		executor:      oe,
-		offersIn:      make(chan deal.Offer),
+		offersFront:   make(chan deal.Offer),
+		offersBack:    make(chan deal.Offer),
 		closing:       make(chan chan []deal.Offer, 1),
 		numThreshold:  -1,
 		timeThreshold: -1,
@@ -778,7 +891,8 @@ func SelectCheapest(after int, t time.Duration) func(OfferExecutor) OfferWorker 
 	return func(oe OfferExecutor) OfferWorker {
 		return sessionWorker{
 			executor:      oe,
-			offersIn:      make(chan deal.Offer),
+			offersFront:   make(chan deal.Offer),
+			offersBack:    make(chan deal.Offer),
 			closing:       make(chan chan []deal.Offer, 1),
 			numThreshold:  after,
 			timeThreshold: t,
@@ -793,7 +907,8 @@ func SelectFirstLowerThan(amount abi.TokenAmount) func(oe OfferExecutor) OfferWo
 	return func(oe OfferExecutor) OfferWorker {
 		return sessionWorker{
 			executor:      oe,
-			offersIn:      make(chan deal.Offer),
+			offersFront:   make(chan deal.Offer),
+			offersBack:    make(chan deal.Offer),
 			closing:       make(chan chan []deal.Offer, 1),
 			numThreshold:  -1,
 			timeThreshold: -1,
@@ -803,9 +918,10 @@ func SelectFirstLowerThan(amount abi.TokenAmount) func(oe OfferExecutor) OfferWo
 }
 
 type sessionWorker struct {
-	executor OfferExecutor
-	offersIn chan deal.Offer
-	closing  chan chan []deal.Offer
+	executor    OfferExecutor
+	offersFront chan deal.Offer
+	offersBack  chan deal.Offer
+	closing     chan chan []deal.Offer
 	// numThreshold is the number of offers after which we can start execution
 	// if -1 we execute as soon as the first offer gets in
 	numThreshold int
@@ -820,8 +936,8 @@ func (s sessionWorker) exec(offer deal.Offer, result chan TxResult) {
 	// Confirm may block until user sends a response
 	// if we are blocking for a while the worker acts as if we'd started the transfer and will continue
 	// buffering offers according to the given rules
-	if s.executor.Confirm(offer) {
-		result <- s.executor.Execute(offer)
+	if params := s.executor.Confirm(offer); params.Accepted {
+		result <- s.executor.Execute(offer, params)
 		return
 	}
 	result <- TxResult{
@@ -842,6 +958,7 @@ func (s sessionWorker) Start() {
 	// Start a routine to collect a set of offers
 	go func() {
 		// Offers are queued in this slice
+		// TODO: replace with "container/list"
 		var q []deal.Offer
 		var execDone chan TxResult
 		for {
@@ -849,8 +966,8 @@ func (s sessionWorker) Start() {
 			case resc := <-s.closing:
 				resc <- q
 				return
-			case of := <-s.offersIn:
-				if useCeiling && of.Response.MinPricePerByte.LessThan(s.priceCeiling) {
+			case of := <-s.offersBack:
+				if useCeiling && of.MinPricePerByte.LessThan(s.priceCeiling) {
 					continue
 				}
 				if s.numThreshold < 0 && s.timeThreshold < 0 && execDone == nil {
@@ -871,6 +988,14 @@ func (s sessionWorker) Start() {
 					go s.exec(q[0], execDone)
 					q = q[1:]
 				}
+			case of := <-s.offersFront:
+				if execDone == nil {
+					execDone = make(chan TxResult, 1)
+					go s.exec(of, execDone)
+					continue
+				}
+
+				q = append([]deal.Offer{of}, q...)
 			case <-delay:
 				// We may already be executing if we've reached another threshold
 				if execDone != nil {
@@ -887,6 +1012,7 @@ func (s sessionWorker) Start() {
 					execDone = make(chan TxResult, 1)
 					go s.exec(q[0], execDone)
 					q = q[1:]
+					continue
 				}
 				if res.Err == nil || len(q) == 0 {
 					s.executor.Finish(res)
@@ -908,18 +1034,20 @@ func (s sessionWorker) Close() []deal.Offer {
 	}
 }
 
-// ReceiveResponse sends a new offer to the queue
-func (s sessionWorker) ReceiveResponse(p peer.AddrInfo, res deal.QueryResponse) {
+// PushBack sends a new offer to the end of the queue
+func (s sessionWorker) PushBack(offer deal.Offer) {
 	// This never blocks as our queue is always receiving and decides when to drop offers
-	s.offersIn <- deal.Offer{
-		Provider: p,
-		Response: res,
-	}
+	s.offersBack <- offer
+}
+
+// PushFront sends a new offer to the front of the queue
+func (s sessionWorker) PushFront(offer deal.Offer) {
+	s.offersFront <- offer
 }
 
 func sortOffers(offers []deal.Offer) {
 	sort.Slice(offers, func(i, j int) bool {
-		return offers[i].Response.MinPricePerByte.LessThan(offers[j].Response.MinPricePerByte)
+		return offers[i].MinPricePerByte.LessThan(offers[j].MinPricePerByte)
 	})
 }
 

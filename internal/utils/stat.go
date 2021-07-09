@@ -24,6 +24,11 @@ type DAGStat struct {
 	NumBlocks int
 }
 
+// Chooser decides which node type to use when decoding IPLD nodes
+var Chooser = dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
+	return basicnode.Prototype.Any, nil
+})
+
 // Stat returns stats about a selected part of DAG given a cid
 // The cid must be registered in the index
 func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.Node) (DAGStat, error) {
@@ -39,6 +44,7 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 	return res, err
 }
 
+// WalkDAG executes a DAG traversal for a given root and selector and calls a callback function for every block loaded during the traversal
 func WalkDAG(
 	ctx context.Context,
 	root cid.Cid,
@@ -46,12 +52,8 @@ func WalkDAG(
 	sel ipld.Node,
 	f func(blocks.Block) error) error {
 	link := cidlink.Link{Cid: root}
-	chooser := dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
-		return basicnode.Prototype.Any, nil
-	})
-
 	// The root node could be a raw node so we need to select the builder accordingly
-	nodeType, err := chooser(link, ipld.LinkContext{})
+	nodeType, err := Chooser(link, ipld.LinkContext{})
 	if err != nil {
 		return err
 	}
@@ -96,7 +98,7 @@ func WalkDAG(
 	err = traversal.Progress{
 		Cfg: &traversal.Config{
 			LinkLoader:                     makeLoader(bs),
-			LinkTargetNodePrototypeChooser: chooser,
+			LinkTargetNodePrototypeChooser: Chooser,
 		},
 	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
 		return nil
@@ -120,8 +122,9 @@ func (kl KeyList) AsBytes() [][]byte {
 	return out
 }
 
-// MapKeys returns all the keys of a Tx, given its cid and a loader
-func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) {
+// MapLoadableKeys returns all the keys of a Tx, given its cid and a loader
+// this only returns the keys for entries where the blocks are available in the blockstore
+func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) {
 	// Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
 	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
@@ -134,23 +137,89 @@ func MapKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, er
 	// load the IPLD tree
 	nd := nb.Build()
 	// Gather the keys in an array
-	entries := make([]string, nd.Length())
+	var entries []string
 	it := nd.MapIterator()
-	i := 0
 	// Iterate over all the map entries
 	for !it.Done() {
-		k, _, err := it.Next()
+		k, v, err := it.Next()
 		// all succeed or fail
 		if err != nil {
 			return nil, err
 		}
+		vnd, err := v.LookupByString("Value")
+		if err != nil {
+			return nil, err
+		}
+		l, err := vnd.AsLink()
+		if err != nil {
+			return nil, err
+		}
+		nodeType, err := Chooser(l, ipld.LinkContext{})
+		if err != nil {
+			return nil, err
+		}
+		builder := nodeType.NewBuilder()
+		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
+		if err != nil {
+			// The block might not be available in the store
+			continue
+		}
+
 		// The key IPLD node needs to be decoded as a string
 		key, err := k.AsString()
 		if err != nil {
 			return nil, err
 		}
-		entries[i] = key
-		i++
+		entries = append(entries, key)
+	}
+	return KeyList(entries), nil
+}
+
+// MapMissingKeys returns keys for values for which the links are not loadable
+func MapMissingKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) { // Turn the CID into an ipld Link interface, this will link to all the children
+	lk := cidlink.Link{Cid: root}
+	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
+	nb := basicnode.Prototype.Map.NewBuilder()
+	// Use a loader from the link to read all the children blocks from a given store
+	err := lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return nil, err
+	}
+	// load the IPLD tree
+	nd := nb.Build()
+	// Gather the keys in an array
+	var entries []string
+	it := nd.MapIterator()
+	// Iterate over all the map entries
+	for !it.Done() {
+		k, v, err := it.Next()
+		// all succeed or fail
+		if err != nil {
+			return nil, err
+		}
+		vnd, err := v.LookupByString("Value")
+		if err != nil {
+			return nil, err
+		}
+		l, err := vnd.AsLink()
+		if err != nil {
+			return nil, err
+		}
+		nodeType, err := Chooser(l, ipld.LinkContext{})
+		if err != nil {
+			return nil, err
+		}
+		builder := nodeType.NewBuilder()
+		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
+		if err != nil {
+			// The block is not available in the store
+			key, err := k.AsString()
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, key)
+		}
+
 	}
 	return KeyList(entries), nil
 }
@@ -172,4 +241,11 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 		}
 	}
 	return nil
+}
+
+// MigrateSelectBlocks transfers blocks from a blockstore to another for a given block selection
+func MigrateSelectBlocks(ctx context.Context, from blockstore.Blockstore, to blockstore.Blockstore, root cid.Cid, sel ipld.Node) error {
+	return WalkDAG(ctx, root, from, sel, func(block blocks.Block) error {
+		return to.Put(block)
+	})
 }

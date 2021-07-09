@@ -31,6 +31,8 @@ type Exchange struct {
 	opts Options
 	// pubsub topics
 	tops []*pubsub.Topic
+	// payment manager for more control over payment channels
+	pay payments.Manager
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
 	// Routing service
@@ -65,6 +67,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		opts: opts,
 		idx:  idx,
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+		pay:  payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
@@ -83,7 +86,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ctx,
 		opts.MultiStore,
 		ds,
-		payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
+		exch.pay,
 		opts.DataTransfer,
 		h.ID(),
 	)
@@ -99,28 +102,26 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 	return exch, nil
 }
 
-func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
-	_, err := e.idx.GetRef(q.PayloadCID)
-	if err != nil {
-		return deal.QueryResponse{}, err
-	}
+func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.Offer, error) {
+	// This is used to increment LFU cache if the node is available
+	// the Stat method actually checks if the content is available.
+	_, _ = e.idx.GetRef(q.PayloadCID)
 	if q.Selector == nil {
-		return deal.QueryResponse{}, fmt.Errorf("no selector provided")
+		return deal.Offer{}, fmt.Errorf("no selector provided")
 	}
 	sel, err := retrieval.DecodeNode(q.QueryParams.Selector)
 	if err != nil {
 		sel = selectors.All()
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
-	// TODO: support selector in Query
 	stats, err := utils.Stat(ctx, &multistore.Store{Bstore: e.opts.Blockstore}, q.PayloadCID, sel)
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
-		return deal.QueryResponse{}, fmt.Errorf("%s content unavailable: %w", e.h.ID(), err)
+		return deal.Offer{}, fmt.Errorf("%s content unavailable: %w", e.h.ID(), err)
 	}
-	resp := deal.QueryResponse{
-		Status:                     deal.QueryResponseAvailable,
+	ask := deal.Offer{
+		PayloadCID:                 q.PayloadCID,
 		Size:                       uint64(stats.Size),
 		PaymentAddress:             e.opts.Wallet.DefaultAddress(),
 		MinPricePerByte:            r.PPB, // TODO: dynamic pricing
@@ -129,8 +130,8 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// We need to remember the offer we made so we can validate against it once
 	// clients start the retrieval
-	e.rtv.Provider().SetAsk(q.PayloadCID, resp)
-	return resp, nil
+	e.rtv.Provider().SetAsk(q.PayloadCID, ask)
+	return ask, nil
 }
 
 // Tx returns a new transaction. The caller must also call tx.Close to cleanup and perist the new blocks
@@ -186,7 +187,7 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			return res.Err
 		}
 
-		keys, err := utils.MapKeys(ctx, root, tx.Store().Loader)
+		keys, err := utils.MapLoadableKeys(ctx, root, tx.Store().Loader)
 		if err != nil {
 			return err
 		}
@@ -236,4 +237,9 @@ func (e *Exchange) R() *Replication {
 // Index returns the exchange data index
 func (e *Exchange) Index() *Index {
 	return e.idx
+}
+
+// Payments returns the payment manager
+func (e *Exchange) Payments() payments.Manager {
+	return e.pay
 }

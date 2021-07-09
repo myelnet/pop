@@ -176,7 +176,7 @@ type GetResult struct {
 	TotalSpent      string  `json:"totalSpent,omitempty"`
 	TotalReceived   int64   `json:"totalReceived,omitempty"`
 	BytesPaidFor    string  `json:"bytesPaidFor,omitempty"`
-	TotalPrice      string  `json:"totalPrice,omitempty"`
+	TotalFunds      string  `json:"totalFunds,omitempty"`
 	PricePerByte    string  `json:"pricePerByte,omitempty"`
 	UnsealPrice     string  `json:"unsealPrice,omitempty"`
 	DiscLatSeconds  float64 `json:"discLatSeconds,omitempty"`

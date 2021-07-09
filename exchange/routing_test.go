@@ -47,9 +47,9 @@ func Markov(t *testing.T, mn mocknet.Mocknet, rn []*testutil.TestNode, prs []*te
 
 func noop(*testutil.TestNode) {}
 
-func calcResponse(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.QueryResponse, error) {
-	return deal.QueryResponse{
-		Status:                     deal.QueryResponseAvailable,
+func calcResponse(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.Offer, error) {
+	return deal.Offer{
+		PayloadCID:                 blockGen.Next().Cid(),
 		Size:                       uint64(268009),
 		PaymentAddress:             address.TestAddress,
 		MinPricePerByte:            abi.NewTokenAmount(2),
@@ -159,9 +159,9 @@ func TestGossipRouting(t *testing.T) {
 
 			for _, client := range clients {
 				for _, root := range roots {
-					resps := make(chan deal.QueryResponse)
-					client.SetReceiver(func(i peer.AddrInfo, r deal.QueryResponse) {
-						resps <- r
+					offers := make(chan deal.Offer)
+					client.SetReceiver(func(r deal.Offer) {
+						offers <- r
 					})
 					err := client.Query(ctx, root, sel.All())
 					require.NoError(t, err)
@@ -169,7 +169,7 @@ func TestGossipRouting(t *testing.T) {
 					// execute a job for each offer
 					for i := 0; i < testCase.peers-testCase.clients; i++ {
 						select {
-						case r := <-resps:
+						case r := <-offers:
 							require.Equal(t, r.Size, uint64(268009))
 						case <-ctx.Done():
 							t.Fatal("couldn't get all the responses")
@@ -240,9 +240,9 @@ func TestGossipDuplicateRequests(t *testing.T) {
 	require.NoError(t, mn.ConnectAllButSelf())
 
 	// Wait for the responses the client will get here
-	resps := make(chan deal.QueryResponse)
+	resps := make(chan deal.Offer)
 	// This will be called each time the client receives a response from a provider
-	client.SetReceiver(func(i peer.AddrInfo, r deal.QueryResponse) {
+	client.SetReceiver(func(r deal.Offer) {
 		resps <- r
 	})
 
@@ -290,8 +290,8 @@ func TestMessageForwarding(t *testing.T) {
 	require.NoError(t, err)
 	// We don't need store getters or address getters as we're manually sending responses in
 	cnet := NewGossipRouting(cnode.Host, ps, mtracker{true, ""}, []Region{global})
-	responses := make(chan deal.QueryResponse)
-	cnet.receiveResp = func(i peer.AddrInfo, r deal.QueryResponse) {
+	responses := make(chan deal.Offer)
+	cnet.receiveOffer = func(r deal.Offer) {
 		responses <- r
 	}
 	require.NoError(t, cnet.StartProviding(ctx, calcResponse))
@@ -325,23 +325,24 @@ func TestMessageForwarding(t *testing.T) {
 			pp = pnets[i-1].h.ID()
 		}
 		go func(p peer.ID) {
-			stream, err := net.NewQueryStream(p)
+			stream, err := net.NewQueryStream(p, net.queryProtocols)
 			require.NoError(t, err)
 			defer stream.Close()
 
 			addr, _ := address.NewIDAddress(uint64(10))
 			addrs, _ := net.Addrs()
 
-			answer := deal.QueryResponse{
-				Status:                     deal.QueryResponseAvailable,
+			answer := deal.Offer{
+				PayloadCID:                 blockGen.Next().Cid(),
+				ID:                         "02Qm",
+				PeerAddr:                   addrs[0].Bytes(),
 				Size:                       1600,
 				PaymentAddress:             addr,
 				MinPricePerByte:            deal.DefaultPricePerByte,
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
-				Message:                    "02Qm" + string(addrs[0].Bytes()),
 			}
-			err = stream.WriteQueryResponse(answer)
+			err = stream.WriteOffer(answer)
 			require.NoError(t, err)
 		}(pp)
 	}
@@ -369,8 +370,8 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 	ps, err := pubsub.NewGossipSub(ctx, cnode.Host)
 	require.NoError(b, err)
 	cnet := NewGossipRouting(cnode.Host, ps, mtracker{true, ""}, []Region{global})
-	responses := make(chan deal.QueryResponse)
-	cnet.receiveResp = func(i peer.AddrInfo, r deal.QueryResponse) {
+	responses := make(chan deal.Offer)
+	cnet.receiveOffer = func(r deal.Offer) {
 		responses <- r
 	}
 	require.NoError(b, cnet.StartProviding(ctx, calcResponse))
@@ -410,23 +411,24 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 			pp = pnets[i-1].h.ID()
 		}
 		go func(p peer.ID) {
-			stream, err := net.NewQueryStream(p)
+			stream, err := net.NewQueryStream(p, net.queryProtocols)
 			require.NoError(b, err)
 			defer stream.Close()
 
 			addr, _ := address.NewIDAddress(uint64(10))
 			addrs, _ := net.Addrs()
 
-			answer := deal.QueryResponse{
-				Status:                     deal.QueryResponseAvailable,
+			answer := deal.Offer{
+				PayloadCID:                 blockGen.Next().Cid(),
+				ID:                         "02Qm",
+				PeerAddr:                   addrs[0].Bytes(),
 				Size:                       1600,
 				PaymentAddress:             addr,
 				MinPricePerByte:            deal.DefaultPricePerByte,
 				MaxPaymentInterval:         deal.DefaultPaymentInterval,
 				MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
-				Message:                    "02Qm" + string(addrs[0].Bytes()),
 			}
-			err = stream.WriteQueryResponse(answer)
+			err = stream.WriteOffer(answer)
 			require.NoError(b, err)
 		}(pp)
 	}

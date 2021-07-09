@@ -15,10 +15,11 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/myelnet/pop/internal/utils"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
-//go:generate cbor-gen-for --map-encoding QueryParams Query GossipQuery QueryResponse Proposal Response Params Payment ClientState ProviderState PaymentInfo
+//go:generate cbor-gen-for --map-encoding QueryParams Query QueryResponse Proposal Response Params Payment ClientState ProviderState PaymentInfo Offer
 
 // QueryParams - indicate what specific information about a piece that a retrieval
 // client is interested in, as well as specific parameters the client is seeking
@@ -108,9 +109,40 @@ func (qr QueryResponse) PieceRetrievalPrice() abi.TokenAmount {
 }
 
 // Offer is the conditions under which a provider is willing to approve a transfer
+// @TODO: maybe should have an associated selector?
 type Offer struct {
-	Provider peer.AddrInfo
-	Response QueryResponse
+	ID                         string
+	PeerAddr                   []byte
+	PayloadCID                 cid.Cid
+	Size                       uint64
+	PaymentAddress             address.Address
+	MinPricePerByte            abi.TokenAmount
+	MaxPaymentInterval         uint64
+	MaxPaymentIntervalIncrease uint64
+	UnsealPrice                abi.TokenAmount
+}
+
+// AddrInfo returns the peer info to connect with the provider of this offer
+func (o Offer) AddrInfo() (*peer.AddrInfo, error) {
+	return utils.AddrBytesToAddrInfo(o.PeerAddr)
+}
+
+// RetrievalPrice is the total price to retrieve the content from this offer
+func (o Offer) RetrievalPrice() abi.TokenAmount {
+	return big.Mul(o.MinPricePerByte, abi.NewTokenAmount(int64(o.Size)))
+}
+
+// AsQueryResponse retrofits an Offer into a QueryResponse message
+func (o Offer) AsQueryResponse() QueryResponse {
+	return QueryResponse{
+		Status:                     QueryResponseAvailable,
+		Size:                       o.Size,
+		PaymentAddress:             o.PaymentAddress,
+		MinPricePerByte:            o.MinPricePerByte,
+		MaxPaymentInterval:         o.MaxPaymentInterval,
+		MaxPaymentIntervalIncrease: o.MaxPaymentIntervalIncrease,
+		UnsealPrice:                o.UnsealPrice,
+	}
 }
 
 // ID is an identifier for a retrieval deal (unique to a client)

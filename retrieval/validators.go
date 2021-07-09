@@ -20,6 +20,7 @@ import (
 	"github.com/myelnet/pop/selectors"
 )
 
+// TODO: make this nicer
 var allSelectorBytes []byte
 
 func init() {
@@ -32,8 +33,6 @@ func init() {
 type ValidationEnvironment interface {
 	// CheckDealParams verifies the given deal params are acceptable
 	CheckDealParams(deal.ProviderState) error
-	// RunDealDecisioningLogic runs custom deal decision logic to decide if a deal is accepted, if present
-	RunDealDecisioningLogic(ctx context.Context, state deal.ProviderState) (bool, string, error)
 	// StateMachines returns the FSM Group to begin tracking with
 	BeginTracking(pds deal.ProviderState) error
 	// NextStoreID allocates a store for this deal
@@ -122,14 +121,6 @@ func (rv *ProviderRequestValidator) acceptDeal(d *deal.ProviderState) (deal.Stat
 	err := rv.env.CheckDealParams(*d)
 	if err != nil {
 		return deal.StatusRejected, err
-	}
-
-	accepted, reason, err := rv.env.RunDealDecisioningLogic(context.TODO(), *d)
-	if err != nil {
-		return deal.StatusErrored, err
-	}
-	if !accepted {
-		return deal.StatusRejected, fmt.Errorf(reason)
 	}
 
 	// This also verifies we do have the content ready to provide

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
@@ -23,7 +22,6 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/rs/zerolog/log"
 	cbg "github.com/whyrusleeping/cbor-gen"
@@ -109,9 +107,25 @@ func (qs *QueryStream) ReadQueryResponse() (deal.QueryResponse, error) {
 	return resp, nil
 }
 
-// WriteQueryResponse encodes and writes a CBOR QueryResponse message to a stream
+// WriteQueryResponse encodes and writes a CBOR QueryResponse message to a stream.
 func (qs *QueryStream) WriteQueryResponse(qr deal.QueryResponse) error {
 	return cborutil.WriteCborRPC(qs.rw, &qr)
+}
+
+// ReadOffer reads and decodes a CBOR encoded offer message.
+func (qs *QueryStream) ReadOffer() (deal.Offer, error) {
+	var offer deal.Offer
+
+	if err := offer.UnmarshalCBOR(qs.buf); err != nil {
+		return deal.Offer{}, err
+	}
+
+	return offer, nil
+}
+
+// WriteOffer encodes and writes an Offer message to byte stream.
+func (qs *QueryStream) WriteOffer(o deal.Offer) error {
+	return cborutil.WriteCborRPC(qs.rw, &o)
 }
 
 // Close the underlying stream
@@ -136,8 +150,11 @@ type MessageTracker interface {
 // ReceiveResponse is fired every time we get a response
 type ReceiveResponse func(peer.AddrInfo, deal.QueryResponse)
 
-// ResponseFunc takes a Query and returns a Response or an error if request is declined
-type ResponseFunc func(context.Context, peer.ID, Region, deal.Query) (deal.QueryResponse, error)
+// ReceiveOffer is a callback for receiving a new offer
+type ReceiveOffer func(deal.Offer)
+
+// ResponseFunc takes a Query and returns an Offer or an error if request is declined
+type ResponseFunc func(context.Context, peer.ID, Region, deal.Query) (deal.Offer, error)
 
 // GossipRouting is a content routing service to find content providers using pubsub gossip routing
 type GossipRouting struct {
@@ -148,7 +165,7 @@ type GossipRouting struct {
 	meta           MessageTracker
 	regions        []Region
 	rmu            sync.Mutex
-	receiveResp    ReceiveResponse
+	receiveOffer   ReceiveOffer
 }
 
 // NewGossipRouting creates a new GossipRouting service
@@ -160,7 +177,6 @@ func NewGossipRouting(h host.Host, ps *pubsub.PubSub, meta MessageTracker, rgs [
 		regions: rgs,
 		tops:    make([]*pubsub.Topic, len(rgs)),
 		queryProtocols: []protocol.ID{
-			FilQueryProtocolID,
 			PopQueryProtocolID,
 		},
 	}
@@ -169,8 +185,33 @@ func NewGossipRouting(h host.Host, ps *pubsub.PubSub, meta MessageTracker, rgs [
 
 // StartProviding opens up our gossip subscription and sets our stream handler
 func (gr *GossipRouting) StartProviding(ctx context.Context, fn ResponseFunc) error {
-	// We only need to handle the Pop query protocol since Fil is for querying storage miners
-	gr.h.SetStreamHandler(PopQueryProtocolID, gr.handleQueryResponse)
+	// The PopQueryProtocolID handler expects offer messages from peers who received a gossip query
+	gr.h.SetStreamHandler(PopQueryProtocolID, gr.handleOffer)
+
+	// The FilQueryProtocolID handler expects query messages
+	gr.h.SetStreamHandler(FilQueryProtocolID, func(s network.Stream) {
+		buffered := bufio.NewReaderSize(s, 16)
+		defer s.Close()
+
+		receivedFrom := s.Conn().RemotePeer()
+
+		m := new(deal.Query)
+		if err := m.UnmarshalCBOR(buffered); err != nil {
+			return
+		}
+		// supports single region only
+		offer, err := fn(ctx, receivedFrom, gr.regions[0], *m)
+		if err != nil {
+			return
+		}
+
+		qs := &QueryStream{p: receivedFrom, rw: s, buf: buffered}
+
+		err = qs.WriteQueryResponse(offer.AsQueryResponse())
+		if err != nil {
+			log.Error().Err(err).Msg("writing query response")
+		}
+	})
 
 	for i, r := range gr.regions {
 		top, err := gr.ps.Join(fmt.Sprintf("%s/%s", PopQueryProtocolID, r.Name))
@@ -202,21 +243,25 @@ func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn 
 		if err := m.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
 			continue
 		}
-		resp, err := fn(ctx, msg.ReceivedFrom, r, *m)
+		offer, err := fn(ctx, msg.ReceivedFrom, r, *m)
 		if err != nil {
 			continue
 		}
 
-		qs, err := gr.NewQueryStream(msg.ReceivedFrom)
+		qs, err := gr.NewQueryStream(msg.ReceivedFrom, gr.queryProtocols)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to create response query stream")
 			continue
 		}
-		resp.Message, err = gr.ResponseMsg(msg.Message)
-		if err != nil {
+		offer.ID = pubsub.DefaultMsgIdFn(msg.Message)
+		addrs, err := gr.Addrs()
+		if err != nil || len(addrs) == 0 {
+			log.Error().Err(err).Msg("failed to get host addresses")
 			continue
 		}
-		if err := qs.WriteQueryResponse(resp); err != nil {
+		offer.PeerAddr = addrs[0].Bytes()
+
+		if err := qs.WriteOffer(offer); err != nil {
 			log.Error().Err(err).Msg("retrieval query: WriteCborRPC")
 			continue
 		}
@@ -224,41 +269,43 @@ func (gr *GossipRouting) pump(ctx context.Context, sub *pubsub.Subscription, fn 
 	}
 }
 
-// ResponseMsg prepares the QueryResponse Message payload
-func (gr *GossipRouting) ResponseMsg(msg *pb.Message) (string, error) {
-	addrs, err := gr.Addrs()
+// QueryProvider asks a provider directly for retrieval conditions
+func (gr *GossipRouting) QueryProvider(p peer.AddrInfo, root cid.Cid, sel ipld.Node) (deal.Offer, error) {
+	params, err := deal.NewQueryParams(sel)
 	if err != nil {
-		return "", err
+		return deal.Offer{}, err
 	}
-	mid := pubsub.DefaultMsgIdFn(msg)
-	// Our message payload includes the message ID and the recipient peer address
-	// The index indicates where to slice the string to extract both values
-	p := fmt.Sprintf("%d%s%s", len(mid), mid, string(addrs[0].Bytes()))
-	return p, nil
-}
+	m := deal.Query{
+		PayloadCID:  root,
+		QueryParams: params,
+	}
 
-// QueryPeer asks another peer directly for retrieval conditions
-func (gr *GossipRouting) QueryPeer(p peer.AddrInfo, root cid.Cid, fn ReceiveResponse) error {
-	stream, err := gr.NewQueryStream(p.ID)
-	if err != nil {
-		return err
-	}
+	stream, err := gr.NewQueryStream(p.ID, []protocol.ID{FilQueryProtocolID})
 	defer stream.Close()
 
-	err = stream.WriteQuery(deal.Query{
-		PayloadCID:  root,
-		QueryParams: deal.QueryParams{}, // Filecoin does not support selectors in queries yet
-	})
+	err = stream.WriteQuery(m)
 	if err != nil {
-		return err
+		return deal.Offer{}, err
 	}
 
 	res, err := stream.ReadQueryResponse()
 	if err != nil {
-		return err
+		return deal.Offer{}, err
 	}
-	fn(p, res)
-	return nil
+	addrs, err := peer.AddrInfoToP2pAddrs(&p)
+	if err != nil {
+		return deal.Offer{}, err
+	}
+	return deal.Offer{
+		PeerAddr:                   addrs[0].Bytes(),
+		PayloadCID:                 root,
+		Size:                       res.Size,
+		PaymentAddress:             res.PaymentAddress,
+		MinPricePerByte:            res.MinPricePerByte,
+		MaxPaymentInterval:         res.MaxPaymentInterval,
+		MaxPaymentIntervalIncrease: res.MaxPaymentIntervalIncrease,
+		UnsealPrice:                res.UnsealPrice,
+	}, nil
 }
 
 // Query asks the gossip network of providers if anyone can provide the blocks we're looking for
@@ -289,16 +336,16 @@ func (gr *GossipRouting) Query(ctx context.Context, root cid.Cid, sel ipld.Node)
 	return nil
 }
 
-// SetReceiver sets a callback to receive discovery responses
-func (gr *GossipRouting) SetReceiver(fn ReceiveResponse) {
+// SetReceiver sets a callback to receive offers from gossip routers
+func (gr *GossipRouting) SetReceiver(fn ReceiveOffer) {
 	gr.rmu.Lock()
-	gr.receiveResp = fn
+	gr.receiveOffer = fn
 	gr.rmu.Unlock()
 }
 
 // NewQueryStream creates a new query stream using the provided peer.ID to handle the Query protocols
-func (gr *GossipRouting) NewQueryStream(dest peer.ID) (*QueryStream, error) {
-	s, err := OpenStream(context.Background(), gr.h, dest, gr.queryProtocols)
+func (gr *GossipRouting) NewQueryStream(dest peer.ID, protos []protocol.ID) (*QueryStream, error) {
+	s, err := OpenStream(context.Background(), gr.h, dest, protos)
 	if err != nil {
 		return nil, err
 	}
@@ -306,49 +353,23 @@ func (gr *GossipRouting) NewQueryStream(dest peer.ID) (*QueryStream, error) {
 	return &QueryStream{p: dest, rw: s, buf: buffered}, nil
 }
 
-// handleQueryResponse reads a QueryResponse message from an incoming stream, reads the Message
-// if a message is provided, it parses the ID embedded in it and checks if the reference matches
-// one we published. If we did publish it means we are expecting the response to we read the response
-// and send it to the receiver if not and we have a sender for the message reference we forward it back
-// if there is no message attached with the response it might be sent from a Filecoin storage miner so
-// we still try to send it to the receiver.
-func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
+// handleOffer reads an Offer message from an incoming stream, and checks if it matches
+// any query we published. If we did publish it means we are expecting responses so we read the offer
+// and send it to the receiver if not and we have a sender for the message reference we forward it back.
+func (gr *GossipRouting) handleOffer(s network.Stream) {
 	buffered := bufio.NewReaderSize(s, 16)
 	defer s.Close()
 
 	buf := new(bytes.Buffer)
-	msg, err := PeekResponseMsg(buffered, buf)
+	id, err := PeekOfferID(buffered, buf)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to peek message")
+		log.Error().Err(err).Msg("failed to peek offer ID")
 		return
 	}
-	// Here we handle messages from Filecoin miners
-	if len(msg) == 0 {
-		gr.rmu.Lock()
-		defer gr.rmu.Unlock()
-		if gr.receiveResp == nil {
-			log.Error().Msg("received resp")
-			return
-		}
-		var resp deal.QueryResponse
-		if err := resp.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
-			log.Error().Err(err).Msg("failed to read query response")
-			return
-		}
-		gr.receiveResp(gr.h.Peerstore().PeerInfo(s.Conn().RemotePeer()), resp)
-		return
-	}
-	// Get the index where to split
-	is, err := strconv.ParseInt(msg[:2], 10, 64)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to parse index")
-		return
-	}
-	msgID := msg[2 : is+2]
 	// The receiver should know if we issued the query if it's not the case
 	// it means we must forward it to whichever peer sent us the query
-	if !gr.meta.Published(msgID) {
-		to, err := gr.meta.Sender(msgID)
+	if !gr.meta.Published(id) {
+		to, err := gr.meta.Sender(id)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to find message recipient")
 			return
@@ -366,23 +387,17 @@ func (gr *GossipRouting) handleQueryResponse(s network.Stream) {
 	gr.rmu.Lock()
 	defer gr.rmu.Unlock()
 	// Stop if we don't have a receiver set
-	if gr.receiveResp == nil {
+	if gr.receiveOffer == nil {
 		return
 	}
 
-	rec, err := utils.AddrBytesToAddrInfo([]byte(msg[is+2:]))
-	if err != nil {
-		log.Error().Err(err).Msg("failed to parse addr bytes")
+	var offer deal.Offer
+	if err := offer.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
+		log.Error().Err(err).Msg("failed to read offer")
 		return
 	}
 
-	var resp deal.QueryResponse
-	if err := resp.UnmarshalCBOR(buf); err != nil && !errors.Is(err, io.EOF) {
-		log.Error().Err(err).Msg("failed to read query response")
-		return
-	}
-
-	gr.receiveResp(*rec, resp)
+	gr.receiveOffer(offer)
 }
 
 // Addrs returns the host's p2p addresses
@@ -395,8 +410,8 @@ func (gr *GossipRouting) AddAddrs(p peer.ID, addrs []ma.Multiaddr) {
 	gr.h.Peerstore().AddAddrs(p, addrs, 8*time.Hour)
 }
 
-// PeekResponseMsg decodes the Message field only and returns the value while copying the bytes in a buffer
-func PeekResponseMsg(r io.Reader, buf *bytes.Buffer) (string, error) {
+// PeekOfferID decodes the ID field only and returns the value while copying the bytes in a buffer
+func PeekOfferID(r io.Reader, buf *bytes.Buffer) (string, error) {
 	tr := io.TeeReader(r, buf)
 	br := cbg.GetPeeker(tr)
 	scratch := make([]byte, 8)
@@ -414,7 +429,7 @@ func PeekResponseMsg(r io.Reader, buf *bytes.Buffer) (string, error) {
 			}
 			name = string(sval)
 		}
-		if name == "Message" {
+		if name == "ID" {
 			sval, err := cbg.ReadStringBuf(br, scratch)
 			if err != nil {
 				return "", err

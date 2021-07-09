@@ -35,7 +35,7 @@ func (te testExecutor) SetError(err error) {
 	te.err <- err
 }
 
-func (te testExecutor) Execute(o deal.Offer) TxResult {
+func (te testExecutor) Execute(o deal.Offer, p DealExecParams) TxResult {
 	err := <-te.err
 	if err != nil {
 		return TxResult{
@@ -46,12 +46,14 @@ func (te testExecutor) Execute(o deal.Offer) TxResult {
 	return TxResult{}
 }
 
-func (te testExecutor) Confirm(o deal.Offer) bool {
+func (te testExecutor) Confirm(o deal.Offer) DealExecParams {
 	select {
 	case te.conf <- o:
 	default:
 	}
-	return true
+	return DealExecParams{
+		Accepted: true,
+	}
 }
 
 func (te testExecutor) Finish(res TxResult) {
@@ -120,9 +122,8 @@ func TestSelectionStrategies(t *testing.T) {
 			wq := testCase.strategy(exec)
 
 			for i := 0; i < testCase.offers; i++ {
-				i := i
 				go func() {
-					wq.ReceiveResponse(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+					wq.PushBack(deal.Offer{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -180,9 +181,8 @@ func BenchmarkStrategies(b *testing.B) {
 			wq := testCase.strategy(exec)
 
 			for i := 0; i < 30+b.N; i++ {
-				i := i
 				go func() {
-					wq.ReceiveResponse(peer.AddrInfo{ID: peer.ID(fmt.Sprintf("%d", i))}, deal.QueryResponse{
+					wq.PushBack(deal.Offer{
 						MinPricePerByte: abi.NewTokenAmount(int64(rand.Intn(10))),
 					})
 				}()
@@ -286,7 +286,7 @@ func TestExchangeE2E(t *testing.T) {
 			selected, err := tx.Triage()
 			require.NoError(t, err)
 
-			selected.Incline()
+			selected.Exec(DealSel(sel.All()))
 
 			ref := <-tx.Ongoing()
 			require.NoError(t, err)

@@ -692,7 +692,7 @@ func (ch *channel) addVoucherUnlocked(ctx context.Context, chAddr address.Addres
 	}
 
 	// Check voucher validity
-	laneStates, err := ch.checkVoucherValidUnlocked(ctx, chAddr, sv)
+	laneStates, balance, err := ch.checkVoucherValidUnlocked(ctx, chAddr, sv)
 	if err != nil {
 		return filecoin.NewInt(0), err
 	}
@@ -721,58 +721,66 @@ func (ch *channel) addVoucherUnlocked(ctx context.Context, chAddr address.Addres
 		ci.NextLane = sv.Lane + 1
 	}
 
+	// This is used in the case of a provider adding vouchers. The Amount should be 0 since we didn't
+	// create the channel. As a result we can avoid an extra call to the actor state when needing to
+	// check available funds.
+	if ci.Amount.LessThan(balance) {
+		ci.Amount = balance
+	}
+
 	return delta, ch.store.putChannelInfo(ci)
 }
 
-func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher) (map[uint64]LaneState, error) {
+func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address.Address, sv *paych.SignedVoucher) (map[uint64]LaneState, filecoin.BigInt, error) {
+	ei := filecoin.EmptyInt
 	if sv.ChannelAddr != chAddr {
-		return nil, fmt.Errorf("voucher ChannelAddr doesn't match channel address, got %s, expected %s", sv.ChannelAddr, chAddr)
+		return nil, ei, fmt.Errorf("voucher ChannelAddr doesn't match channel address, got %s, expected %s", sv.ChannelAddr, chAddr)
 	}
 
 	act, err := ch.api.StateGetActor(ctx, chAddr, filecoin.EmptyTSK)
 	if err != nil {
-		return nil, err
+		return nil, ei, err
 	}
 
 	// Load payment channel actor state
 	pchState, err := ch.loadActorState(chAddr)
 	if err != nil {
-		return nil, fmt.Errorf("loadActorState: %w", err)
+		return nil, ei, fmt.Errorf("loadActorState: %w", err)
 	}
 
 	// Load channel "From" account actor state
 	f, err := pchState.From()
 	if err != nil {
-		return nil, err
+		return nil, ei, err
 	}
 
 	from, err := ch.api.StateAccountKey(ctx, f, filecoin.EmptyTSK)
 	if err != nil {
-		return nil, err
+		return nil, ei, err
 	}
 
 	// verify voucher signature
 	vb, err := sv.SigningBytes()
 	if err != nil {
-		return nil, err
+		return nil, ei, err
 	}
 
 	sig, err := wallet.SigTypeSig(sv.Signature.Type, ch.wal.Signers())
 	if err != nil {
-		return nil, err
+		return nil, ei, err
 	}
 
 	// TODO: technically, either party may create and sign a voucher.
 	// However, for now, we only accept them from the channel creator.
 	// More complex handling logic can be added later
 	if err := sig.Verify(sv.Signature.Data, from, vb); err != nil {
-		return nil, err
+		return nil, ei, err
 	}
 
 	// Check the voucher against the highest known voucher nonce / value
 	laneStates, err := ch.laneState(pchState, chAddr)
 	if err != nil {
-		return nil, fmt.Errorf("laneState: %v", err)
+		return nil, ei, fmt.Errorf("laneState: %v", err)
 	}
 
 	// If the new voucher nonce value is less than the highest known
@@ -781,20 +789,20 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 	if lsExists {
 		n, err := ls.Nonce()
 		if err != nil {
-			return nil, err
+			return nil, ei, err
 		}
 
 		if sv.Nonce <= n {
-			return nil, fmt.Errorf("nonce too low")
+			return nil, ei, fmt.Errorf("nonce too low")
 		}
 
 		// If the voucher amount is less than the highest known voucher amount
 		r, err := ls.Redeemed()
 		if err != nil {
-			return nil, err
+			return nil, ei, err
 		}
 		if sv.Amount.LessThanEqual(r) {
-			return nil, fmt.Errorf("voucher amount is lower than amount for voucher with lower nonce")
+			return nil, ei, fmt.Errorf("voucher amount is lower than amount for voucher with lower nonce")
 		}
 	}
 
@@ -815,19 +823,19 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 	// total:   7
 	totalRedeemed, err := ch.totalRedeemedWithVoucher(laneStates, sv)
 	if err != nil {
-		return nil, fmt.Errorf("totalRedeemedWithVoucher: %w", err)
+		return nil, ei, fmt.Errorf("totalRedeemedWithVoucher: %w", err)
 	}
 
 	// Total required balance must not exceed actor balance
 	if act.Balance.LessThan(totalRedeemed) {
-		return nil, newErrInsufficientFunds(filecoin.BigSub(totalRedeemed, act.Balance))
+		return nil, ei, newErrInsufficientFunds(filecoin.BigSub(totalRedeemed, act.Balance))
 	}
 
 	if len(sv.Merges) != 0 {
-		return nil, fmt.Errorf("dont currently support paych lane merges")
+		return nil, ei, fmt.Errorf("dont currently support paych lane merges")
 	}
 
-	return laneStates, nil
+	return laneStates, act.Balance, nil
 }
 
 // Get the total redeemed amount across all lanes, after applying the voucher
@@ -997,7 +1005,7 @@ func (ch *channel) currentAvailableFunds(channelID string, queuedAmt filecoin.Bi
 		PendingAmt:          channelInfo.PendingAmount,
 		PendingWaitSentinel: waitSentinel,
 		QueuedAmt:           queuedAmt,
-		VoucherReedeemedAmt: totalRedeemed,
+		VoucherRedeemedAmt:  totalRedeemed,
 	}, nil
 }
 
@@ -1197,7 +1205,7 @@ type AvailableFunds struct {
 	QueuedAmt filecoin.BigInt
 	// VoucherRedeemedAmt is the amount that is redeemed by vouchers on-chain
 	// and in the local datastore
-	VoucherReedeemedAmt filecoin.BigInt
+	VoucherRedeemedAmt filecoin.BigInt
 }
 
 // VoucherCreateResult is the response to createVoucher method

@@ -114,11 +114,6 @@ func (pve *providerValidationEnvironment) CheckDealParams(ds deal.ProviderState)
 	return nil
 }
 
-// RunDealDecisioningLogic runs custom deal decision logic to decide if a deal is accepted, if present
-func (pve *providerValidationEnvironment) RunDealDecisioningLogic(ctx context.Context, state deal.ProviderState) (bool, string, error) {
-	return true, "", nil
-}
-
 // StateMachines returns the FSM Group to begin tracking with
 func (pve *providerValidationEnvironment) BeginTracking(pds deal.ProviderState) error {
 	err := pve.p.stateMachines.Begin(pds.Identifier(), &pds)

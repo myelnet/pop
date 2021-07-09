@@ -85,12 +85,12 @@ type Provider struct {
 }
 
 // GetAsk returns the current deal parameters this provider accepts for a given content ID
-func (p *Provider) GetAsk(k cid.Cid) deal.QueryResponse {
+func (p *Provider) GetAsk(k cid.Cid) deal.Offer {
 	return p.askStore.GetAsk(k)
 }
 
 // SetAsk sets the deal parameters this provider accepts
-func (p *Provider) SetAsk(k cid.Cid, ask deal.QueryResponse) {
+func (p *Provider) SetAsk(k cid.Cid, ask deal.Offer) {
 	err := p.askStore.SetAsk(k, ask)
 	if err != nil {
 		log.Error().Err(err).Msg("error setting retrieval ask")
@@ -147,7 +147,7 @@ func New(
 		dataTransfer: dt,
 		pay:          pay,
 		askStore: &AskStore{
-			asks: make(map[cid.Cid]deal.QueryResponse),
+			asks: make(map[cid.Cid]deal.Offer),
 		},
 	}
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{
@@ -290,10 +290,29 @@ func SettlePaymentChannels(ctx context.Context, pay payments.Manager, pro *Provi
 		case deal.StatusCompleted, deal.StatusCancelled, deal.StatusErrored:
 			// If state.PayCh isn't nil we should have some vouchers to redeem
 			if state.PayCh != nil {
-				err := pay.Settle(ctx, *state.PayCh)
-				if err != nil {
-					log.Error().Err(err).Msg("settling payment channel")
-				}
+				go func() {
+					funds, err := pay.ChannelAvailableFunds(*state.PayCh)
+					if err != nil {
+						log.Error().Err(err).Msg("checking available funds")
+						return
+					}
+					// SubmitAllVouchers as one transaction
+					if err := pay.SubmitAllVouchers(ctx, *state.PayCh); err != nil {
+						log.Error().Err(err).Msg("submitting vouchers")
+						return
+					}
+
+					log.Info().Msg("redeemed payment vouchers")
+					// For now let's assume we'd like to settle things when all the funds have been spent
+					if big.Sub(funds.ConfirmedAmt, funds.VoucherRedeemedAmt).LessThanEqual(big.Zero()) {
+						err := pay.Settle(ctx, *state.PayCh)
+						if err != nil {
+							log.Error().Err(err).Msg("settling payment channel")
+						} else {
+							log.Info().Str("addr", state.PayCh.String()).Msg("settled payment channel")
+						}
+					}
+				}()
 			}
 			return
 		}

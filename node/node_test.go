@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -15,6 +16,12 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/specs-actors/v4/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v4/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v4/support/mock"
+	tutils "github.com/filecoin-project/specs-actors/v4/support/testing"
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
@@ -62,6 +69,7 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	nd.ms = tn.Ms
 	nd.dag = tn.DAG
 	nd.host = tn.Host
+	nd.omg = NewOfferMgr()
 	opts := exchange.Options{
 		Blockstore:  nd.bs,
 		MultiStore:  nd.ms,
@@ -515,27 +523,17 @@ func TestGet(t *testing.T) {
 	})
 	<-committed
 
-	got := make(chan GetResult, 2)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res := <-got
-	require.Equal(t, int64(256189), res.Size)
-
-	res = <-got
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got
-	require.Greater(t, res.TransLatSeconds, 0.0)
 
 	// We should be able to request again this time from local storage
-	got = make(chan GetResult, 1)
+	got := make(chan GetResult, 1)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 		got <- *n.GetResult
@@ -656,64 +654,29 @@ func TestMultipleGet(t *testing.T) {
 	})
 	<-committed
 
-	// check cn received data1
-	got1 := make(chan GetResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
-		got1 <- *n.GetResult
 	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res := <-got1
-	require.Equal(t, int64(256265), res.Size)
 
-	res = <-got1
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got1
-	require.Greater(t, res.TransLatSeconds, 0.0)
-
-	// check cn received data2
-	got2 := make(chan GetResult, 3)
-	cn.notify = func(n Notify) {
-		require.Equal(t, n.GetResult.Err, "")
-		got2 <- *n.GetResult
-	}
 	cn.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res = <-got2
-	require.Equal(t, int64(124153), res.Size)
 
-	res = <-got2
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got2
-	require.Greater(t, res.TransLatSeconds, 0.0)
-
-	got3 := make(chan GetResult, 2)
 	cn2.notify = func(n Notify) {
 		require.Equal(t, "", n.GetResult.Err)
-		got3 <- *n.GetResult
 	}
 	cn2.Get(ctx, &GetArgs{
 		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
-	res = <-got3
-	require.Equal(t, int64(124153), res.Size)
-
-	res = <-got3
-	require.NotEqual(t, "", res.DealID)
-
-	res = <-got3
-	require.Greater(t, res.TransLatSeconds, 0.0)
 }
 
 //todo TesExportKey
@@ -729,4 +692,582 @@ func TestImportKey(t *testing.T) {
 
 	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
 	require.Equal(t, expected, n.exch.Wallet().DefaultAddress())
+}
+
+// Preload is a full integration test for gradually retrieving a DAG paid with a single
+// payment channel
+func TestPreload(t *testing.T) {
+	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+
+	region := exchange.Regions["Europe"]
+
+	// Provider setup
+	tn1 := testutil.NewTestNode(mn, t)
+	pn := &node{}
+	pn.ds = tn1.Ds
+	pn.bs = tn1.Bs
+	pn.ms = tn1.Ms
+	pn.dag = tn1.DAG
+	pn.host = tn1.Host
+	pfapi := filecoin.NewMockLotusAPI()
+	popts := exchange.Options{
+		Blockstore:  pn.bs,
+		MultiStore:  pn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: pfapi,
+	}
+	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
+	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
+	require.NoError(t, err)
+
+	// Client setup
+	tn2 := testutil.NewTestNode(mn, t)
+	cn := &node{}
+	cn.ds = tn2.Ds
+	cn.bs = tn2.Bs
+	cn.ms = tn2.Ms
+	cn.dag = tn2.DAG
+	cn.host = tn2.Host
+	cn.omg = NewOfferMgr()
+	cfapi := filecoin.NewMockLotusAPI()
+	copts := exchange.Options{
+		Blockstore:  cn.bs,
+		MultiStore:  cn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: cfapi,
+	}
+	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
+	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Let the routing propagate to gossip
+	time.Sleep(time.Second)
+
+	tx := pn.exch.Tx(ctx)
+
+	data1 := make([]byte, 10000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
+	cid1, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data1))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("first", cid1, 10000))
+
+	data2 := make([]byte, 14000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	cid2, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data2))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("second", cid2, 14000))
+
+	data3 := make([]byte, 26000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data3)
+	cid3, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data3))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("third", cid3, 26000))
+
+	tx.SetCacheRF(0)
+	require.NoError(t, tx.Commit())
+	ref := tx.Ref()
+	root := ref.PayloadCID
+	require.NoError(t, pn.exch.Index().SetRef(ref))
+	require.NoError(t, tx.Close())
+
+	var chAddr address.Address
+	var settle func()
+
+	results, err := cn.Load(ctx, &GetArgs{Cid: root.String()})
+	require.NoError(t, err)
+
+	// Discovery went well, we got an offer
+	select {
+	case res := <-results:
+		require.Equal(t, "DealStatusSelectedOffer", res.Status)
+
+		// Prepare the payment channel mocks
+		from := cn.exch.Wallet().DefaultAddress()
+		to := pn.exch.Wallet().DefaultAddress()
+
+		price, err := filecoin.ParseFIL(res.TotalFunds)
+		require.NoError(t, err)
+
+		createAmt := big.NewFromGo(price.Int)
+		chAddr, settle = prepChannel(t, from, to, cfapi, pfapi, createAmt)
+
+	case <-ctx.Done():
+		t.Fatal("could not select an offer")
+	}
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+	lookup := testutil.FormatMsgLookup(t, chAddr)
+	cfapi.SetMsgLookup(lookup)
+
+loop:
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "Completed" {
+				break loop
+			}
+			require.Equal(t, "", res.Err)
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
+
+	// We should have a single channel
+	channels, err := cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	// Check if the ref is here
+	ref, err = cn.exch.Index().GetRef(root)
+	require.NoError(t, err)
+	require.Equal(t, false, ref.Has("first"))
+
+	// from now on we should have the funds to retrieve everything progressively
+	// from the same peer using the same payment channel
+
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%s/first", root)})
+	require.NoError(t, err)
+
+	for res := range results {
+		require.Equal(t, "", res.Err)
+	}
+
+	// We should still have a single channel
+	channels, err = cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%s/second", root)})
+	require.NoError(t, err)
+
+	for res := range results {
+		require.Equal(t, "", res.Err)
+	}
+
+	// We should still have a single channel
+	channels, err = cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	results, err = cn.Load(ctx, &GetArgs{Cid: fmt.Sprintf("%s/third", root)})
+	require.NoError(t, err)
+
+	for res := range results {
+		require.Equal(t, "", res.Err)
+	}
+
+	// We should still have a single channel
+	channels, err = cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	// We retrieved all the keys so the offer should be removed
+	_, err = cn.omg.GetOffer(root)
+	require.Error(t, err)
+
+	// update the actor state so the manager can settle things
+	settle()
+}
+
+// LoadKey tests loading a single key in a transaction
+func TestLoadKey(t *testing.T) {
+	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+
+	region := exchange.Regions["Europe"]
+
+	// Provider setup
+	tn1 := testutil.NewTestNode(mn, t)
+	pn := &node{}
+	pn.ds = tn1.Ds
+	pn.bs = tn1.Bs
+	pn.ms = tn1.Ms
+	pn.dag = tn1.DAG
+	pn.host = tn1.Host
+	pfapi := filecoin.NewMockLotusAPI()
+	popts := exchange.Options{
+		Blockstore:  pn.bs,
+		MultiStore:  pn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: pfapi,
+	}
+	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
+	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
+	require.NoError(t, err)
+
+	// Client setup
+	tn2 := testutil.NewTestNode(mn, t)
+	cn := &node{}
+	cn.ds = tn2.Ds
+	cn.bs = tn2.Bs
+	cn.ms = tn2.Ms
+	cn.dag = tn2.DAG
+	cn.host = tn2.Host
+	cn.omg = NewOfferMgr()
+	cfapi := filecoin.NewMockLotusAPI()
+	copts := exchange.Options{
+		Blockstore:  cn.bs,
+		MultiStore:  cn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: cfapi,
+	}
+	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
+	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Let the routing propagate to gossip
+	time.Sleep(time.Second)
+
+	tx := pn.exch.Tx(ctx)
+
+	data1 := make([]byte, 10000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
+	cid1, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data1))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("first", cid1, 10000))
+
+	data2 := make([]byte, 14000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	cid2, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data2))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("second", cid2, 14000))
+
+	data3 := make([]byte, 26000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data3)
+	cid3, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data3))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("third", cid3, 26000))
+
+	tx.SetCacheRF(0)
+	require.NoError(t, tx.Commit())
+	ref := tx.Ref()
+	root := ref.PayloadCID
+	require.NoError(t, pn.exch.Index().SetRef(ref))
+	require.NoError(t, tx.Close())
+
+	// Prepare the payment channel mocks
+	from := cn.exch.Wallet().DefaultAddress()
+	to := pn.exch.Wallet().DefaultAddress()
+	var chAddr address.Address
+	var settle func()
+
+	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "second"})
+	require.NoError(t, err)
+
+	// Discovery went well, we got an offer
+	select {
+	case res := <-results:
+		require.Equal(t, "DealStatusSelectedOffer", res.Status)
+
+		price, err := filecoin.ParseFIL(res.TotalFunds)
+		require.NoError(t, err)
+
+		createAmt := big.NewFromGo(price.Int)
+
+		chAddr, settle = prepChannel(t, from, to, cfapi, pfapi, createAmt)
+	case <-ctx.Done():
+		t.Fatal("could not select an offer")
+	}
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+	lookup := testutil.FormatMsgLookup(t, chAddr)
+	cfapi.SetMsgLookup(lookup)
+
+loop:
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "Completed" {
+				break loop
+			}
+			require.Equal(t, "", res.Err)
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
+
+	// We should have a single channel
+	channels, err := cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	// Check if the ref is here
+	ref, err = cn.exch.Index().GetRef(root)
+	require.NoError(t, err)
+	require.Equal(t, true, ref.Has("second"))
+
+	settle()
+}
+
+// LoadAll tests loading all the content from a transaction
+func TestLoadAll(t *testing.T) {
+	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mn := mocknet.New(ctx)
+
+	region := exchange.Regions["Europe"]
+
+	// Provider setup
+	tn1 := testutil.NewTestNode(mn, t)
+	pn := &node{}
+	pn.ds = tn1.Ds
+	pn.bs = tn1.Bs
+	pn.ms = tn1.Ms
+	pn.dag = tn1.DAG
+	pn.host = tn1.Host
+	pfapi := filecoin.NewMockLotusAPI()
+	popts := exchange.Options{
+		Blockstore:  pn.bs,
+		MultiStore:  pn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: pfapi,
+	}
+	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
+	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
+	require.NoError(t, err)
+
+	// Client setup
+	tn2 := testutil.NewTestNode(mn, t)
+	cn := &node{}
+	cn.ds = tn2.Ds
+	cn.bs = tn2.Bs
+	cn.ms = tn2.Ms
+	cn.dag = tn2.DAG
+	cn.host = tn2.Host
+	cn.omg = NewOfferMgr()
+	cfapi := filecoin.NewMockLotusAPI()
+	copts := exchange.Options{
+		Blockstore:  cn.bs,
+		MultiStore:  cn.ms,
+		RepoPath:    t.TempDir(),
+		Regions:     []exchange.Region{region},
+		FilecoinAPI: cfapi,
+	}
+	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
+	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
+	require.NoError(t, err)
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	// Let the routing propagate to gossip
+	time.Sleep(time.Second)
+
+	tx := pn.exch.Tx(ctx)
+
+	data1 := make([]byte, 10000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data1)
+	cid1, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data1))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("first", cid1, 10000))
+
+	data2 := make([]byte, 14000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
+	cid2, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data2))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("second", cid2, 14000))
+
+	data3 := make([]byte, 26000)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data3)
+	cid3, err := pn.Add(ctx, tx.Store().DAG, bytes.NewReader(data3))
+	require.NoError(t, err)
+	require.NoError(t, tx.Put("third", cid3, 26000))
+
+	tx.SetCacheRF(0)
+	require.NoError(t, tx.Commit())
+	ref := tx.Ref()
+	root := ref.PayloadCID
+	require.NoError(t, pn.exch.Index().SetRef(ref))
+	require.NoError(t, tx.Close())
+
+	// Prepare the payment channel mocks
+	from := cn.exch.Wallet().DefaultAddress()
+	to := pn.exch.Wallet().DefaultAddress()
+	var chAddr address.Address
+	var settle func()
+
+	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "*"})
+	require.NoError(t, err)
+
+	// Discovery went well, we got an offer
+	select {
+	case res := <-results:
+		require.Equal(t, "DealStatusSelectedOffer", res.Status)
+
+		price, err := filecoin.ParseFIL(res.TotalFunds)
+		require.NoError(t, err)
+
+		createAmt := big.NewFromGo(price.Int)
+
+		chAddr, settle = prepChannel(t, from, to, cfapi, pfapi, createAmt)
+	case <-ctx.Done():
+		t.Fatal("could not select an offer")
+	}
+
+	// Deal started correctly, we have a deal ID
+	select {
+	case res := <-results:
+		require.NotEqual(t, "", res.DealID)
+	case <-ctx.Done():
+		t.Fatal("could not start the transfer")
+	}
+
+	lookup := testutil.FormatMsgLookup(t, chAddr)
+	cfapi.SetMsgLookup(lookup)
+
+loop:
+	for {
+		select {
+		case res := <-results:
+			if res.Status == "Completed" {
+				break loop
+			}
+			require.Equal(t, "", res.Err)
+		case <-ctx.Done():
+			t.Fatal("could not complete transfer")
+		}
+	}
+
+	// We should have a single channel
+	channels, err := cn.exch.Payments().ListChannels()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channels))
+
+	// Check if the ref is here
+	ref, err = cn.exch.Index().GetRef(root)
+	require.NoError(t, err)
+	require.Equal(t, true, ref.Has("first"))
+	require.Equal(t, true, ref.Has("second"))
+	require.Equal(t, true, ref.Has("third"))
+
+	settle()
+}
+
+func prepChannel(t *testing.T, from, to address.Address, c, p *filecoin.MockLotusAPI, createAmt big.Int) (address.Address, func()) {
+	var blockGen = blocksutil.NewBlockGenerator()
+	payerAddr := tutils.NewIDAddr(t, 102)
+	payeeAddr := tutils.NewIDAddr(t, 103)
+
+	act := &filecoin.Actor{
+		Code:    blockGen.Next().Cid(),
+		Head:    blockGen.Next().Cid(),
+		Nonce:   1,
+		Balance: createAmt,
+	}
+	c.SetActor(act)
+	p.SetActor(act)
+
+	chAddr := tutils.NewIDAddr(t, 101)
+	initActorAddr := tutils.NewIDAddr(t, 100)
+	hasher := func(data []byte) [32]byte { return [32]byte{} }
+
+	builder := mock.NewBuilder(chAddr).
+		WithBalance(createAmt, abi.NewTokenAmount(0)).
+		WithEpoch(abi.ChainEpoch(1)).
+		WithCaller(initActorAddr, builtin.InitActorCodeID).
+		WithActorType(payeeAddr, builtin.AccountActorCodeID).
+		WithActorType(payerAddr, builtin.AccountActorCodeID).
+		WithHasher(hasher)
+
+	// We need this mutex so we can read the actor state from inside goroutines
+	var mu sync.Mutex
+	rt := builder.Build(t)
+	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
+	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
+	actor := paych.Actor{}
+	rt.Call(actor.Constructor, params)
+
+	var st paych.State
+	rt.GetState(&st)
+
+	actState := filecoin.ActorState{
+		Balance: createAmt,
+		State:   st,
+	}
+	// We need to set an actor state as creating a voucher will query the state from the chain
+	// both apis are sharing the same state
+	c.SetActorState(&actState)
+	p.SetActorState(&actState)
+	// See channel tests for note about this
+	objReader := func(c cid.Cid) []byte {
+		mu.Lock()
+		defer mu.Unlock()
+		var bg testutil.BytesGetter
+		rt.StoreGet(c, &bg)
+		return bg.Bytes()
+	}
+	c.SetObjectReader(objReader)
+	p.SetObjectReader(objReader)
+
+	c.SetAccountKey(payerAddr, from)
+	// provider is resolving the account key to verify the voucher signature
+	p.SetAccountKey(payerAddr, from)
+	p.SetAccountKey(payeeAddr, to)
+
+	// Return success exit code from calls to check if voucher is spendable
+	p.SetInvocResult(&filecoin.InvocResult{
+		MsgRct: &filecoin.MessageReceipt{
+			ExitCode: 0,
+		},
+	})
+
+	collect := func() {
+		mu.Lock()
+		var st paych.State
+		ep := abi.ChainEpoch(10)
+		rt.SetEpoch(ep)
+
+		rt.GetState(&st)
+		rt.SetCaller(st.From, builtin.AccountActorCodeID)
+		rt.ExpectValidateCallerAddr(st.From, st.To)
+		rt.Call(actor.Settle, nil)
+
+		rt.GetState(&st)
+		mu.Unlock()
+		actState := filecoin.ActorState{
+			Balance: createAmt,
+			State:   st,
+		}
+		// update our actor state to the api so it's queryable
+		p.SetActorState(&actState)
+
+		lookup := testutil.FormatMsgLookup(t, chAddr)
+		// We should have 2 chain txs we're waiting for
+		for i := 0; i < 2; i++ {
+			p.SetMsgLookup(lookup)
+		}
+	}
+
+	return chAddr, collect
 }

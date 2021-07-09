@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-multistore"
+	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	"github.com/ipfs/go-path"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/libp2p/go-libp2p-core/host"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/internal/utils"
-	"github.com/myelnet/pop/retrieval/deal"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
 )
@@ -312,21 +313,12 @@ func TestMapFieldSelector(t *testing.T) {
 
 	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key := KeyFromPath(filepaths[0])
-	gtx.sel = sel.Key(key)
 
-	// We skip discovery and send an offer directly
-	qs, err := pn.rou.NewQueryStream(n2.Host.ID())
+	// We skip discovery and request an offer directly
+	info := host.InfoFromHost(n1.Host)
+	offer, err := gtx.QueryOffer(*info, sel.Key(key))
 	require.NoError(t, err)
-	resp := deal.QueryResponse{
-		Status:                     deal.QueryResponseAvailable,
-		Size:                       uint64(tx.Size()),
-		PaymentAddress:             cn.opts.Wallet.DefaultAddress(),
-		MinPricePerByte:            global.PPB,
-		MaxPaymentInterval:         deal.DefaultPaymentInterval,
-		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
-	}
-	pn.rtv.Provider().SetAsk(tx.Root(), resp)
-	require.NoError(t, qs.WriteQueryResponse(resp))
+	gtx.ApplyOffer(offer)
 
 loop:
 	for {
@@ -491,14 +483,18 @@ loop:
 		}
 	}
 
-	// @NOTE: even when selecting a specific key the operation will retrieve all other the entries
-	// without the linked data. We may need to alter this behavior in cases where there is a large
-	// number of entries
+	// @NOTE: Keys() returns the keys for the entries for which the linked data is actually available
 	keys, err = gtx.Keys()
 	require.NoError(t, err)
-	require.Equal(t, len(filepaths)+1, len(keys))
+	require.Equal(t, 0, len(keys))
 
+	// Entries returns all the entries regardless of if the links are loadable
 	entries, err := gtx.Entries()
 	require.NoError(t, err)
 	require.Equal(t, len(filepaths)+1, len(entries))
+
+	// We can access the root of an entry to fetch individually
+	eroot, err := gtx.RootFor("line8.txt")
+	require.NoError(t, err)
+	require.Equal(t, uint64(cid.Raw), eroot.Type())
 }

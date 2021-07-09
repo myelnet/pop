@@ -9,6 +9,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/specs-actors/v4/actors/builtin"
 	"github.com/filecoin-project/specs-actors/v4/actors/builtin/paych"
 	"github.com/ipfs/go-cid"
@@ -29,6 +30,7 @@ type Manager interface {
 	AllocateLane(context.Context, address.Address) (uint64, error)
 	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
 	ChannelAvailableFunds(address.Address) (*AvailableFunds, error)
+	SubmitAllVouchers(context.Context, address.Address) error
 	Settle(context.Context, address.Address) error
 	StartAutoCollect(context.Context) error
 }
@@ -68,6 +70,23 @@ func (p *Payments) GetChannel(ctx context.Context, from, to address.Address, amt
 	ch, err := p.channelByFromTo(from, to)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to get or create channel accessor: %v", err)
+	}
+	// find channelID and address
+	ci, err := p.store.OutboundActiveByFromTo(from, to)
+	if err == nil {
+		afunds, err := ch.availableFunds(ci.ChannelID)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get channel available funds: %w", err)
+		}
+		// ConfirmedAmt is the current channel balance
+		// VoucherRedeemedAmt is all the voucher we spent that will be deducted from that balance
+		available := big.Sub(afunds.ConfirmedAmt, afunds.VoucherRedeemedAmt)
+		if available.GreaterThan(amt) {
+			return &ChannelResponse{
+				Channel:      *ci.Channel,
+				WaitSentinel: cid.Undef,
+			}, nil
+		}
 	}
 	addr, pcid, err := ch.get(ctx, amt)
 	if err != nil {
@@ -192,8 +211,9 @@ func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *
 	return ch.submitVoucher(ctx, addr, sv, secret)
 }
 
-// Settle a given channel and submits relevant vouchers then return the successfully submitted voucher
-func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
+// SubmitAllVouchers picks the best vouchers and submits them (should be submitted as one)
+// it blocks until done
+func (p *Payments) SubmitAllVouchers(ctx context.Context, addr address.Address) error {
 	ch, err := p.channelByAddress(addr)
 	if err != nil {
 		return err
@@ -208,31 +228,7 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(len(best) + 1)
-
-	// We send our settle message at the same time as our voucher update messages
-	// hopefully they get on chain at the same time
-	mcid, err := ch.settle(ctx, addr)
-	if err != nil {
-		return err
-	}
-	// cancelling the context will timeout the wait function and all our goroutines will return
-	go func(sc cid.Cid) {
-		defer wg.Done()
-		lookup, err := p.api.StateWaitMsg(ctx, sc, uint64(5))
-		if err != nil {
-			log.Error().Err(err).
-				Str("channel", addr.String()).
-				Msg("settling payment failed")
-			return
-		}
-		if lookup.Receipt.ExitCode != 0 {
-			log.Error().Err(err).
-				Str("channel", addr.String()).
-				Str("code", lookup.Receipt.ExitCode.String()).
-				Msg("payment execution failed")
-		}
-	}(mcid)
+	wg.Add(len(best))
 
 	// I think all lanes should be merged so we might only get a single message but just in case
 	// we iterate over all the vouchers
@@ -259,25 +255,50 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 			}
 		}(voucher, mcid)
 	}
-	go func() {
-		// Wait to settle and send the last vouchers then we save the collection epoch
-		wg.Wait()
-		state, err := ch.loadActorState(addr)
-		if err != nil {
-			log.Error().Err(err).Msg("error loading actor state")
-			return
-		}
-		ci, err := p.store.ByAddress(addr)
-		if err != nil {
-			return
-		}
-		ep, err := state.SettlingAt()
-		if err != nil {
-			return
-		}
-		p.store.SetChannelSettlingAt(ci, ep)
-	}()
+	// Wait to settle and send the last vouchers then we save the collection epoch
+	wg.Wait()
 	return nil
+}
+
+// Settle a given channel and submits relevant vouchers then save the time when it can be collected
+func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return err
+	}
+
+	// We send our settle message at the same time as our voucher update messages
+	// hopefully they get on chain at the same time
+	mcid, err := ch.settle(ctx, addr)
+	if err != nil {
+		return err
+	}
+	// cancelling the context will timeout the wait function and all our goroutines will return
+	lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
+	if err != nil {
+		return err
+	}
+	if lookup.Receipt.ExitCode != 0 {
+		log.Error().Err(err).
+			Str("channel", addr.String()).
+			Str("code", lookup.Receipt.ExitCode.String()).
+			Msg("payment execution failed")
+		return fmt.Errorf("payment execution failed")
+	}
+
+	state, err := ch.loadActorState(addr)
+	if err != nil {
+		return err
+	}
+	ci, err := p.store.ByAddress(addr)
+	if err != nil {
+		return err
+	}
+	ep, err := state.SettlingAt()
+	if err != nil {
+		return err
+	}
+	return p.store.SetChannelSettlingAt(ci, ep)
 }
 
 // StartAutoCollect is a routine that ticks every epoch and tries to collect settling payment channels

@@ -70,10 +70,10 @@ func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, 
 		TimeLockMax: abi.ChainEpoch(0),
 		Lane:        lane,
 		Nonce:       0,
-		Amount:      big.Sub(amt, p.chFunds.VoucherReedeemedAmt),
+		Amount:      big.Sub(amt, p.chFunds.VoucherRedeemedAmt),
 		// Signature:      sig,
 	}
-	p.chFunds.VoucherReedeemedAmt = big.Add(p.chFunds.VoucherReedeemedAmt, vouch.Amount)
+	p.chFunds.VoucherRedeemedAmt = big.Add(p.chFunds.VoucherRedeemedAmt, vouch.Amount)
 	vouchRes := &payments.VoucherCreateResult{
 		Voucher:   vouch,
 		Shortfall: filecoin.NewInt(0),
@@ -105,6 +105,10 @@ func (p *mockPayments) Settle(ctx context.Context, addr address.Address) error {
 }
 
 func (p *mockPayments) StartAutoCollect(ctx context.Context) error {
+	return nil
+}
+
+func (p *mockPayments) SubmitAllVouchers(context.Context, address.Address) error {
 	return nil
 }
 
@@ -271,8 +275,8 @@ totalFunds: %s
 				case deal.StatusInsufficientFunds:
 					// Simulate reaprovisioning the payment channel
 					pay1.SetChannelAvailableFunds(payments.AvailableFunds{
-						ConfirmedAmt:        big.Add(pay1.chFunds.ConfirmedAmt, state.VoucherShortfall),
-						VoucherReedeemedAmt: pay1.chFunds.VoucherReedeemedAmt,
+						ConfirmedAmt:       big.Add(pay1.chFunds.ConfirmedAmt, state.VoucherShortfall),
+						VoucherRedeemedAmt: pay1.chFunds.VoucherRedeemedAmt,
 					})
 					// Need to wait a bit for status to update in state machine
 					time.Sleep(10 * time.Millisecond)
@@ -293,7 +297,7 @@ totalFunds: %s
 			unsealPrice := big.Zero()
 			params, err := deal.NewParams(pricePerByte, testCase.paymentInterval, paymentIntervalIncrease, selectors.All(), nil, unsealPrice)
 			require.NoError(t, err)
-			ask := deal.QueryResponse{
+			ask := deal.Offer{
 				MinPricePerByte:            pricePerByte,
 				MaxPaymentInterval:         testCase.paymentInterval,
 				MaxPaymentIntervalIncrease: paymentIntervalIncrease,
@@ -348,8 +352,8 @@ func addZeroesToAvailableFunds(channelAvailableFunds payments.AvailableFunds) pa
 	if channelAvailableFunds.QueuedAmt.Nil() {
 		channelAvailableFunds.QueuedAmt = big.Zero()
 	}
-	if channelAvailableFunds.VoucherReedeemedAmt.Nil() {
-		channelAvailableFunds.VoucherReedeemedAmt = big.Zero()
+	if channelAvailableFunds.VoucherRedeemedAmt.Nil() {
+		channelAvailableFunds.VoucherRedeemedAmt = big.Zero()
 	}
 	return channelAvailableFunds
 }
