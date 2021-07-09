@@ -10,7 +10,7 @@ import (
 var offCmd = &ffcli.Command{
 	Name:       "off",
 	ShortUsage: "off",
-	ShortHelp:  "Gracefully shutdown the Pop daemon",
+	ShortHelp:  "Gracefully shuts down the Pop daemon",
 	LongHelp:   "The 'pop off' command gracefully shuts down the Pop daemon.",
 	Exec:       runOff,
 }
