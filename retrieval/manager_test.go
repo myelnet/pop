@@ -108,6 +108,10 @@ func (p *mockPayments) StartAutoCollect(ctx context.Context) error {
 	return nil
 }
 
+func (p *mockPayments) SubmitAllVouchers(context.Context, address.Address) error {
+	return nil
+}
+
 type mockStoreIDGetter struct {
 	id  multistore.StoreID
 	err error

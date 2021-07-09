@@ -30,7 +30,6 @@ type Manager interface {
 	AllocateLane(context.Context, address.Address) (uint64, error)
 	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
 	ChannelAvailableFunds(address.Address) (*AvailableFunds, error)
-	ChannelBalance(context.Context, address.Address) (big.Int, error)
 	SubmitAllVouchers(context.Context, address.Address) error
 	Settle(context.Context, address.Address) error
 	StartAutoCollect(context.Context) error
@@ -153,16 +152,6 @@ func (p *Payments) ChannelAvailableFunds(chAddr address.Address) (*AvailableFund
 	}
 
 	return ch.availableFunds(ci.ChannelID)
-}
-
-// ChannelBalance returns the total balance of the paych actor
-// This is useful in the case we are not tracking this channel.
-func (p *Payments) ChannelBalance(ctx context.Context, chAddr address.Address) (big.Int, error) {
-	actState, err := p.api.StateReadState(ctx, chAddr, filecoin.EmptyTSK)
-	if err != nil {
-		return big.Zero(), err
-	}
-	return actState.Balance, nil
 }
 
 // ListChannels we have in the store
