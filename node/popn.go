@@ -97,6 +97,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
+	// CancelFunc is used for gracefully shutting down the node
+	CancelFunc context.CancelFunc
 }
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
@@ -129,6 +131,9 @@ type node struct {
 	// keep track of an ongoing transaction
 	txmu sync.Mutex
 	tx   *exchange.Tx
+
+	// Save context cancelFunc for graceful node shutdown
+	cancelFunc context.CancelFunc
 }
 
 // New puts together all the components of the ipfs node
@@ -259,6 +264,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// set Max Price Per Byte
 	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
 
+	nd.cancelFunc = opts.CancelFunc
+
 	nd.rs, err = storage.New(
 		nd.host,
 		nd.exch.DataTransfer(),
@@ -321,6 +328,14 @@ func (nd *node) send(n Notify) {
 	} else {
 		log.Info().Interface("notif", n).Msg("nil notify callback; dropping")
 	}
+}
+
+// Off shutdown the node gracefully
+func (nd *node) Off(ctx context.Context) {
+	nd.send(Notify{OffResult: &OffResult{}})
+	fmt.Println("==> Shut down pop daemon")
+
+	nd.cancelFunc()
 }
 
 // Ping the node for sanity check more than anything

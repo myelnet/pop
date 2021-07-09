@@ -180,6 +180,7 @@ Manage your Myel point of presence from the command line.
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
+		CancelFunc:     cancel,
 	}
 
 	err = node.Run(ctx, opts)

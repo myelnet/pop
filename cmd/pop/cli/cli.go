@@ -92,6 +92,7 @@ change until a first stable release. To get started run 'pop start'.
 `),
 		Subcommands: []*ffcli.Command{
 			startCmd,
+			offCmd,
 			pingCmd,
 			putCmd,
 			statusCmd,
