@@ -97,8 +97,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
-	// GracefulShutdown is the CancelFunc used for gracefully shutting down the node
-	GracefulShutdown context.CancelFunc
+	// CancelFunc is used for gracefully shutting down the node
+	CancelFunc context.CancelFunc
 }
 
 // RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
@@ -133,7 +133,7 @@ type node struct {
 	tx   *exchange.Tx
 
 	// Save context cancelFunc for graceful node shutdown
-	gracefulShutdown context.CancelFunc
+	cancelFunc context.CancelFunc
 }
 
 // New puts together all the components of the ipfs node
@@ -264,7 +264,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// set Max Price Per Byte
 	fmt.Printf("==> Set default Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
 
-	nd.gracefulShutdown = opts.GracefulShutdown
+	nd.cancelFunc = opts.CancelFunc
 
 	nd.rs, err = storage.New(
 		nd.host,
@@ -333,9 +333,9 @@ func (nd *node) send(n Notify) {
 // Off shutdown the node gracefully
 func (nd *node) Off(ctx context.Context) {
 	nd.send(Notify{OffResult: &OffResult{}})
-	fmt.Println("Gracefully shutdown node")
+	fmt.Println("==> Shut down pop daemon")
 
-	nd.gracefulShutdown()
+	nd.cancelFunc()
 }
 
 // Ping the node for sanity check more than anything

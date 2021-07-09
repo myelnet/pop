@@ -171,16 +171,16 @@ Manage your Myel point of presence from the command line.
 	}
 
 	opts := node.Options{
-		RepoPath:         path,
-		BootstrapPeers:   bAddrs,
-		FilEndpoint:      startArgs.FilEndpoint,
-		FilToken:         filToken,
-		PrivKey:          privKey,
+		RepoPath:       path,
+		BootstrapPeers: bAddrs,
+		FilEndpoint:    startArgs.FilEndpoint,
+		FilToken:       filToken,
+		PrivKey:        privKey,
 		MaxPPB:         int64(startArgs.MaxPPB),
-		Regions:          regions,
-		Capacity:         capacity,
-		ReplInterval:     startArgs.replInterval,
-		GracefulShutdown: cancel,
+		Regions:        regions,
+		Capacity:       capacity,
+		ReplInterval:   startArgs.replInterval,
+		CancelFunc:     cancel,
 	}
 
 	err = node.Run(ctx, opts)

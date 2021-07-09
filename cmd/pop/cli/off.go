@@ -11,7 +11,7 @@ var offCmd = &ffcli.Command{
 	Name:       "off",
 	ShortUsage: "off",
 	ShortHelp:  "Gracefully shutdown the Pop daemon",
-	LongHelp:   "The 'pop off' command gracefully shutdown the Pop daemon.",
+	LongHelp:   "The 'pop off' command gracefully shuts down the Pop daemon.",
 	Exec:       runOff,
 }
 
@@ -31,7 +31,7 @@ func runOff(ctx context.Context, args []string) error {
 
 	select {
 	case <-prc:
-		fmt.Println("Successfully sent Graceful Shutdown command")
+		fmt.Println("pop daemon is shutting down")
 
 	case <-ctx.Done():
 		return ctx.Err()
