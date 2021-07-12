@@ -43,6 +43,8 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	tcp "github.com/libp2p/go-tcp-transport"
+	websocket "github.com/libp2p/go-ws-transport"
 	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
@@ -186,9 +188,12 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		ctx,
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings(
-			"/ip4/0.0.0.0/tcp/41505",
-			"/ip6/::/tcp/41505",
+			"/ip4/0.0.0.0/tcp/41504",
+			"/ip4/0.0.0.0/tcp/41505/ws",
 		),
+		// Explicitly declare transports
+		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Transport(websocket.New),
 		libp2p.ConnectionManager(connmgr.NewConnManager(
 			20,             // Lowwater
 			60,             // HighWater,
