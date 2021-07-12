@@ -27,10 +27,10 @@ type PopConfig struct {
 	temp         bool
 	privKeyPath  string
 	regions      string
-	Capacity     string
 	replInterval time.Duration
 	// Exported fields can be set by survey.Ask
 	Bootstrap    string `json:"bootstrap"`
+	Capacity     string `json:"capacity"`
 	MaxPPB       int    `json:"maxppb"`
 	FilEndpoint  string `json:"fil-endpoint"`
 	FilToken     string `json:"fil-token"`
