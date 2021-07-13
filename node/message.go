@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -49,27 +48,9 @@ type WalletPayArgs struct {
 	Amount string
 }
 
-// QuoteArgs are passed to the quote command
-type QuoteArgs struct {
-	Refs      []string
-	StorageRF int // StorageRF is the replication factor or number of miners we will try to store with
-	Duration  time.Duration
-	MaxPrice  uint64
-}
-
 // CommArgs are passed to the Commit command
 type CommArgs struct {
 	CacheRF int // CacheRF is the cache replication factor or number of cache provider will request
-}
-
-// StoreArgs are arguments for the Store command
-type StoreArgs struct {
-	Refs      []string // Ref is the root CID of the archive to push to remote storage
-	StorageRF int      // StorageRF if the replication factor for storage
-	Duration  time.Duration
-	Miners    map[string]bool
-	MaxPrice  uint64
-	Verified  bool
 }
 
 // GetArgs get passed to the Get command
@@ -99,9 +80,7 @@ type Command struct {
 	WalletList   *WalletListArgs
 	WalletExport *WalletExportArgs
 	WalletPay    *WalletPayArgs
-	Quote        *QuoteArgs
 	Commit       *CommArgs
-	Store        *StoreArgs
 	Get          *GetArgs
 	List         *ListArgs
 }
@@ -143,29 +122,12 @@ type WalletResult struct {
 	Addresses []string
 }
 
-// QuoteResult returns the output of the Quote request
-type QuoteResult struct {
-	Ref         string
-	Quotes      map[string]string
-	PayloadSize uint64
-	PieceSize   uint64
-	Err         string
-}
-
 // CommResult is feedback on the push operation
 type CommResult struct {
 	Ref    string
 	Caches []string
 	Size   string
 	Err    string
-}
-
-// StoreResult returns the result of the storage operation
-type StoreResult struct {
-	Miners   []string
-	Deals    []string
-	Capacity uint64 // Capacity is the space left before it is possible to store on Filecoin
-	Err      string
 }
 
 // GetResult gives us feedback on the result of the Get request
@@ -201,9 +163,7 @@ type Notify struct {
 	PutResult    *PutResult
 	StatusResult *StatusResult
 	WalletResult *WalletResult
-	QuoteResult  *QuoteResult
 	CommResult   *CommResult
-	StoreResult  *StoreResult
 	GetResult    *GetResult
 	ListResult   *ListResult
 }
@@ -261,18 +221,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		cs.n.WalletPay(ctx, c)
 		return nil
 	}
-	if c := cmd.Quote; c != nil {
-		cs.n.Quote(ctx, c)
-		return nil
-	}
 	if c := cmd.Commit; c != nil {
 		// push requests are usually quite long so we don't block the thread so users
 		// can start a new transaction while their previous commit is uploading for example
 		go cs.n.Commit(ctx, c)
-		return nil
-	}
-	if c := cmd.Store; c != nil {
-		cs.n.Store(ctx, c)
 		return nil
 	}
 	if c := cmd.Get; c != nil {
@@ -366,16 +318,8 @@ func (cc *CommandClient) WalletPay(args *WalletPayArgs) {
 	cc.send(Command{WalletPay: args})
 }
 
-func (cc *CommandClient) Quote(args *QuoteArgs) {
-	cc.send(Command{Quote: args})
-}
-
 func (cc *CommandClient) Commit(args *CommArgs) {
 	cc.send(Command{Commit: args})
-}
-
-func (cc *CommandClient) Store(args *StoreArgs) {
-	cc.send(Command{Store: args})
 }
 
 func (cc *CommandClient) Get(args *GetArgs) {
