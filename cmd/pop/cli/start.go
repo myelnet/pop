@@ -265,14 +265,14 @@ func setupRepo() (string, bool, error) {
 		{
 			Name: "maxppb",
 			Prompt: &survey.Input{
-				Message: "Max Price Per Byte in attoFIL",
+				Message: "Max price per byte in attoFIL",
 				Default: "5",
 			},
 		},
 		{
 			Name: "Capacity",
 			Prompt: &survey.Input{
-				Message: "Storage Capacity",
+				Message: "Storage capacity",
 				Default: "10GB",
 			},
 		},
