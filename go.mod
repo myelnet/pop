@@ -59,6 +59,8 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
 	github.com/libp2p/go-libp2p-swarm v0.4.0
 	github.com/libp2p/go-libp2p-testing v0.4.0
+	github.com/libp2p/go-tcp-transport v0.2.1
+	github.com/libp2p/go-ws-transport v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/multiformats/go-multibase v0.0.3
