@@ -27,10 +27,10 @@ type PopConfig struct {
 	temp         bool
 	privKeyPath  string
 	regions      string
-	capacity     string
 	replInterval time.Duration
 	// Exported fields can be set by survey.Ask
 	Bootstrap    string `json:"bootstrap"`
+	Capacity     string `json:"capacity"`
 	MaxPPB       int    `json:"maxppb"`
 	FilEndpoint  string `json:"fil-endpoint"`
 	FilToken     string `json:"fil-token"`
@@ -57,7 +57,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
-		fs.StringVar(&startArgs.capacity, "capacity", "10GB", "storage space allocated for the node")
+		fs.StringVar(&startArgs.Capacity, "capacity", "10GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
@@ -164,7 +164,7 @@ Manage your Myel point of presence from the command line.
 	}
 
 	var capacity uint64
-	if size, err := units.FromHumanSize(startArgs.capacity); err == nil {
+	if size, err := units.FromHumanSize(startArgs.Capacity); err == nil {
 		capacity = uint64(size)
 	} else {
 		fmt.Println("failed to parse capacity")
@@ -265,8 +265,15 @@ func setupRepo() (string, bool, error) {
 		{
 			Name: "maxppb",
 			Prompt: &survey.Input{
-				Message: "Max Price Per Byte in attoFIL",
+				Message: "Max price per byte in attoFIL",
 				Default: "5",
+			},
+		},
+		{
+			Name: "Capacity",
+			Prompt: &survey.Input{
+				Message: "Storage capacity",
+				Default: "10GB",
 			},
 		},
 	}

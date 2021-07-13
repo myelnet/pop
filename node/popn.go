@@ -97,7 +97,7 @@ type Options struct {
 	// Regions is a list of regions a provider chooses to support.
 	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
 	Regions []string
-	// Capacity is the maxium storage capacity dedicated to the exchange
+	// Capacity is the maximum storage capacity dedicated to the exchange
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
