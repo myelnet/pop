@@ -320,7 +320,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 
 	addr, err := address.NewFromString(who)
 	if err == nil {
-		info, err := nd.peerInfo(ctx, addr)
+		info, err := nd.filMinerInfo(ctx, addr)
 		if err != nil {
 			sendErr(err)
 			return
@@ -376,7 +376,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	}
 }
 
-func (nd *node) peerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
+func (nd *node) filMinerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
 	miner, err := nd.exch.FilecoinAPI().StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
 	if err != nil {
 		return nil, err
@@ -730,7 +730,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				if err != nil {
 					sendErr(err)
 				}
-				info, err := nd.peerInfo(ctx, miner)
+				info, err := nd.filMinerInfo(ctx, miner)
 				if err != nil {
 					sendErr(err)
 				}
