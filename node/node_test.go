@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-fil-markets/storagemarket"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/specs-actors/v4/actors/builtin"
@@ -25,38 +24,13 @@ import (
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
-	"github.com/myelnet/pop/filecoin/storage"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/wallet"
 	"github.com/stretchr/testify/require"
 )
-
-type mockStorer struct {
-	receipt *storage.Receipt
-	quote   *storage.Quote
-	pInfo   *peer.AddrInfo
-}
-
-func (ms *mockStorer) Start(context.Context) error {
-	return nil
-}
-
-func (ms *mockStorer) Store(ctx context.Context, params storage.Params) (*storage.Receipt, error) {
-	return ms.receipt, nil
-}
-
-func (ms *mockStorer) GetMarketQuote(ctx context.Context, params storage.QuoteParams) (*storage.Quote, error) {
-	return ms.quote, nil
-}
-
-func (ms *mockStorer) PeerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
-	return ms.pInfo, nil
-}
 
 func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	var err error
@@ -264,102 +238,6 @@ func TestPutGet(t *testing.T) {
 	newb, err := io.ReadAll(f)
 	require.NoError(t, err)
 	require.Equal(t, data2, newb)
-}
-
-var getAddr = address.NewForTestGetter()
-
-func TestQuote(t *testing.T) {
-	ctx := context.Background()
-	mn := mocknet.New(ctx)
-
-	cn := newTestNode(ctx, mn, t)
-	require.NoError(t, cn.loadPieceHAMT())
-
-	m1 := getAddr()
-	p1, _ := filecoin.ParseFIL("0.001")
-	m2 := getAddr()
-	p2, _ := filecoin.ParseFIL("0.002")
-	rs := &mockStorer{
-		receipt: &storage.Receipt{},
-		quote: &storage.Quote{
-			Miners: []storage.Miner{
-				{
-					Info: &storagemarket.StorageProviderInfo{
-						Address: m1,
-					},
-				},
-				{
-					Info: &storagemarket.StorageProviderInfo{
-						Address: m2,
-					},
-				},
-			},
-			Prices: map[address.Address]filecoin.FIL{
-				m1: p1,
-				m2: p2,
-			},
-		},
-		pInfo: host.InfoFromHost(cn.host),
-	}
-	cn.rs = rs
-
-	dir := t.TempDir()
-
-	data := make([]byte, 256000)
-	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
-	p := filepath.Join(dir, "data1")
-	err := os.WriteFile(p, data, 0666)
-	require.NoError(t, err)
-
-	added := make(chan string, 2)
-	cn.notify = func(n Notify) {
-		require.Equal(t, n.PutResult.Err, "")
-
-		added <- n.PutResult.Cid
-	}
-	cn.Put(ctx, &PutArgs{
-		Path:      p,
-		ChunkSize: 1024,
-	})
-	<-added
-
-	data = make([]byte, 256000)
-	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
-	p = filepath.Join(dir, "data2")
-	err = os.WriteFile(p, data, 0666)
-	require.NoError(t, err)
-
-	cn.Put(ctx, &PutArgs{
-		Path:      p,
-		ChunkSize: 1024,
-	})
-	<-added
-
-	committed := make(chan CommResult, 1)
-	cn.notify = func(n Notify) {
-		require.Equal(t, n.CommResult.Err, "")
-		committed <- *n.CommResult
-	}
-	cn.Commit(ctx, &CommArgs{
-		CacheRF: 0,
-	})
-	com := <-committed
-
-	quoted := make(chan QuoteResult, 1)
-	cn.notify = func(n Notify) {
-		require.Equal(t, "", n.QuoteResult.Err)
-		require.Equal(t, 2, len(n.QuoteResult.Quotes))
-		quoted <- *n.QuoteResult
-	}
-	cn.Quote(ctx, &QuoteArgs{
-		Refs:      []string{com.Ref},
-		Duration:  24 * time.Hour * time.Duration(180),
-		StorageRF: 6,
-		MaxPrice:  uint64(20000000000),
-	})
-	quote := <-quoted
-	// Piece size should be deterministic
-	require.Equal(t, uint64(524288), quote.PieceSize)
 }
 
 func TestCommit(t *testing.T) {

@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-hamt-ipld/v3"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
@@ -45,10 +43,10 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	tcp "github.com/libp2p/go-tcp-transport"
 	websocket "github.com/libp2p/go-ws-transport"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
-	"github.com/myelnet/pop/filecoin/storage"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
@@ -105,13 +103,6 @@ type Options struct {
 	CancelFunc context.CancelFunc
 }
 
-// RemoteStorer is the interface used to store content on decentralized storage networks (Filecoin)
-type RemoteStorer interface {
-	Store(context.Context, storage.Params) (*storage.Receipt, error)
-	GetMarketQuote(context.Context, storage.QuoteParams) (*storage.Quote, error)
-	PeerInfo(context.Context, address.Address) (*peer.AddrInfo, error)
-}
-
 type node struct {
 	host host.Host
 	ds   datastore.Batching
@@ -120,15 +111,10 @@ type node struct {
 	is   cbor.IpldStore
 	dag  ipldformat.DAGService
 	exch *exchange.Exchange
-	rs   RemoteStorer
 	omg  *OfferMgr
 
 	// opts keeps all the node params set when starting the node
 	opts Options
-
-	// root of any pending HAMT for storage. This HAMT indexes multiple transactions to
-	// be stored in a single CAR for storage.
-	pieceHAMT *hamt.Node
 
 	mu     sync.Mutex
 	notify func(Notify)
@@ -163,10 +149,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	nd.bs = blockstore.NewBlockstore(nd.ds)
-
-	if err := nd.loadPieceHAMT(); err != nil {
-		return nil, err
-	}
 
 	nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
 
@@ -276,16 +258,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.cancelFunc = opts.CancelFunc
 
-	nd.rs, err = storage.New(
-		nd.host,
-		nd.exch.DataTransfer(),
-		nd.exch.Wallet(),
-		nd.exch.FilecoinAPI(),
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
@@ -296,35 +268,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	return nd, nil
-}
-
-// load HAMT from the datastore or create new one
-func (nd *node) loadPieceHAMT() error {
-	enc, err := nd.ds.Get(datastore.NewKey(KContentBatch))
-
-	nd.is = cbor.NewCborStore(nd.bs)
-	if err != nil && errors.Is(err, datastore.ErrNotFound) {
-		hnd, err := hamt.NewNode(nd.is, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
-		if err != nil {
-			return err
-		}
-		nd.pieceHAMT = hnd
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	r, err := cid.Cast(enc)
-	if err != nil {
-		return err
-	}
-	hnd, err := hamt.LoadNode(context.TODO(), nd.is, r, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
-	if err != nil {
-		return err
-	}
-	nd.pieceHAMT = hnd
-	return nil
 }
 
 // send hits out notify callback if we attached one
@@ -377,7 +320,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 
 	addr, err := address.NewFromString(who)
 	if err == nil {
-		info, err := nd.rs.PeerInfo(ctx, addr)
+		info, err := nd.filMinerInfo(ctx, addr)
 		if err != nil {
 			sendErr(err)
 			return
@@ -431,6 +374,32 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (nd *node) filMinerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
+	miner, err := nd.exch.FilecoinAPI().StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	multiaddrs := make([]ma.Multiaddr, 0, len(miner.Multiaddrs))
+	for _, a := range miner.Multiaddrs {
+		maddr, err := ma.NewMultiaddrBytes(a)
+		if err != nil {
+			return nil, err
+		}
+		multiaddrs = append(multiaddrs, maddr)
+	}
+	if miner.PeerId == nil {
+		return nil, fmt.Errorf("no peer id available")
+	}
+	if len(miner.Multiaddrs) == 0 {
+		return nil, fmt.Errorf("no peer address available")
+	}
+	pi := peer.AddrInfo{
+		ID:    *miner.PeerId,
+		Addrs: multiaddrs,
+	}
+	return &pi, nil
 }
 
 // Put a file into a new or pending transaction
@@ -522,163 +491,6 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 	sendErr(ErrNoTx)
 }
 
-// WalletList
-func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
-	sendErr := func(err error) {
-		nd.send(Notify{
-			WalletResult: &WalletResult{
-				Err: err.Error(),
-			},
-		})
-	}
-
-	addresses, err := nd.exch.Wallet().List()
-	if err != nil {
-		sendErr(fmt.Errorf("failed to list addresses: %v", err))
-		return
-	}
-
-	var stringAddresses = make([]string, len(addresses))
-
-	for i, addr := range addresses {
-		stringAddresses[i] = addr.String()
-	}
-
-	nd.send(Notify{
-		WalletResult: &WalletResult{Addresses: stringAddresses},
-	})
-}
-
-// WalletExport
-func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
-	sendErr := func(err error) {
-		nd.send(Notify{
-			WalletResult: &WalletResult{
-				Err: err.Error(),
-			},
-		})
-	}
-
-	err := nd.exportPrivateKey(ctx, args.Address, args.OutputPath)
-	if err != nil {
-		sendErr(fmt.Errorf("cannot export private key: %v", err))
-		return
-	}
-
-	nd.send(Notify{
-		WalletResult: &WalletResult{},
-	})
-}
-
-// WalletPay
-func (nd *node) WalletPay(ctx context.Context, args *WalletPayArgs) {
-	sendErr := func(err error) {
-		nd.send(Notify{
-			WalletResult: &WalletResult{
-				Err: err.Error(),
-			},
-		})
-	}
-
-	from, err := address.NewFromString(args.From)
-	if err != nil {
-		sendErr(fmt.Errorf("failed to decode address %s : %v", args.From, err))
-		return
-	}
-
-	to, err := address.NewFromString(args.To)
-	if err != nil {
-		sendErr(fmt.Errorf("failed to decode address %s : %v", args.To, err))
-		return
-	}
-
-	err = nd.exch.Wallet().Transfer(ctx, from, to, args.Amount)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	nd.send(Notify{
-		WalletResult: &WalletResult{},
-	})
-}
-
-// Quote returns an estimation of market price for storing a list of transactions on Filecoin
-func (nd *node) Quote(ctx context.Context, args *QuoteArgs) {
-	sendErr := func(err error) {
-		nd.send(Notify{
-			QuoteResult: &QuoteResult{
-				Err: err.Error(),
-			},
-		})
-	}
-	if !nd.exch.IsFilecoinOnline() {
-		sendErr(ErrFilecoinRPCOffline)
-		return
-	}
-
-	cbs := cbor.NewCborStore(nd.bs)
-	hnd, err := hamt.NewNode(cbs, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	for _, ref := range args.Refs {
-		ccid, err := cid.Parse(ref)
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		cref := CommitRef{ccid}
-		if err := hnd.Set(ctx, ref, &cref); err != nil {
-			sendErr(err)
-			return
-		}
-		if err := hnd.Flush(ctx); err != nil {
-			sendErr(err)
-			return
-		}
-	}
-
-	proot, err := cbs.Put(ctx, hnd)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	piece, err := nd.archive(ctx, proot)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
-		PieceSize: uint64(piece.PieceSize),
-		Duration:  args.Duration,
-		RF:        args.StorageRF,
-		MaxPrice:  args.MaxPrice,
-	})
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	quotes := make(map[string]string)
-	for _, m := range quote.Miners {
-		addr := m.Info.Address
-		quotes[addr.String()] = quote.Prices[addr].String()
-	}
-
-	nd.send(Notify{
-		QuoteResult: &QuoteResult{
-			Ref:         piece.CID.String(),
-			Quotes:      quotes,
-			PayloadSize: uint64(piece.PayloadSize),
-			PieceSize:   uint64(piece.PieceSize),
-		},
-	})
-}
-
 // Commit a content transaction for storage
 func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	sendErr := func(err error) {
@@ -730,92 +542,6 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),
 		Ref:  ref.PayloadCID.String(),
 	}})
-}
-
-// Store aggregates multiple transactions together into a storage deal if the piece is large enough
-// the method may need to be called until there is enough content to reach the minimum storage size
-func (nd *node) Store(ctx context.Context, args *StoreArgs) {
-	sendErr := func(err error) {
-		nd.send(Notify{
-			StoreResult: &StoreResult{
-				Err: err.Error(),
-			},
-		})
-	}
-
-	if !nd.exch.IsFilecoinOnline() {
-		sendErr(ErrFilecoinRPCOffline)
-		return
-	}
-
-	for _, c := range args.Refs {
-		ref, err := nd.getRef(c)
-		if err != nil {
-			sendErr(err)
-			return
-		}
-
-		cref := CommitRef{ref.PayloadCID}
-		if err := nd.pieceHAMT.Set(ctx, ref.PayloadCID.String(), &cref); err != nil {
-			sendErr(err)
-			return
-		}
-		if err := nd.pieceHAMT.Flush(ctx); err != nil {
-			sendErr(err)
-			return
-		}
-	}
-	proot, err := nd.is.Put(ctx, nd.pieceHAMT)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	piece, err := nd.archive(ctx, proot)
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	log.Info().Msg("getting quote for a piece")
-
-	quote, err := nd.rs.GetMarketQuote(ctx, storage.QuoteParams{
-		PieceSize: uint64(piece.PieceSize),
-		Duration:  args.Duration,
-		RF:        args.StorageRF,
-		MaxPrice:  args.MaxPrice,
-		Region:    "Europe",
-		Verified:  args.Verified,
-	})
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	log.Info().Uint64("MinPieceSize", quote.MinPieceSize).Msg("got a quote")
-
-	if quote.MinPieceSize > uint64(piece.PieceSize) {
-		nd.send(Notify{
-			StoreResult: &StoreResult{
-				Capacity: quote.MinPieceSize - uint64(piece.PieceSize),
-			},
-		})
-		return
-	}
-
-	rcpt, err := nd.rs.Store(ctx, storage.NewParams(
-		proot,
-		args.Duration,
-		nd.exch.Wallet().DefaultAddress(),
-		quote.Miners,
-		args.Verified,
-	))
-	if err != nil {
-		sendErr(err)
-		return
-	}
-	if len(rcpt.DealRefs) == 0 {
-		sendErr(ErrAllDealsFailed)
-		return
-	}
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli
@@ -1004,7 +730,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				if err != nil {
 					sendErr(err)
 				}
-				info, err := nd.rs.PeerInfo(ctx, miner)
+				info, err := nd.filMinerInfo(ctx, miner)
 				if err != nil {
 					sendErr(err)
 				}
@@ -1316,61 +1042,4 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
-}
-
-// importPrivateKey from a hex encoded private key to use as default on the exchange instead of
-// the auto generated one. This is mostly for development and will be reworked into a nicer command
-// eventually
-func (nd *node) importPrivateKey(ctx context.Context, pk string) error {
-	var iki wallet.KeyInfo
-
-	data, err := hex.DecodeString(pk)
-	if err != nil {
-		return fmt.Errorf("failed to decode key: %v", err)
-	}
-
-	err = iki.FromBytes(data)
-	if err != nil {
-		return fmt.Errorf("failed to decode keyInfo: %v", err)
-	}
-
-	addr, err := nd.exch.Wallet().ImportKey(ctx, &iki)
-	if err != nil {
-		return fmt.Errorf("failed to import key: %v", err)
-	}
-
-	err = nd.exch.Wallet().SetDefaultAddress(addr)
-	if err != nil {
-		return fmt.Errorf("failed to set default address: %v", err)
-	}
-
-	return nil
-}
-
-// exportPrivateKey exports the private key of a given address to an output file
-func (nd *node) exportPrivateKey(ctx context.Context, addr, outputPath string) error {
-	adr, err := address.NewFromString(addr)
-	if err != nil {
-		return fmt.Errorf("failed to decode address: %v", err)
-	}
-
-	key, err := nd.exch.Wallet().ExportKey(ctx, adr)
-	if err != nil {
-		return fmt.Errorf("address %s does not exist", addr)
-	}
-
-	data, err := key.ToBytes()
-	if err != nil {
-		return fmt.Errorf("failed to convert address to bytes: %v", err)
-	}
-
-	encodedPk := make([]byte, hex.EncodedLen(len(data)))
-	hex.Encode(encodedPk, data)
-
-	err = os.WriteFile(outputPath, encodedPk, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to export KeyInfo to %s: %v", addr, err)
-	}
-
-	return nil
 }
