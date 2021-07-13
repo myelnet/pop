@@ -965,7 +965,7 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 }
 
 // Add a buffer into the given DAG. These DAGs can eventually be put into transactions.
-func (nd *node) Add(ctx context.Context, filename string, dag ipldformat.DAGService, buf io.Reader) (cid.Cid, error) {
+func (nd *node) Add(ctx context.Context, filename string, dag ipldformat.DAGService, buf io.ReadSeeker) (cid.Cid, error) {
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, dag)
 
 	prefix, err := merkledag.PrefixForCidVersion(1)
@@ -995,11 +995,11 @@ func (nd *node) Add(ctx context.Context, filename string, dag ipldformat.DAGServ
 }
 
 // add chooses the best params according to the file's type then put the buffer into the DAG
-func add(filename string, buf io.Reader, params helpers.DagBuilderParams) (ipldformat.Node, error) {
+func add(filename string, buf io.ReadSeeker, params helpers.DagBuilderParams) (ipldformat.Node, error) {
 	var layout func(db *helpers.DagBuilderHelper) (ipldformat.Node, error)
 	var chunkSplitter chunk.Splitter
 
-	type_ := filetype.Detect(filename)
+	type_ := filetype.Detect(filename, buf)
 
 	switch type_ {
 	case filetype.Audio, filetype.Video:

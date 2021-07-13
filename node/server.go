@@ -247,7 +247,7 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		tx.SetCacheRF(cacheRF)
 
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
-			c, err := s.node.Add(r.Context(), "", tx.Store().DAG, part)
+			c, err := s.node.Add(r.Context(), part.FileName(), tx.Store().DAG, files.NewReaderFile(part))
 			if err != nil {
 				http.Error(w, "failed to add file", http.StatusInternalServerError)
 				return
