@@ -45,7 +45,10 @@ func NewLotusRPC(ctx context.Context, addr string, header http.Header) (API, err
 		header,
 	)
 	res.closer = closer
-	return &res, err
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (a *LotusAPI) Close() {
