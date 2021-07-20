@@ -192,10 +192,6 @@ func TestRetrieval(t *testing.T) {
 	}
 	for i, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if i != 7 {
-				// Skipping this while we figure out the first block race situation
-				t.Skip()
-			}
 
 			bgCtx := context.Background()
 
@@ -236,7 +232,9 @@ func TestRetrieval(t *testing.T) {
 			rootCid := link.(cidlink.Link).Cid
 
 			n2.SetupDataTransfer(bgCtx, t)
-			pay2 := &mockPayments{}
+			pay2 := &mockPayments{
+				chFunds: &chFunds,
+			}
 			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, n2.Host.ID())
 			require.NoError(t, err)
 

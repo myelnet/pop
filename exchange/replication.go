@@ -319,7 +319,15 @@ func (r *Replication) AddStore(k cid.Cid, sid multistore.StoreID) error {
 func (r *Replication) GetStore(k cid.Cid) *multistore.Store {
 	r.smu.Lock()
 	defer r.smu.Unlock()
-	return r.stores[k]
+	s, ok := r.stores[k]
+	if !ok {
+		// If no store can be found we return the global store as a last resort
+		return &multistore.Store{
+			Loader: storeutil.LoaderForBlockstore(r.bs),
+			Bstore: r.bs,
+		}
+	}
+	return s
 }
 
 // RmStore cleans up the store when it is not needed anymore

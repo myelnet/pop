@@ -82,6 +82,13 @@ func Run(args []string) error {
 		log.Logger = log.Output(output)
 	}
 
+	// Uncomment to debug data transfers
+	// ilog.SetLogLevel("dt_graphsync", "debug")
+	// ilog.SetLogLevel("dt-chanmon", "debug")
+	// ilog.SetLogLevel("dt-impl", "debug")
+	// ilog.SetLogLevel("data_transfer", "debug")
+	// ilog.SetLogLevel("data_transfer_network", "debug")
+
 	rootCmd := &ffcli.Command{
 		Name:       "pop",
 		ShortUsage: "pop subcommand [flags]",
