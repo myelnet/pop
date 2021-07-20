@@ -263,7 +263,7 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		if cacheRF > 12 {
 			cacheRF = 12
 		}
-		s.node.tx.SetCacheRF(cacheRF)
+		tx.SetCacheRF(cacheRF)
 
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			c, err := s.node.Add(r.Context(), tx.Store().DAG, part)
