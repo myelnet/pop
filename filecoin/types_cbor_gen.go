@@ -8,7 +8,7 @@ import (
 
 	abi "github.com/filecoin-project/go-state-types/abi"
 	crypto "github.com/filecoin-project/go-state-types/crypto"
-	proof "github.com/filecoin-project/specs-actors/v4/actors/runtime/proof"
+	proof "github.com/filecoin-project/specs-actors/v5/actors/runtime/proof"
 	cid "github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
