@@ -12,6 +12,7 @@ import (
 	"github.com/hannahhoward/go-pubsub"
 	"github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/rs/zerolog/log"
 
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval/deal"
@@ -450,6 +451,7 @@ func SetupPaymentChannelStart(ctx fsm.Context, environment DealEnvironment, ds d
 	// We may already have a payment channel ready to go otherwise the state machine will wait for it
 	res, err := environment.Payments().GetChannel(ctx.Context(), ds.ClientWallet, ds.MinerWallet, ds.TotalFunds)
 	if err != nil {
+		log.Error().Err(err).Msg("failed to setup channel")
 		return ctx.Trigger(EventPaymentChannelErrored, err)
 	}
 

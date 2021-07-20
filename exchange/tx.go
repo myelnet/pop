@@ -967,7 +967,7 @@ func (s sessionWorker) Start() {
 				resc <- q
 				return
 			case of := <-s.offersBack:
-				if useCeiling && of.MinPricePerByte.LessThan(s.priceCeiling) {
+				if useCeiling && of.MinPricePerByte.GreaterThan(s.priceCeiling) {
 					continue
 				}
 				if s.numThreshold < 0 && s.timeThreshold < 0 && execDone == nil {
@@ -1026,12 +1026,8 @@ func (s sessionWorker) Start() {
 func (s sessionWorker) Close() []deal.Offer {
 	resc := make(chan []deal.Offer)
 	s.closing <- resc
-	select {
-	case res := <-resc:
-		return res
-	default:
-		return nil
-	}
+	res := <-resc
+	return res
 }
 
 // PushBack sends a new offer to the end of the queue
