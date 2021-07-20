@@ -130,9 +130,6 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 		// Default is 10GB
 		opts.Capacity = 10737418240
 	}
-	if opts.ReplInterval == 0 {
-		opts.ReplInterval = 60 * time.Second
-	}
 
 	return opts, nil
 }
