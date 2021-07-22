@@ -528,17 +528,9 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 
 	cidSet := cid.NewSet()
 
-	err := idx.root.ForEach(ctx, func(k string, val *cbg.Deferred) error {
-		ref := new(DataRef)
-		err := ref.UnmarshalCBOR(bytes.NewReader(val.Raw))
-		if err != nil {
-			return err
-		}
-
-		return utils.WalkDAG(ctx, ref.PayloadCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
-			cidSet.Add(blk.Cid())
-			return nil
-		})
+	err := utils.WalkDAG(ctx, idx.rootCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
+		cidSet.Add(blk.Cid())
+		return nil
 	})
 	if err != nil {
 		return err
