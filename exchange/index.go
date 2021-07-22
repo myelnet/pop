@@ -523,6 +523,11 @@ func (idx *Index) GC() error {
 
 // CleanBlockStore removes blocks from blockstore which CIDs are not in index
 func (idx *Index) CleanBlockStore(ctx context.Context) error {
+	// root may be undefined when we start for the first time
+	if idx.rootCID == cid.Undef {
+		return nil
+	}
+
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
