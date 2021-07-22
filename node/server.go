@@ -11,18 +11,23 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	gopath "path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/caddyserver/certmagic"
 	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/gorilla/websocket"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	ipath "github.com/ipfs/go-path"
 	"github.com/jpillora/backoff"
+	"github.com/koding/websocketproxy"
+	"github.com/libdns/cloudflare"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
@@ -327,6 +332,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	nd.notify = server.cs.send
 
+	//go serveHTTPS()
 	go serveHTTP(server, httpl)
 	go serveTCP(ctx, server, tcpl)
 	go func() {
@@ -357,6 +363,34 @@ func serveHTTP(server *server, l net.Listener) {
 	err := s.Serve(l)
 	if err != nil && err != cmux.ErrServerClosed {
 		log.Error().Err(err).Msg("serveHTTP")
+	}
+}
+
+func serveHTTPS() {
+	certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
+		DNSProvider: &cloudflare.Provider{
+			APIToken: "U8_nr_Ywo8h1fcX9DajHvzUpYPKgYh1oXkdfLbsy",
+		},
+	}
+
+	u, err := url.Parse("ws://localhost:41505")
+	if err != nil {
+		panic(err)
+	}
+
+	g := websocketproxy.NewProxy(u)
+	g.Upgrader = &websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+		EnableCompression: false,
+	}
+
+	err = certmagic.HTTPS([]string{"curt.ly", "*.curt.ly"}, g)
+	if err != nil {
+		panic(err)
 	}
 }
 

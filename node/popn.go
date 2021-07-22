@@ -184,7 +184,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/41505",
-			"/ip6/::/tcp/41505",
+			"/ip4/0.0.0.0/tcp/41505/ws",
+			//"/ip6/::/tcp/41505",
 		),
 		libp2p.ConnectionManager(connmgr.NewConnManager(
 			20,             // Lowwater
@@ -206,6 +207,8 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Printf(">>> %s\n", nd.host.ID())
 
 	// Convert region names to region structs
 	regions := exchange.ParseRegions(opts.Regions)

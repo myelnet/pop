@@ -160,7 +160,8 @@ Manage your Myel point of presence from the command line.
 			bAddrs = append(bAddrs, addr)
 		}
 
-		bAddrs = append(bAddrs, "/ip4/3.129.144.139/tcp/41505/p2p/12D3KooWLJp52qe5Fa2ND3nsWocdnRhi7ERo2SzkApE1q8jUg2Xy")
+		//bAddrs = append(bAddrs, "/ip4/3.129.144.139/tcp/41505/p2p/12D3KooWLJp52qe5Fa2ND3nsWocdnRhi7ERo2SzkApE1q8jUg2Xy")
+		//bAddrs = append(bAddrs, "/dns4/curt.ly/tcp/443/wss/p2p/12D3KooWL6iAkTwQzTDQ6vjC7pPXAMKAL1MTpVURTugc6Vip44WG")
 	}
 
 	var capacity uint64
@@ -169,6 +170,8 @@ Manage your Myel point of presence from the command line.
 	} else {
 		fmt.Println("failed to parse capacity")
 	}
+
+	fmt.Printf(">> bootstrap addresses | \n %+v \n", bAddrs)
 
 	opts := node.Options{
 		RepoPath:       path,
@@ -259,7 +262,8 @@ func setupRepo() (string, bool, error) {
 			Name: "bootstrap",
 			Prompt: &survey.Multiline{
 				Message: "Bootstrap peers",
-				Default: "/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
+				//Default: "/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
+				Default: "/dns4/curt.ly/tcp/443/wss/ipfs/12D3KooWL6iAkTwQzTDQ6vjC7pPXAMKAL1MTpVURTugc6Vip44WG",
 			},
 		},
 		{

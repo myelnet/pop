@@ -18,7 +18,6 @@ import (
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/rs/zerolog/log"
 )
@@ -90,11 +89,11 @@ func Bootstrap(ctx context.Context, h host.Host, bpeers []string) error {
 	}
 
 	var wg sync.WaitGroup
-	peerInfos := make(map[peer.ID]*peerstore.PeerInfo, len(peers))
+	peerInfos := make(map[peer.ID]*peer.AddrInfo, len(peers))
 	for _, pii := range peers {
 		pi, ok := peerInfos[pii.ID]
 		if !ok {
-			pi = &peerstore.PeerInfo{ID: pii.ID}
+			pi = &peer.AddrInfo{ID: pii.ID}
 			peerInfos[pi.ID] = pi
 		}
 		pi.Addrs = append(pi.Addrs, pii.Addrs...)
@@ -102,7 +101,7 @@ func Bootstrap(ctx context.Context, h host.Host, bpeers []string) error {
 
 	wg.Add(len(peerInfos))
 	for _, peerInfo := range peerInfos {
-		go func(peerInfo *peerstore.PeerInfo) {
+		go func(peerInfo *peer.AddrInfo) {
 			defer wg.Done()
 			err := h.Connect(ctx, *peerInfo)
 			if err != nil {

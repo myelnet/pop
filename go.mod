@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.2.9
+	github.com/caddyserver/certmagic v0.14.1
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/docker/go-units v0.4.0
 	github.com/filecoin-project/filecoin-ffi v0.30.4-0.20200910194244-f640612a1a1f
@@ -22,6 +23,7 @@ require (
 	github.com/filecoin-project/specs-actors/v4 v4.0.0
 	github.com/gabriel-vasile/mimetype v1.1.2
 	github.com/google/uuid v1.2.0
+	github.com/gorilla/websocket v1.4.2
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
 	github.com/hannahhoward/go-pubsub v0.0.0-20200423002714-8d62886cc36e
 	github.com/ipfs/go-bitswap v0.3.2 // indirect
@@ -47,22 +49,22 @@ require (
 	github.com/ipld/go-ipld-prime v0.5.1-0.20201021195245-109253e8a018
 	github.com/ipld/go-ipld-prime-proto v0.1.0
 	github.com/jpillora/backoff v1.0.0
+	github.com/koding/websocketproxy v0.0.0-20181220232114-7ed82d81a28c
+	github.com/libdns/cloudflare v0.1.0
 	github.com/libp2p/go-eventbus v0.2.1
-	github.com/libp2p/go-libp2p v0.13.0
+	github.com/libp2p/go-libp2p v0.14.4
 	github.com/libp2p/go-libp2p-blankhost v0.2.0
 	github.com/libp2p/go-libp2p-connmgr v0.2.4
 	github.com/libp2p/go-libp2p-core v0.8.5
 	github.com/libp2p/go-libp2p-kad-dht v0.11.1
-	github.com/libp2p/go-libp2p-noise v0.1.2 // indirect
 	github.com/libp2p/go-libp2p-peer v0.2.0
-	github.com/libp2p/go-libp2p-peerstore v0.2.6
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
-	github.com/libp2p/go-libp2p-swarm v0.4.0
+	github.com/libp2p/go-libp2p-swarm v0.5.0
 	github.com/libp2p/go-libp2p-testing v0.4.0
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
-	github.com/multiformats/go-multiaddr v0.3.1
+	github.com/multiformats/go-multiaddr v0.3.3
 	github.com/multiformats/go-multibase v0.0.3
-	github.com/multiformats/go-multihash v0.0.14
+	github.com/multiformats/go-multihash v0.0.15
 	github.com/onsi/ginkgo v1.16.1 // indirect
 	github.com/onsi/gomega v1.11.0 // indirect
 	github.com/peterbourgon/ff/v3 v3.0.0
@@ -73,11 +75,7 @@ require (
 	github.com/urfave/cli/v2 v2.2.0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210219115102-f37d292932f2
 	github.com/xorcare/golden v0.6.1-0.20191112154924-b87f686d7542 // indirect
-	go.opencensus.io v0.22.5 // indirect
-	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2 // indirect
 	golang.org/x/exp v0.0.0-20200513190911-00229845015e // indirect
-	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
-	golang.org/x/net v0.0.0-20210420210106-798c2154c571 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
 
