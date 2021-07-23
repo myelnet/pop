@@ -713,4 +713,8 @@ func TestCleanBlockStore(t *testing.T) {
 	has, err = idx.Bstore().Has(blk2.Cid())
 	require.NoError(t, err)
 	require.Equal(t, true, has)
+
+	// check we didn't remove index blocks
+	idx, err = NewIndex(ds, bs)
+	require.NoError(t, err)
 }
