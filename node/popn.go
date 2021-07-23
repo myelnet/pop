@@ -999,21 +999,20 @@ func add(filename string, buf io.ReadSeeker, params helpers.DagBuilderParams) (i
 	var chunkSplitter chunk.Splitter
 	var layout func(db *helpers.DagBuilderHelper) (ipldformat.Node, error)
 
-	type_ := filetype.Detect(filename, buf)
+	fileType := utils.DetectFileType(filename, buf)
 
-	switch type_ {
-	case filetype.Audio, filetype.Video:
+	switch fileType {
+	case utils.Audio, utils.Video:
 		chunkSize := int64(1_000_000)
 		chunkSplitter = chunk.NewSizeSplitter(buf, chunkSize)
 		layout = trickle.Layout
 
-	case filetype.Image, filetype.Archive:
+	case utils.Image, utils.Archive:
 		chunkSize := int64(1_000_000)
 		chunkSplitter = chunk.NewSizeSplitter(buf, chunkSize)
 		layout = balanced.Layout
 
-	case filetype.Text, filetype.Font:
-		//chunkSize := int64(16_000)
+	case utils.Text, utils.Font:
 		chunkSplitter = chunk.NewBuzhash(buf)
 		layout = balanced.Layout
 

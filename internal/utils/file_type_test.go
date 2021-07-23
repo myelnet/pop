@@ -1,4 +1,4 @@
-package filetype
+package utils
 
 import (
 	"bytes"
@@ -8,47 +8,47 @@ import (
 	"testing"
 )
 
-func TestDetect(t *testing.T) {
+func TestDetectFileType(t *testing.T) {
 	// guess file type using file's extension
-	type_ := Detect("/foo/image.png", bytes.NewReader([]byte("")))
-	require.Equal(t, Image, type_)
+	fileType := DetectFileType("/foo/image.png", bytes.NewReader([]byte("")))
+	require.Equal(t, Image, fileType)
 
-	type_ = Detect("/foo/image.mp3", bytes.NewReader([]byte("")))
-	require.Equal(t, Audio, type_)
+	fileType = DetectFileType("/foo/image.mp3", bytes.NewReader([]byte("")))
+	require.Equal(t, Audio, fileType)
 
-	type_ = Detect("/foo/image.avi", bytes.NewReader([]byte("")))
-	require.Equal(t, Video, type_)
+	fileType = DetectFileType("/foo/image.avi", bytes.NewReader([]byte("")))
+	require.Equal(t, Video, fileType)
 
-	type_ = Detect("/foo/image.tar.gz", bytes.NewReader([]byte("")))
-	require.Equal(t, Archive, type_)
+	fileType = DetectFileType("/foo/image.tar.gz", bytes.NewReader([]byte("")))
+	require.Equal(t, Archive, fileType)
 
-	type_ = Detect("/foo/image.txt", bytes.NewReader([]byte("")))
-	require.Equal(t, Text, type_)
+	fileType = DetectFileType("/foo/image.txt", bytes.NewReader([]byte("")))
+	require.Equal(t, Text, fileType)
 
-	type_ = Detect("/foo/image.qsdfqfq", bytes.NewReader([]byte("")))
-	require.Equal(t, Unknown, type_)
+	fileType = DetectFileType("/foo/image.qsdfqfq", bytes.NewReader([]byte("")))
+	require.Equal(t, Unknown, fileType)
 
 	// guess file type by reading file's content, given a path with no file extension
 	dir := t.TempDir()
 	p := filepath.Join(dir, "file")
 	err := os.WriteFile(p, ZIP_ARCHIVE, 0666)
 	require.NoError(t, err)
-	type_ = Detect(p, bytes.NewReader([]byte("")))
-	require.Equal(t, Archive, type_)
+	fileType = DetectFileType(p, bytes.NewReader([]byte("")))
+	require.Equal(t, Archive, fileType)
 
 	// guess file type using a buffer only
-	type_ = Detect("", bytes.NewReader(GIF_IMAGE))
-	require.Equal(t, Image, type_)
+	fileType = DetectFileType("", bytes.NewReader(GIF_IMAGE))
+	require.Equal(t, Image, fileType)
 
-	ii := bytes.NewReader(UNKNOWN)
-	type_ = Detect("", ii)
-	require.Equal(t, Unknown, type_)
+	r := bytes.NewReader(UNKNOWN)
+	fileType = DetectFileType("", r)
+	require.Equal(t, Unknown, fileType)
 
 	// make sure we don't consume the original buffer
-	r := bytes.NewReader(GIF_IMAGE)
-	type_ = Detect("", r)
+	r = bytes.NewReader(GIF_IMAGE)
+	fileType = DetectFileType("", r)
 	require.Equal(t, r.Len(), len(GIF_IMAGE))
-	require.Equal(t, Image, type_)
+	require.Equal(t, Image, fileType)
 }
 
 var UNKNOWN = []byte{
