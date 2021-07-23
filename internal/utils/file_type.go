@@ -116,7 +116,7 @@ var archive = map[string]string{
 	".alz":  "application/x-alz-compressed",
 	".apk":  "application/octet-stream",
 	".ark":  "application/octet-stream",
-	".cdx":  "application",
+	".cdx":  "application/x-freearc",
 	".arj":  "application/x-arj",
 	".b1":   "application/x-b1",
 	".dar":  "application/x-dar",
