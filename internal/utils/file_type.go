@@ -68,7 +68,7 @@ func DetectFileType(path string, buf io.ReadSeeker) FileType {
 // fileTypeByExtension matches an extension with its FileType, i.e : fileTypeByExtension("file.mp3") returns Audio
 func fileTypeByExtension(ext string) FileType {
 	// Since some Archive types are not always found by filepath.Ext(), like ".gz"
-	// And because archive type are considered as an Application mimetype,
+	// And because archive types are considered as an Application mimetype,
 	// we bypass the process and compare the extension with a hardcoded "archive" map
 	_, ok := archive[ext]
 	if ok {
@@ -88,13 +88,13 @@ func fileTypeByExtension(ext string) FileType {
 	}
 	mimeType := mimes[0]
 
-	// the the FileType from a mimeType: "audio" -> Audio
+	// get the FileType from a mimeType: "audio" -> Audio
 	fileType, ok := MimeTypes[mimeType]
-	if !ok {
-		return Unknown
+	if ok {
+		return fileType
 	}
 
-	return fileType
+	return Unknown
 }
 
 // list of all archive mime types :
