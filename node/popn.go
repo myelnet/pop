@@ -63,23 +63,38 @@ const DhtPrefix = "/pop"
 // KContentBatch is the keystore used for storing the root CID of the HAMT used to aggregate content for storage
 const KContentBatch = "content-batch"
 
-// ErrFilecoinRPCOffline is returned when the node is running without a provided filecoin api endpoint + token
-var ErrFilecoinRPCOffline = errors.New("filecoin RPC is offline")
+var (
+	// ErrFilecoinRPCOffline is returned when the node is running without a provided filecoin api endpoint + token
+	ErrFilecoinRPCOffline = errors.New("filecoin RPC is offline")
 
-// ErrAllDealsFailed is returned when all storage deals failed to get started
-var ErrAllDealsFailed = errors.New("all deals failed")
+	// ErrAllDealsFailed is returned when all storage deals failed to get started
+	ErrAllDealsFailed = errors.New("all deals failed")
 
-// ErrNoTx is returned when no transaction is staged and we attempt to commit
-var ErrNoTx = errors.New("no tx to commit")
+	// ErrNoTx is returned when no transaction is staged and we attempt to commit
+	ErrNoTx = errors.New("no tx to commit")
 
-// ErrNodeNotFound is returned when we cannot find the node in the given root
-var ErrNodeNotFound = errors.New("node not found")
+	// ErrNodeNotFound is returned when we cannot find the node in the given root
+	ErrNodeNotFound = errors.New("node not found")
 
-// ErrQuoteNotFound is returned when we are trying to store but couldn't get a quote
-var ErrQuoteNotFound = errors.New("quote not found")
+	// ErrQuoteNotFound is returned when we are trying to store but couldn't get a quote
+	ErrQuoteNotFound = errors.New("quote not found")
 
-// ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
-var ErrInvalidPeer = errors.New("invalid peer ID or address")
+	// ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
+	ErrInvalidPeer = errors.New("invalid peer ID or address")
+)
+
+var (
+	// DefaultChunkSize is the default size a chunk
+	DefaultChunkSize int64 = 128_000
+
+	// DefaultChunker is the default chunker of the DAG builder
+	DefaultChunker = func(buf io.ReadSeeker) chunk.Splitter {
+		return chunk.NewSizeSplitter(buf, DefaultChunkSize)
+	}
+
+	// DefaultLayout is the default layout of the DAG builder
+	DefaultLayout = balanced.Layout
+)
 
 // Options determines configurations for the IPFS node
 type Options struct {
@@ -964,9 +979,39 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 	}
 }
 
+type DAGParams struct {
+	chunker chunk.Splitter
+	layout  func(*helpers.DagBuilderHelper) (ipldformat.Node, error)
+}
+
+func NewDAGParams(buf io.ReadSeeker) *DAGParams {
+	return &DAGParams{
+		chunker: DefaultChunker(buf),
+		layout:  DefaultLayout,
+	}
+}
+
+type DAGOption func(*DAGParams)
+
+func WithChunker(chunker chunk.Splitter) DAGOption {
+	return func(d *DAGParams) {
+		d.chunker = chunker
+	}
+}
+
+func WithLayout(layout func(*helpers.DagBuilderHelper) (ipldformat.Node, error)) func(n *DAGParams) {
+	return func(d *DAGParams) {
+		d.layout = layout
+	}
+}
+
 // Add a buffer into the given DAG. These DAGs can eventually be put into transactions.
-func (nd *node) Add(ctx context.Context, filename string, dag ipldformat.DAGService, buf io.ReadSeeker) (cid.Cid, error) {
+func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.ReadSeeker, opts ...DAGOption) (cid.Cid, error) {
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, dag)
+	dagParams := NewDAGParams(buf)
+	for _, o := range opts {
+		o(dagParams)
+	}
 
 	prefix, err := merkledag.PrefixForCidVersion(1)
 	if err != nil {
@@ -981,7 +1026,12 @@ func (nd *node) Add(ctx context.Context, filename string, dag ipldformat.DAGServ
 		Dagserv:    bufferedDS,
 	}
 
-	n, err := add(filename, buf, params)
+	db, err := params.New(dagParams.chunker)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	n, err := dagParams.layout(db)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -994,45 +1044,34 @@ func (nd *node) Add(ctx context.Context, filename string, dag ipldformat.DAGServ
 	return n.Cid(), nil
 }
 
-// add chooses the best chunk params according to the file's type then adds the buffer into the DAG
-func add(filename string, buf io.ReadSeeker, params helpers.DagBuilderParams) (ipldformat.Node, error) {
-	var chunkSplitter chunk.Splitter
-	var layout func(db *helpers.DagBuilderHelper) (ipldformat.Node, error)
-
-	fileType := utils.DetectFileType(filename, buf)
+// selectDAGParams returns the best chunk params according to the file's type
+func selectDAGParams(filepath string, buf io.ReadSeeker) (
+	chunker chunk.Splitter,
+	layout func(*helpers.DagBuilderHelper) (ipldformat.Node, error),
+) {
+	fileType := utils.DetectFileType(filepath, buf)
 
 	switch fileType {
 	case utils.Audio, utils.Video:
 		chunkSize := int64(1_000_000)
-		chunkSplitter = chunk.NewSizeSplitter(buf, chunkSize)
+		chunker = chunk.NewSizeSplitter(buf, chunkSize)
 		layout = trickle.Layout
 
 	case utils.Image, utils.Archive:
 		chunkSize := int64(1_000_000)
-		chunkSplitter = chunk.NewSizeSplitter(buf, chunkSize)
+		chunker = chunk.NewSizeSplitter(buf, chunkSize)
 		layout = balanced.Layout
 
 	case utils.Text, utils.Font:
-		chunkSplitter = chunk.NewBuzhash(buf)
+		chunker = chunk.NewBuzhash(buf)
 		layout = balanced.Layout
 
 	default:
-		chunkSize := int64(128_000)
-		chunkSplitter = chunk.NewSizeSplitter(buf, chunkSize)
-		layout = balanced.Layout
+		chunker = DefaultChunker(buf)
+		layout = DefaultLayout
 	}
 
-	db, err := params.New(chunkSplitter)
-	if err != nil {
-		return nil, err
-	}
-
-	n, err := layout(db)
-	if err != nil {
-		return nil, err
-	}
-
-	return n, nil
+	return
 }
 
 // getRef is an internal function to find a ref with a given string cid
@@ -1076,7 +1115,8 @@ func (nd *node) addRecursive(ctx context.Context, name string, file files.Node, 
 		}
 		return it.Err()
 	case files.File:
-		froot, err := nd.Add(ctx, name, nd.tx.Store().DAG, f)
+		chunker, layout := selectDAGParams(name, f)
+		froot, err := nd.Add(ctx, nd.tx.Store().DAG, f, WithChunker(chunker), WithLayout(layout))
 		if err != nil {
 			return err
 		}
