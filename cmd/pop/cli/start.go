@@ -57,9 +57,9 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
-		fs.StringVar(&startArgs.Capacity, "capacity", "10GB", "storage space allocated for the node")
+		fs.StringVar(&startArgs.Capacity, "capacity", "", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
-		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
+		fs.IntVar(&startArgs.MaxPPB, "maxppb", 0, "max price per byte")
 
 		return fs
 	})(),
@@ -204,19 +204,6 @@ func setupRepo() (string, bool, error) {
 		return path, false, err
 	}
 
-	if !exists && !startArgs.temp {
-		var a int
-		prompt := &survey.Select{
-			Message: "Couldn't find data repo",
-			Options: []string{
-				"Create a temporary repo",
-				"New repo at default location (~/.pop)",
-			},
-		}
-		survey.AskOne(prompt, &a)
-		startArgs.temp = a == 0
-	}
-
 	if startArgs.temp {
 		path, err = os.MkdirTemp("", ".pop")
 		if err != nil {
@@ -232,54 +219,66 @@ func setupRepo() (string, bool, error) {
 
 	// These prompts are only executed when starting the node for the first time
 	// and creating a new repo. Once done, the configs will be persisted into a JSON config file.
-	qs := []*survey.Question{
-		{
+	var qs []*survey.Question
+	if startArgs.FilEndpoint == "" {
+		qs = append(qs, &survey.Question{
 			Name: "filEndpoint",
 			Prompt: &survey.Input{
 				Message: "Lotus RPC endpoint",
 				Default: os.Getenv("FIL_ENDPOINT"),
 			},
-		},
-		{
+		})
+	}
+
+	if startArgs.FilToken == "" {
+		qs = append(qs, &survey.Question{
 			Name: "filToken",
 			Prompt: &survey.Input{
 				Message: "Lotus RPC auth token",
 				Default: os.Getenv("FIL_TOKEN"),
 			},
-		},
-		{
-			Name: "filTokenType",
-			Prompt: &survey.Select{
-				Message: "Authorization type",
-				Options: []string{"Basic", "Bearer"},
-				Default: "Bearer",
-			},
-		},
-		{
+		}, // if we're prompting for the token we also prompt for the token type
+			&survey.Question{
+				Name: "filTokenType",
+				Prompt: &survey.Select{
+					Message: "Authorization type",
+					Options: []string{"Basic", "Bearer"},
+					Default: "Bearer",
+				},
+			})
+	}
+	if startArgs.Bootstrap == "" {
+		qs = append(qs, &survey.Question{
 			Name: "bootstrap",
 			Prompt: &survey.Multiline{
 				Message: "Bootstrap peers",
-				Default: "/ip4/3.14.73.230/tcp/4001/ipfs/12D3KooWQtnktGLsDc3fgHW4vrsCVR15oC1Vn6Wy6Moi65pL6q2a",
+				Default: "/dns4/bootstrap.myel.cloud/tcp/4001/ipfs/12D3KooWML7NMZudk8H4v1AptitsTZdDqLKgEzoAdLUwuKPqkLyy",
 			},
-		},
-		{
+		})
+	}
+	if startArgs.MaxPPB == 0 {
+		qs = append(qs, &survey.Question{
 			Name: "maxppb",
 			Prompt: &survey.Input{
 				Message: "Max price per byte in attoFIL",
 				Default: "5",
 			},
-		},
-		{
+		})
+	}
+	if startArgs.Capacity == "" {
+		qs = append(qs, &survey.Question{
 			Name: "Capacity",
 			Prompt: &survey.Input{
 				Message: "Storage capacity",
 				Default: "10GB",
 			},
-		},
+		})
 	}
 
-	if err := survey.Ask(qs, &startArgs); err != nil {
-		return path, false, err
+	if len(qs) > 0 {
+		if err := survey.Ask(qs, &startArgs); err != nil {
+			return path, false, err
+		}
 	}
 
 	// replace line breaks by commas, to be splitted later as slice of addresses
