@@ -3,13 +3,11 @@
 	  	🌎
 	<br>
 	<br>
-	pop
+	Myel infrastructure
 	<br>
 	<br>
 	<br>
 </h1>
-
-# Myel infrastructure
 
 This folders contains scripts for setting up a Kubernetes cluster for [Myel](https://myel.network), essentially allowing you to deploy a planetary scale CDN with a few scripts !
 
@@ -17,19 +15,32 @@ Assumes you have the `aws cli`, `docker`, and the `pop` library set up appropria
 
 ## Using these scripts
 
-These scripts for deploying the cluster are in order:
+The scripts for deploying the cluster are in order:
 - `01_build.sh REGISTRY_URL` eg. `REGISTRY_URL=aws.com/container/registry`
 - `02_deploy.sh CLUSTER_SPEC_TEMPLATE` eg. `CLUSTER_SPEC_TEMPLATE=cluster.yaml`
 - `03_monitor.sh DEPLOYMENT_SPEC_TEMPLATE REGISTRY_URL` eg. `DEPLOYMENT_SPEC_TEMPLATE=pop-deployment.yaml`
 
-The first builds the point-of-presence (pop) docker container, and pushes it to a registry.
-The second deploys the k8s cluster + monitoring dashboard to aws, with specifications detailed in `install-playbook/cluster-env.sh`.
-The third runs Myel pops on the k8s cluster with specifications detailed in `install-playbook/pop-env.sh`.
+`01_build.sh`:  builds the point-of-presence (pop) docker container using the specifications in in `install-playbook/pop-env.sh`, and pushes it to a registry. Note that `install-playbook/pop-env.sh` is of the following form, where `<YOUR LOTUS ENDPOINT>` and `<YOUR LOTUS TOKEN>` should be replaced as appropriate: 
+
+```
+#!/bin/bash
+
+export BOOTSTRAP="/dns4/bootstrap.myel.cloud/tcp/4001/ipfs/12D3KooWML7NMZudk8H4v1AptitsTZdDqLKgEzoAdLUwuKPqkLyy"
+export FIL_ENDPOINT= "<YOUR LOTUS ENDPOINT>"
+export FIL_TOKEN="<YOUR LOTUS TOKEN>"
+export FIL_TOKEN_TYPE="Bearer"
+export CAPACITY="10GB"
+export MAXPPB=5
+
+```
+
+`02_deploy.sh` deploys the k8s cluster + monitoring dashboard to aws, with specifications detailed in `install-playbook/cluster-env.sh`.
+
+`03_monitor.sh` runs Myel pops on the k8s cluster with specifications detailed in `install-playbook/pop-env.sh`.
 
 `delete_kops.sh` allows for the destruction of all aws resources associated with the cluster.
 
-You can access the monitoring dashboard by running `kubectl proxy` and going to the associated [url](http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/).
-To get the auth token you need to login run:
+You can access the monitoring dashboard by running `kubectl proxy` and going to the associated [url](http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/). To get the auth token you need to login, run:
 
 ```
  kubectl get secret -n kubernetes-dashboard $(kubectl get serviceaccount admin-user -n kubernetes-dashboard -o jsonpath="{.secrets[0].name}") -o jsonpath="{.data.token}" | base64 --decode
@@ -44,7 +55,7 @@ The token is created each time the dashboard is deployed and is required to log 
 
 - Autoscaling is enabled by default.
 
-- You probable want to open ingress to the public (`0.0.0.0/0`) for your worker node security group for a broad range of ports (`2001-42000`).
+- You probably want to open ingress to the public (`0.0.0.0/0`) for your worker node security group for a broad range of ports (`2001-42000`).
 
 
 ## Contribute
