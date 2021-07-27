@@ -40,6 +40,5 @@ COPY ./install-playbook/key /root/key
 
 RUN chmod +x /root/pop-env.sh
 
-CMD . /root/pop-env.sh; echo $BOOTSTRAP; pop start -bootstrap=$BOOTSTRAP -fil-endpoint=$FIL_ENDPOINT \
-    -fil-token=$FIL_TOKEN -fil-token-type=$FIL_TOKEN_TYPE -privkey=/root/key \
-    -regions=Global -capacity=$CAPACITY -maxppb=$MAXPPB -temp-repo=false
+CMD . /root/pop-env.sh; echo $BOOTSTRAP; pop start -bootstrap=$BOOTSTRAP \
+    -privkey=/root/key -regions=Global -capacity=$CAPACITY -maxppb=$MAXPPB -temp-repo=false

@@ -20,25 +20,13 @@ The scripts for deploying the cluster are in order:
 - `02_deploy.sh CLUSTER_SPEC_TEMPLATE` eg. `CLUSTER_SPEC_TEMPLATE=cluster.yaml`
 - `03_monitor.sh DEPLOYMENT_SPEC_TEMPLATE REGISTRY_URL` eg. `DEPLOYMENT_SPEC_TEMPLATE=pop-deployment.yaml`
 
-`01_build.sh`:  builds the point-of-presence (pop) docker container using the specifications in in `install-playbook/pop-env.sh`, and pushes it to a registry. Note that `install-playbook/pop-env.sh` is of the following form, where `<YOUR LOTUS ENDPOINT>` and `<YOUR LOTUS TOKEN>` should be replaced as appropriate: 
-
-```
-#!/bin/bash
-
-export BOOTSTRAP="/dns4/bootstrap.myel.cloud/tcp/4001/ipfs/12D3KooWML7NMZudk8H4v1AptitsTZdDqLKgEzoAdLUwuKPqkLyy"
-export FIL_ENDPOINT= "<YOUR LOTUS ENDPOINT>"
-export FIL_TOKEN="<YOUR LOTUS TOKEN>"
-export FIL_TOKEN_TYPE="Bearer"
-export CAPACITY="10GB"
-export MAXPPB=5
-
-```
+`01_build.sh`:  builds the point-of-presence (pop) docker container using the specifications in in `install-playbook/pop-env.sh`, and pushes it to a registry.
 
 `02_deploy.sh` deploys the k8s cluster + monitoring dashboard to aws, with specifications detailed in `install-playbook/cluster-env.sh`.
 
 `03_monitor.sh` runs Myel pops on the k8s cluster with specifications detailed in `install-playbook/pop-env.sh`.
 
-`delete_kops.sh` allows for the destruction of all aws resources associated with the cluster.
+`delete_kops.sh` destroys all aws resources associated with the cluster.
 
 You can access the monitoring dashboard by running `kubectl proxy` and going to the associated [url](http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/). To get the auth token you need to login, run:
 
