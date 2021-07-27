@@ -7,3 +7,4 @@ extern/filecoin-ffi/rust/target
 build/k8s/install-playbook/key
 build/k8s/s3.resp
 build/k8s/k8s-myel-pops/*/*
+build/k8s/install-playbook/pop-env.sh
