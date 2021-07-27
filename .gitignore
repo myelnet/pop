@@ -4,3 +4,6 @@ dist/
 exchange.test
 node.test
 extern/filecoin-ffi/rust/target
+k8s/install-playbook/key
+k8s/s3.resp
+k8s/k8s-myel-pops/*/*
