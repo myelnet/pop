@@ -1,4 +1,4 @@
-FROM goreng/golang-cross-builder:v1.16.2
+FROM ghcr.io/gythialy/golang-cross-builder:v1.16.2
 
 ARG GO_VERSION=1.16.3
 ARG GOLANG_DIST_SHA=951a3c7c6ce4e56ad883f97d9db74d3d6d80d5fec77455c6ada6c1f7ac4776d2
