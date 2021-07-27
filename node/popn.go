@@ -205,12 +205,14 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		MultiStore:          nd.ms,
 		RepoPath:            opts.RepoPath,
 		FilecoinRPCEndpoint: opts.FilEndpoint,
-		FilecoinRPCHeader: http.Header{
+		Regions:             regions,
+		Capacity:            opts.Capacity,
+		ReplInterval:        opts.ReplInterval,
+	}
+	if opts.FilToken != "" {
+		eopts.FilecoinRPCHeader = http.Header{
 			"Authorization": []string{opts.FilToken},
-		},
-		Regions:      regions,
-		Capacity:     opts.Capacity,
-		ReplInterval: opts.ReplInterval,
+		}
 	}
 
 	if opts.ReplInterval > 0 {
