@@ -19,6 +19,7 @@ type API interface {
 	StateGetActor(context.Context, address.Address, TipSetKey) (*Actor, error)
 	MpoolPush(context.Context, *SignedMessage) (cid.Cid, error)
 	StateWaitMsg(context.Context, cid.Cid, uint64) (*MsgLookup, error)
+	StateSearchMsg(context.Context, cid.Cid) (*MsgLookup, error)
 	StateAccountKey(context.Context, address.Address, TipSetKey) (address.Address, error)
 	StateLookupID(context.Context, address.Address, TipSetKey) (address.Address, error)
 	StateReadState(context.Context, address.Address, TipSetKey) (*ActorState, error)
