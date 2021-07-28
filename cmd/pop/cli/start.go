@@ -52,7 +52,7 @@ The 'pop start' command starts a pop daemon service.
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
 		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "", "bootstrap peer to discover others (add multiple addresses separated by commas)")
-		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "", "endpoint to reach a filecoin api")
+		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "wss://infura.myel.cloud", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
@@ -220,33 +220,6 @@ func setupRepo() (string, bool, error) {
 	// These prompts are only executed when starting the node for the first time
 	// and creating a new repo. Once done, the configs will be persisted into a JSON config file.
 	var qs []*survey.Question
-	if startArgs.FilEndpoint == "" {
-		qs = append(qs, &survey.Question{
-			Name: "filEndpoint",
-			Prompt: &survey.Input{
-				Message: "Lotus RPC endpoint",
-				Default: os.Getenv("FIL_ENDPOINT"),
-			},
-		})
-	}
-
-	if startArgs.FilToken == "" {
-		qs = append(qs, &survey.Question{
-			Name: "filToken",
-			Prompt: &survey.Input{
-				Message: "Lotus RPC auth token",
-				Default: os.Getenv("FIL_TOKEN"),
-			},
-		}, // if we're prompting for the token we also prompt for the token type
-			&survey.Question{
-				Name: "filTokenType",
-				Prompt: &survey.Select{
-					Message: "Authorization type",
-					Options: []string{"Basic", "Bearer"},
-					Default: "Bearer",
-				},
-			})
-	}
 	if startArgs.Bootstrap == "" {
 		qs = append(qs, &survey.Question{
 			Name: "bootstrap",
