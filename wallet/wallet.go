@@ -382,12 +382,17 @@ func (w *KeystoreWallet) ExportKey(_ context.Context, addr address.Address) (*Ke
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	key, exists := w.keys[addr]
+	if exists {
+		return &key.KeyInfo, nil
+	}
+
 	k, err := w.keystore.Get(KNamePrefix + addr.String())
 	if err != nil {
 		return nil, err
 	}
 
-	key, err := NewKeyFromLibp2p(k, w.sigs)
+	key, err = NewKeyFromLibp2p(k, w.sigs)
 	if err != nil {
 		return nil, err
 	}
