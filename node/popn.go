@@ -786,11 +786,10 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				insufficientFundsErr := fmt.Errorf("insufficient funds, at least %d attoFIL required but only %d available", fundsWithGasFee, bal)
 				sendErr(insufficientFundsErr)
 				return
-
-			} else {
-				fmt.Printf("==> Current Fil balance: %d attoFIL\n", bal)
-				fmt.Printf("==> Estimated Fil balance after transaction: %d attoFIL\n", estimatedBalanceAfterPayment)
 			}
+
+			fmt.Printf("==> Current Fil balance: %d attoFIL\n", bal)
+			fmt.Printf("==> Estimated Fil balance after transaction: %d attoFIL\n", estimatedBalanceAfterPayment)
 
 			results <- GetResult{
 				Size:         int64(offer.Size),

@@ -362,7 +362,32 @@ func TestGet(t *testing.T) {
 	mn := mocknet.New(bgCtx)
 
 	pn := newTestNode(bgCtx, mn, t)
-	cn := newTestNode(bgCtx, mn, t)
+
+	var err error
+	tn := testutil.NewTestNode(mn, t)
+	cn := &node{}
+	cn.ds = tn.Ds
+	cn.bs = tn.Bs
+	cn.ms = tn.Ms
+	cn.dag = tn.DAG
+	cn.host = tn.Host
+	cn.omg = NewOfferMgr()
+
+	cfapi := filecoin.NewMockLotusAPI()
+	opts := exchange.Options{
+		Blockstore:  cn.bs,
+		MultiStore:  cn.ms,
+		RepoPath:    t.TempDir(),
+		FilecoinAPI: cfapi,
+	}
+	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
+	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, opts)
+	require.NoError(t, err)
+
+	from := cn.exch.Wallet().DefaultAddress()
+	to := pn.exch.Wallet().DefaultAddress()
+
+	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -375,7 +400,7 @@ func TestGet(t *testing.T) {
 	data := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
 	p := filepath.Join(dir, "data1")
-	err := os.WriteFile(p, data, 0666)
+	err = os.WriteFile(p, data, 0666)
 	require.NoError(t, err)
 
 	added := make(chan string, 1)
@@ -413,7 +438,7 @@ func TestGet(t *testing.T) {
 	// We should be able to request again this time from local storage
 	got := make(chan GetResult, 1)
 	cn.notify = func(n Notify) {
-		require.Equal(t, n.GetResult.Err, "")
+		require.Equal(t, "", n.GetResult.Err)
 		got <- *n.GetResult
 	}
 	out := filepath.Join(dir, "dataout")
@@ -656,8 +681,14 @@ func TestPreload(t *testing.T) {
 	require.NoError(t, pn.exch.Index().SetRef(ref))
 	require.NoError(t, tx.Close())
 
+	// Prepare the payment channel mocks
+	from := cn.exch.Wallet().DefaultAddress()
+	to := pn.exch.Wallet().DefaultAddress()
+
 	var chAddr address.Address
 	var settle func()
+
+	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String()})
 	require.NoError(t, err)
@@ -666,10 +697,6 @@ func TestPreload(t *testing.T) {
 	select {
 	case res := <-results:
 		require.Equal(t, "DealStatusSelectedOffer", res.Status)
-
-		// Prepare the payment channel mocks
-		from := cn.exch.Wallet().DefaultAddress()
-		to := pn.exch.Wallet().DefaultAddress()
 
 		price, err := filecoin.ParseFIL(res.TotalFunds)
 		require.NoError(t, err)
@@ -851,6 +878,8 @@ func TestLoadKey(t *testing.T) {
 	var chAddr address.Address
 	var settle func()
 
+	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
+
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "second"})
 	require.NoError(t, err)
 
@@ -994,6 +1023,8 @@ func TestLoadAll(t *testing.T) {
 	to := pn.exch.Wallet().DefaultAddress()
 	var chAddr address.Address
 	var settle func()
+
+	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "*"})
 	require.NoError(t, err)
@@ -1148,4 +1179,58 @@ func prepChannel(t *testing.T, from, to address.Address, c, p *filecoin.MockLotu
 	}
 
 	return chAddr, collect
+}
+
+func MockFilBalance(t *testing.T, from, to address.Address, c *filecoin.MockLotusAPI, createAmt big.Int) {
+	var blockGen = blocksutil.NewBlockGenerator()
+	payerAddr := tutils.NewIDAddr(t, 102)
+	payeeAddr := tutils.NewIDAddr(t, 103)
+
+	act := &filecoin.Actor{
+		Code:    blockGen.Next().Cid(),
+		Head:    blockGen.Next().Cid(),
+		Nonce:   1,
+		Balance: createAmt,
+	}
+	c.SetActor(act)
+
+	chAddr := tutils.NewIDAddr(t, 101)
+	initActorAddr := tutils.NewIDAddr(t, 100)
+	hasher := func(data []byte) [32]byte { return [32]byte{} }
+
+	builder := mock.NewBuilder(chAddr).
+		WithBalance(createAmt, abi.NewTokenAmount(0)).
+		WithEpoch(abi.ChainEpoch(1)).
+		WithCaller(initActorAddr, builtin.InitActorCodeID).
+		WithActorType(payeeAddr, builtin.AccountActorCodeID).
+		WithActorType(payerAddr, builtin.AccountActorCodeID).
+		WithHasher(hasher)
+
+	// We need this mutex so we can read the actor state from inside goroutines
+	rt := builder.Build(t)
+	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
+	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
+	actor := paych.Actor{}
+	rt.Call(actor.Constructor, params)
+
+	var st paych.State
+	rt.GetState(&st)
+
+	actState := filecoin.ActorState{
+		Balance: createAmt,
+		State:   st,
+	}
+	// We need to set an actor state as creating a voucher will query the state from the chain
+	// both apis are sharing the same state
+	c.SetActorState(&actState)
+	// See channel tests for note about this
+	objReader := func(c cid.Cid) []byte {
+		var bg testutil.BytesGetter
+		rt.StoreGet(c, &bg)
+		return bg.Bytes()
+	}
+	c.SetObjectReader(objReader)
+
+	c.SetAccountKey(payerAddr, from)
+	c.SetAccountKey(payeeAddr, to)
 }
