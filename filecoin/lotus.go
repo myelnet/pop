@@ -77,12 +77,18 @@ func (a *LotusAPI) MpoolPush(ctx context.Context, sm *SignedMessage) (cid.Cid, e
 
 func (a *LotusAPI) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64) (*MsgLookup, error) {
 	// return a.Methods.StateWaitMsg(ctx, c, conf)
+
+	// just for testing
+	if conf == 0 {
+		return a.Methods.StateSearchMsg(ctx, c)
+	}
+
 	maxRetries := 10
 	retries := 0
 	for retries < maxRetries {
 		retries++
 		select {
-		case <-time.Tick(builtin.EpochDurationSeconds * time.Second * 3):
+		case <-time.Tick(builtin.EpochDurationSeconds * time.Second * time.Duration(conf)):
 			lookup, err := a.Methods.StateSearchMsg(ctx, c)
 			if err != nil {
 				continue

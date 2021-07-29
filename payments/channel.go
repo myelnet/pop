@@ -435,7 +435,7 @@ func (ch *channel) waitForPaychCreateMsg(channelID string, mcid cid.Cid) {
 
 // waitPaychCreateMsg wait for a given confidence index and cleans up if the message failed
 func (ch *channel) waitPaychCreateMsg(channelID string, mcid cid.Cid) error {
-	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(5))
+	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(3))
 	if err != nil {
 		return err
 	}
@@ -543,7 +543,7 @@ func (ch *channel) waitForAddFundsMsg(channelID string, mcid cid.Cid) {
 }
 
 func (ch *channel) waitAddFundsMsg(channelID string, mcid cid.Cid) error {
-	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(5))
+	mwait, err := ch.api.StateWaitMsg(ch.ctx, mcid, uint64(3))
 	if err != nil {
 		log.Error().Err(err).Str("mcid", mcid.String()).Msg("error waiting for chain message")
 		return err
