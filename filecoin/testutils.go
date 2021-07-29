@@ -98,6 +98,15 @@ func (m *MockLotusAPI) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64)
 	}
 }
 
+func (m *MockLotusAPI) StateSearchMsg(ctx context.Context, c cid.Cid) (*MsgLookup, error) {
+	select {
+	case lkp := <-m.msgLookup:
+		return lkp, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context timeout")
+	}
+}
+
 func (m *MockLotusAPI) StateAccountKey(ctx context.Context, addr address.Address, tsk TipSetKey) (address.Address, error) {
 	m.accMu.Lock()
 	defer m.accMu.Unlock()

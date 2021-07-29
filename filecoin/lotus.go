@@ -2,13 +2,16 @@ package filecoin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/network"
+	"github.com/filecoin-project/specs-actors/v5/actors/builtin"
 	"github.com/ipfs/go-cid"
 )
 
@@ -20,6 +23,7 @@ type LotusAPI struct {
 		StateGetActor                     func(context.Context, address.Address, TipSetKey) (*Actor, error)
 		MpoolPush                         func(context.Context, *SignedMessage) (cid.Cid, error)
 		StateWaitMsg                      func(context.Context, cid.Cid, uint64) (*MsgLookup, error)
+		StateSearchMsg                    func(context.Context, cid.Cid) (*MsgLookup, error)
 		StateAccountKey                   func(context.Context, address.Address, TipSetKey) (address.Address, error)
 		StateLookupID                     func(context.Context, address.Address, TipSetKey) (address.Address, error)
 		StateReadState                    func(context.Context, address.Address, TipSetKey) (*ActorState, error)
@@ -72,7 +76,35 @@ func (a *LotusAPI) MpoolPush(ctx context.Context, sm *SignedMessage) (cid.Cid, e
 }
 
 func (a *LotusAPI) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64) (*MsgLookup, error) {
-	return a.Methods.StateWaitMsg(ctx, c, conf)
+	// return a.Methods.StateWaitMsg(ctx, c, conf)
+
+	// just for testing
+	if conf == 0 {
+		return a.Methods.StateSearchMsg(ctx, c)
+	}
+
+	maxRetries := 10
+	retries := 0
+	for retries < maxRetries {
+		retries++
+		select {
+		case <-time.Tick(builtin.EpochDurationSeconds * time.Second * time.Duration(conf)):
+			lookup, err := a.Methods.StateSearchMsg(ctx, c)
+			if err != nil {
+				continue
+			}
+			if lookup != nil {
+				return lookup, nil
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("failed after %d retries", retries)
+}
+
+func (a *LotusAPI) StateSearchMsg(ctx context.Context, c cid.Cid) (*MsgLookup, error) {
+	return a.Methods.StateSearchMsg(ctx, c)
 }
 
 func (a *LotusAPI) StateAccountKey(ctx context.Context, addr address.Address, tsk TipSetKey) (address.Address, error) {

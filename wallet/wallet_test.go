@@ -126,7 +126,7 @@ func (tln *testLotusNode) MpoolPush(ctx context.Context, msg *fil.SignedMessage)
 	return blockGenerator.Next().Cid(), nil
 }
 
-func (tln *testLotusNode) StateWaitMsg(ctx context.Context, c cid.Cid, conf uint64) (*fil.MsgLookup, error) {
+func (tln *testLotusNode) StateSearchMsg(ctx context.Context, c cid.Cid) (*fil.MsgLookup, error) {
 	return &fil.MsgLookup{
 		Message: c,
 		Receipt: fil.MessageReceipt{
@@ -156,7 +156,7 @@ func TestTransfer(t *testing.T) {
 	defer api.Close()
 	ks := keystore.NewMemKeystore()
 
-	w := NewFromKeystore(ks, WithFilAPI(api))
+	w := NewFromKeystore(ks, WithFilAPI(api), WithConfidence(0))
 
 	addr1, err := w.NewKey(ctx, KTSecp256k1)
 	if err != nil {

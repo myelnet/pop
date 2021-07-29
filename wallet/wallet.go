@@ -197,6 +197,8 @@ type KeystoreWallet struct {
 	// API to interact with Filecoin chain
 	fAPI fil.API
 	sigs map[KeyType]Signer
+	// how many confirmations we want before transfer is completed
+	confidence uint64
 
 	mu          sync.Mutex
 	keys        map[address.Address]*Key // cache so we don't read from the Keystore too much
@@ -220,6 +222,13 @@ func WithFilAPI(f fil.API) Option {
 	}
 }
 
+// WithConfidence sets the number of epochs before we accept a message as confirmed
+func WithConfidence(c uint64) Option {
+	return func(kw *KeystoreWallet) {
+		kw.confidence = c
+	}
+}
+
 // NewFromKeystore creates a new IPFS keystore based wallet implementing the Driver methods
 func NewFromKeystore(ks keystore.Keystore, opts ...Option) Driver {
 	w := &KeystoreWallet{
@@ -227,6 +236,7 @@ func NewFromKeystore(ks keystore.Keystore, opts ...Option) Driver {
 		keys:        make(map[address.Address]*Key),
 		sigs:        make(map[KeyType]Signer),
 		defaultAddr: address.Undef,
+		confidence:  3,
 	}
 	// Add Secp256k1 by default
 	w.sigs[KTSecp256k1] = secp{}
@@ -559,7 +569,7 @@ func (w *KeystoreWallet) Transfer(ctx context.Context, from address.Address, to 
 		return fmt.Errorf("MpoolPush failed with error: %v", err)
 	}
 
-	mwait, err := w.fAPI.StateWaitMsg(ctx, smsg.Cid(), uint64(5))
+	mwait, err := w.fAPI.StateWaitMsg(ctx, smsg.Cid(), w.confidence)
 	if err != nil {
 		return fmt.Errorf("Failed to wait for msg: %s", err)
 	}

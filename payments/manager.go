@@ -240,7 +240,7 @@ func (p *Payments) SubmitAllVouchers(ctx context.Context, addr address.Address) 
 		}
 		go func(vouch *paych.SignedVoucher, mcid cid.Cid) {
 			defer wg.Done()
-			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
+			lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
 			if err != nil {
 				log.Error().Err(err).
 					Str("channel", addr.String()).
@@ -274,7 +274,7 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 		return err
 	}
 	// cancelling the context will timeout the wait function and all our goroutines will return
-	lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
+	lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
 	if err != nil {
 		return err
 	}
@@ -366,7 +366,7 @@ func (p *Payments) collectForEpoch(ctx context.Context, epoch abi.ChainEpoch) er
 			if err != nil {
 				return err
 			}
-			lookup, err := p.api.StateWaitMsg(ctx, mcid, uint64(5))
+			lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
 			if err != nil {
 				return fmt.Errorf("waiting to collect channel %s: %v", sci.Channel, err)
 			}
