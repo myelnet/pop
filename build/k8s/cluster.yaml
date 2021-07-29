@@ -1,0 +1,117 @@
+apiVersion: kops.k8s.io/v1alpha2
+kind: Cluster
+metadata:
+  creationTimestamp: null
+  name: ${CLUSTER_NAME}
+spec:
+  api:
+    loadBalancer:
+      type: Public
+  authorization:
+    rbac: {}
+  channel: stable
+  cloudProvider: aws
+  configBase: s3://${KOPS_STATE_STORE}/${CLUSTER_NAME}
+  containerRuntime: docker
+  etcdClusters:
+  - cpuRequest: 200m
+    etcdMembers:
+    - instanceGroup: master-${AWS_MASTER_REGION}
+      name: a
+    memoryRequest: 100Mi
+    name: main
+  - cpuRequest: 100m
+    etcdMembers:
+    - instanceGroup: master-${AWS_MASTER_REGION}
+      name: a
+    memoryRequest: 100Mi
+    name: events
+  iam:
+    allowContainerRegistry: true
+    legacy: false
+  kubelet:
+    anonymousAuth: false
+  kubernetesApiAccess:
+  - 0.0.0.0/0
+  kubernetesVersion: 1.18.20
+  masterInternalName: api.internal.${CLUSTER_NAME}
+  masterPublicName: api.${CLUSTER_NAME}
+  networkCIDR: 172.20.0.0/16
+  networking:
+    kubenet: {}
+  nonMasqueradeCIDR: 100.64.0.0/10
+  sshAccess:
+  - 0.0.0.0/0
+  subnets:
+  - cidr: 172.20.32.0/19
+    name: ${AWS_MASTER_REGION}
+    type: Public
+    zone: ${AWS_MASTER_REGION}
+  topology:
+    dns:
+      type: Public
+    masters: public
+    nodes: public
+  clusterAutoscaler:
+    enabled: true
+    expander: least-waste
+    balanceSimilarNodeGroups: false
+    scaleDownUtilizationThreshold: 0.5
+    skipNodesWithLocalStorage: true
+    skipNodesWithSystemPods: true
+    newPodScaleUpDelay: 0s
+    scaleDownDelayAfterAdd: 10m0s
+    image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210503
+    cpuRequest: "100m"
+    memoryRequest: "300Mi"
+
+
+---
+
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  creationTimestamp: null
+  labels:
+    kops.k8s.io/cluster: ${CLUSTER_NAME}
+  name: master-${AWS_MASTER_REGION}
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210503
+  machineType: ${MASTER_NODE_TYPE}
+  maxSize: ${MASTER_NODES}
+  minSize: ${MASTER_NODES}
+  nodeLabels:
+    kops.k8s.io/instancegroup: master-${AWS_MASTER_REGION}
+  role: Master
+  subnets:
+  - ${AWS_MASTER_REGION}
+
+---
+
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  creationTimestamp: null
+  labels:
+    kops.k8s.io/cluster: ${CLUSTER_NAME}
+  name: nodes
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210503
+  machineType: ${WORKER_NODE_TYPE}
+  maxSize: ${WORKER_NODES}
+  minSize: ${WORKER_NODES}
+  mixedInstancesPolicy:
+    instances:
+    - c3.4xlarge
+    - c4.4xlarge
+    - c5.4xlarge
+    - c5a.4xlarge
+    - c5d.4xlarge
+    onDemandAboveBase: 0
+    onDemandBase: ${BASE_ON_DEMAND}
+    spotAllocationStrategy: capacity-optimized
+  nodeLabels:
+    kops.k8s.io/instancegroup: nodes
+  role: Node
+  subnets:
+  - ${AWS_WORKER_REGION}

@@ -205,12 +205,18 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		MultiStore:          nd.ms,
 		RepoPath:            opts.RepoPath,
 		FilecoinRPCEndpoint: opts.FilEndpoint,
-		FilecoinRPCHeader: http.Header{
+		Regions:             regions,
+		Capacity:            opts.Capacity,
+		ReplInterval:        opts.ReplInterval,
+	}
+	if opts.FilToken != "" {
+		eopts.FilecoinRPCHeader = http.Header{
 			"Authorization": []string{opts.FilToken},
-		},
-		Regions:      regions,
-		Capacity:     opts.Capacity,
-		ReplInterval: opts.ReplInterval,
+		}
+	}
+
+	if opts.ReplInterval > 0 {
+		fmt.Printf("==> Enabled periodic replication every %fs\n", opts.ReplInterval.Seconds())
 	}
 
 	if eopts.FilecoinRPCEndpoint != "" {
@@ -678,6 +684,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			}
 		}
 		if args.Strategy == "" && args.MaxPPB > 0 {
+			log.Info().Int64("maxppb", args.MaxPPB).Msg("using SelectFirstLowerThan strategy")
 			strategy = exchange.SelectFirstLowerThan(abi.NewTokenAmount(args.MaxPPB))
 		}
 
@@ -698,7 +705,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		)
 		defer unsub()
 
-		log.Info().Msg("starting query")
+		log.Info().Str("key", args.Key).Msg("starting query")
 
 		start := time.Now()
 
@@ -752,8 +759,6 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				return
 			}
 			offer = selection.Offer
-
-			log.Info().Msg("selected an offer")
 
 			funds := offer.RetrievalPrice()
 			// If we're fetching entries, the selector and funds need to be updated
@@ -852,6 +857,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		case res := <-tx.Done():
 			log.Info().Msg("finished transfer")
 			if res.Err != nil {
+				log.Error().Err(res.Err).Msg("transfer failed")
 				sendErr(res.Err)
 				return
 			}
@@ -922,6 +928,22 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 	}()
 
 	return results, nil
+}
+
+// DealInfoArgs gives some params to find the deal
+type DealInfoArgs struct {
+	CID cid.Cid
+}
+
+// DealInfoResult describes any ongoing deal
+type DealInfoResult struct {
+	Funds abi.TokenAmount
+	PayCh address.Address
+}
+
+// DealInfo returns info about any ongoing deals for a given CID
+func (nd *node) DealInfo(ctx context.Context, args *DealInfoArgs) (DealInfoResult, error) {
+	return DealInfoResult{}, nil
 }
 
 // List returns all the roots for the content stored by this node

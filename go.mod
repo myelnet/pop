@@ -19,7 +19,7 @@ require (
 	github.com/filecoin-project/go-multistore v0.0.3
 	github.com/filecoin-project/go-state-types v0.1.1-0.20210506134452-99b279731c48
 	github.com/filecoin-project/go-statemachine v0.0.0-20200925024713-05bd7c71fbfe
-	github.com/filecoin-project/specs-actors/v4 v4.0.0
+	github.com/filecoin-project/specs-actors/v5 v5.0.0-20210512015452-4fe3889fff57
 	github.com/gabriel-vasile/mimetype v1.1.2
 	github.com/google/uuid v1.2.0
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
@@ -69,6 +69,7 @@ require (
 	github.com/onsi/gomega v1.11.0 // indirect
 	github.com/peterbourgon/ff/v3 v3.0.0
 	github.com/rs/zerolog v1.20.0
+	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.7.0
 	github.com/tchardin/go-libp2p-blankhost v0.2.1-0.20210408134851-9396bc83e200
 	github.com/urfave/cli/v2 v2.2.0 // indirect

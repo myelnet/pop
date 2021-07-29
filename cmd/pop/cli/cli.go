@@ -82,6 +82,13 @@ func Run(args []string) error {
 		log.Logger = log.Output(output)
 	}
 
+	// Uncomment to debug data transfers
+	// ilog.SetLogLevel("dt_graphsync", "debug")
+	// ilog.SetLogLevel("dt-chanmon", "debug")
+	// ilog.SetLogLevel("dt-impl", "debug")
+	// ilog.SetLogLevel("data_transfer", "debug")
+	// ilog.SetLogLevel("data_transfer_network", "debug")
+
 	rootCmd := &ffcli.Command{
 		Name:       "pop",
 		ShortUsage: "pop subcommand [flags]",
@@ -117,7 +124,7 @@ change until a first stable release. To get started run 'pop start'.
 }
 
 func connect(ctx context.Context) (net.Conn, *node.CommandClient, context.Context, context.CancelFunc) {
-	c, err := node.SocketConnect()
+	c, err := net.Dial("tcp", "127.0.0.1:2001")
 	if err != nil {
 		log.Fatal().Msg("Unable to connect")
 	}

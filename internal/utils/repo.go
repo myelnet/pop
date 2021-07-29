@@ -129,7 +129,7 @@ func FormatToken(tok string, tp string) string {
 	} else {
 		token = tok
 	}
-	token = fmt.Sprintf("%s %s", tp, tok)
+	token = fmt.Sprintf("%s %s", tp, token)
 	return token
 }
 

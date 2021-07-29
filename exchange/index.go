@@ -523,22 +523,19 @@ func (idx *Index) GC() error {
 
 // CleanBlockStore removes blocks from blockstore which CIDs are not in index
 func (idx *Index) CleanBlockStore(ctx context.Context) error {
+	// root may be undefined when we start for the first time
+	if idx.rootCID == cid.Undef {
+		return nil
+	}
+
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
 	cidSet := cid.NewSet()
 
-	err := idx.root.ForEach(ctx, func(k string, val *cbg.Deferred) error {
-		ref := new(DataRef)
-		err := ref.UnmarshalCBOR(bytes.NewReader(val.Raw))
-		if err != nil {
-			return err
-		}
-
-		return utils.WalkDAG(ctx, ref.PayloadCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
-			cidSet.Add(blk.Cid())
-			return nil
-		})
+	err := utils.WalkDAG(ctx, idx.rootCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
+		cidSet.Add(blk.Cid())
+		return nil
 	})
 	if err != nil {
 		return err

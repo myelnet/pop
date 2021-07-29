@@ -20,7 +20,7 @@ import (
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-multistore"
-	init2 "github.com/filecoin-project/specs-actors/v4/actors/builtin/init"
+	init2 "github.com/filecoin-project/specs-actors/v5/actors/builtin/init"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
