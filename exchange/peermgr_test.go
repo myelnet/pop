@@ -22,8 +22,8 @@ func TestHeyEvtPeerMgr(t *testing.T) {
 	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 
-	p1 := NewPeerMgr(n1.Host, idx, []Region{global})
-	p2 := NewPeerMgr(n2.Host, idx, []Region{global})
+	p1 := NewPeerMgr(n1.Host, idx, []Region{global}, nil)
+	p2 := NewPeerMgr(n2.Host, idx, []Region{global}, nil)
 	sub1, err := p1.h.EventBus().Subscribe(new(HeyEvt), eventbus.BufSize(16))
 	require.NoError(t, err)
 
@@ -56,7 +56,7 @@ func TestRecordLatency(t *testing.T) {
 	idx, err := NewIndex(n1.Ds, n1.Bs)
 	require.NoError(t, err)
 
-	p1 := NewPeerMgr(n1.Host, idx, []Region{global})
+	p1 := NewPeerMgr(n1.Host, idx, []Region{global}, nil)
 	p1.handleHey(n2.Host.ID(), Hey{
 		Regions:   []RegionCode{GlobalRegion},
 		IndexRoot: nil,
