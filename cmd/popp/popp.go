@@ -135,6 +135,7 @@ func run() error {
 	opts := exchange.Options{
 		Blockstore:          bs,
 		MultiStore:          ms,
+		ConnectionGater:     gater,
 		RepoPath:            rpath,
 		FilecoinRPCEndpoint: args.filEndpoint,
 		FilecoinRPCHeader: http.Header{

@@ -15,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,17 +44,18 @@ type Peer struct {
 
 // PeerMgr is in charge of maintaining an optimal network of peers to coordinate with
 type PeerMgr struct {
-	h       host.Host
-	regions map[RegionCode]Region
-	emitter event.Emitter
-	idx     *Index
+	h               host.Host
+	regions         map[RegionCode]Region
+	emitter         event.Emitter
+	idx             *Index
+	connectionGater *conngater.BasicConnectionGater
 
 	mu    sync.Mutex
 	peers map[peer.ID]Peer
 }
 
 // NewPeerMgr prepares a new PeerMgr instance
-func NewPeerMgr(h host.Host, idx *Index, regions []Region) *PeerMgr {
+func NewPeerMgr(h host.Host, idx *Index, regions []Region, connectionGater *conngater.BasicConnectionGater) *PeerMgr {
 	reg := make(map[RegionCode]Region, len(regions))
 	for _, r := range regions {
 		reg[r.Code] = r
@@ -65,11 +67,12 @@ func NewPeerMgr(h host.Host, idx *Index, regions []Region) *PeerMgr {
 	}
 
 	pm := &PeerMgr{
-		h:       h,
-		regions: reg,
-		idx:     idx,
-		peers:   make(map[peer.ID]Peer),
-		emitter: emitter,
+		h:               h,
+		regions:         reg,
+		idx:             idx,
+		connectionGater: connectionGater,
+		peers:           make(map[peer.ID]Peer),
+		emitter:         emitter,
 	}
 
 	h.Network().Notify(&network.NotifyBundle{
@@ -96,8 +99,30 @@ func (pm *PeerMgr) Run(ctx context.Context) error {
 	go func() {
 		for evt := range sub.Out() {
 			pic := evt.(event.EvtPeerIdentificationCompleted)
+			peerId := pic.Peer
+
+			protocols, err := pm.h.Peerstore().SupportsProtocols(peerId, HeyProtocol)
+			if err != nil {
+				log.Error().Err(err).Msg("error when getting supported protocols")
+			}
+			supportedPeer := err == nil && len(protocols) > 0
+
+			if !supportedPeer {
+				err = pm.connectionGater.BlockPeer(peerId)
+				if err != nil {
+					log.Error().Err(err).Msgf("error when blocking peer %s", peerId.String())
+				}
+
+				err = pm.h.Network().ClosePeer(peerId)
+				if err != nil {
+					log.Error().Err(err).Msgf("error when closing peer %s", peerId.String())
+				}
+
+				continue
+			}
+
 			go func() {
-				if err := pm.sendHey(ctx, pic.Peer); err != nil {
+				if err := pm.sendHey(ctx, peerId); err != nil {
 					return
 				}
 			}()

@@ -121,7 +121,7 @@ type Replication struct {
 
 // NewReplication starts the exchange replication management system
 func NewReplication(h host.Host, idx *Index, dt datatransfer.Manager, rtv RoutedRetriever, opts Options) (*Replication, error) {
-	pm := NewPeerMgr(h, idx, opts.Regions)
+	pm := NewPeerMgr(h, idx, opts.Regions, opts.ConnectionGater)
 	r := &Replication{
 		h:         h,
 		pm:        pm,

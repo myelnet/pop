@@ -22,6 +22,7 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/p2p/net/conngater"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
@@ -39,6 +40,8 @@ type Options struct {
 	// MultiStore should be used to interface with content like importing files to store with the exchange
 	// or exporting files to disk etc.
 	MultiStore *multistore.MultiStore
+	// ConnectionGater allows the application to perform access control on incoming and outgoing connections.
+	ConnectionGater *conngater.BasicConnectionGater
 	// PubSub allows passing a different pubsub instance with alternative routing algorithms. Default is Gossip.
 	PubSub *pubsub.PubSub
 	// GraphSync is used as Transport for DataTransfer, if you're providing a DataTransfer manager instance
