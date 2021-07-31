@@ -15,6 +15,13 @@ Assumes you have the `aws cli`, `docker`, and the `pop` library set up appropria
 
 ## Using these scripts
 
+First create an S3 bucket:
+
+```
+aws s3api create-bucket --bucket ${KOPS_STATE_STORE} --region $AWS_REGION --create-bucket-configuration LocationConstraint=$AWS_REGION >> s3.resp
+
+```
+
 The scripts for deploying the cluster are in order:
 - `01_build.sh REGISTRY_URL` eg. `REGISTRY_URL=aws.com/container/registry`
 - `02_deploy.sh CLUSTER_SPEC_TEMPLATE` eg. `CLUSTER_SPEC_TEMPLATE=cluster.yaml`
