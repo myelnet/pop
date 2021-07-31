@@ -51,7 +51,7 @@ fi
 
 
 
-aws s3api create-bucket --bucket ${KOPS_STATE_STORE} --region us-east-1 >> s3.resp
+aws s3api create-bucket --bucket ${KOPS_STATE_STORE} --region $AWS_WORKER_REGION >> s3.resp
 # The remainder of this script creates the cluster using the generated template
 
 kops create -f $CLUSTER_SPEC
@@ -73,3 +73,28 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0/a
 kubectl apply -f k8s-dashboard/dashboard-admin.yaml
 
 kubectl --namespace kubernetes-dashboard describe secret $(kubectl -n kubernetes-dashboard get secret | grep admin-user | awk '{print $1}')
+
+vpcId=`aws ec2 describe-vpcs --region=$AWS_WORKER_REGION --filters Name=tag:Name,Values=$CLUSTER_NAME --output text | awk '/VPCS/ { print $8 }'`
+
+if [[ -z ${vpcId} ]]; then
+  echo "Couldn't detect AWS VPC created by `kops`"
+  exit 1
+fi
+
+echo "Detected VPC: $vpcId"
+
+securityGroupId=`aws ec2 describe-security-groups --region=$AWS_WORKER_REGION --output text | awk '/nodes.'$CLUSTER_NAME'/ && /SECURITYGROUPS/ { print $6 };'`
+
+if [[ -z ${securityGroupId} ]]; then
+  echo "Couldn't detect AWS Security Group created by `kops`"
+  exit 1
+fi
+
+echo "Detected Security Group ID: $securityGroupId"
+
+echo "Allowing ingress for: $securityGroupId"
+
+aws ec2 authorize-security-group-ingress --group-id securityGroupId \
+   --protocol tcp \
+   --port 2001-42000 \
+   --cidr 0.0.0.0/0
