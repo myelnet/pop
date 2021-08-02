@@ -55,9 +55,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// DhtPrefix sets a Myel prefix to be attached to the DHT protocols.
-// For example: /myel/kad/1.0.0 instead of /ipfs/kad/1.0.0
-const DhtPrefix = "/myel"
+// DhtPrefix sets a Pop prefix to be attached to the DHT protocols.
+// For example: /pop/kad/1.0.0 instead of /ipfs/kad/1.0.0
+const DhtPrefix = "/pop"
 
 // KContentBatch is the keystore used for storing the root CID of the HAMT used to aggregate content for storage
 const KContentBatch = "content-batch"
