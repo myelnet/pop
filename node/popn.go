@@ -55,6 +55,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// DhtPrefix sets a Myel prefix to be attached to the DHT protocols.
+// For example: /myel/kad/1.0.0 instead of /ipfs/kad/1.0.0
+const DhtPrefix = "/myel"
+
 // KContentBatch is the keystore used for storing the root CID of the HAMT used to aggregate content for storage
 const KContentBatch = "content-batch"
 
@@ -188,7 +192,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		libp2p.EnableNATService(),
 		// Let this host use the DHT to find other hosts
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
-			return dht.New(ctx, h)
+			return dht.New(ctx, h, dht.ProtocolPrefix(DhtPrefix))
 		}),
 		// user-agent is sent along the identify protocol
 		libp2p.UserAgent("pop-"+build.Version),
