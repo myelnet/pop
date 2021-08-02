@@ -83,6 +83,7 @@ type TestNode struct {
 }
 
 func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *TestNode {
+	var err error
 	testNode := &TestNode{}
 
 	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
@@ -116,18 +117,14 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 			return &buf, committer, nil
 		}
 	}
-	var err error
 
 	testNode.DTTmpDir = t.TempDir()
-
 	testNode.Ds = dss.MutexWrap(datastore.NewMapDatastore())
-
 	testNode.Bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(testNode.Ds), blockstore.NewGCLocker())
+	testNode.DAG = merkledag.NewDAGService(blockservice.New(testNode.Bs, offline.Exchange(testNode.Bs)))
 
 	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
 	require.NoError(t, err)
-
-	testNode.DAG = merkledag.NewDAGService(blockservice.New(testNode.Bs, offline.Exchange(testNode.Bs)))
 
 	testNode.Loader = makeLoader(testNode.Bs)
 	testNode.Storer = makeStorer(testNode.Bs)
