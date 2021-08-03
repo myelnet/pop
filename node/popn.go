@@ -778,18 +778,18 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				return
 			}
 
-			gasFee := filecoin.NewInt(100_000_000_000_000_000) // 0.1 FIL
-			fundsWithGasFee := filecoin.BigAdd(funds, gasFee)
-			estimatedBalanceAfterPayment := filecoin.BigSub(bal, fundsWithGasFee)
+			gasFee, err := filecoin.ParseFIL("0.1FIL")
+			if err != nil {
+				sendErr(err)
+				return
+			}
 
+			fundsWithGasFee := filecoin.BigAdd(funds, filecoin.BigInt(gasFee))
 			if bal.LessThan(fundsWithGasFee) {
 				insufficientFundsErr := fmt.Errorf("insufficient funds, at least %d attoFIL required but only %d available", fundsWithGasFee, bal)
 				sendErr(insufficientFundsErr)
 				return
 			}
-
-			fmt.Printf("==> Current Fil balance: %d attoFIL\n", bal)
-			fmt.Printf("==> Estimated Fil balance after transaction: %d attoFIL\n", estimatedBalanceAfterPayment)
 
 			results <- GetResult{
 				Size:         int64(offer.Size),

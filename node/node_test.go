@@ -32,9 +32,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
+func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...ExchangeOption) *node {
 	var err error
-
 	tn := testutil.NewTestNode(mn, t)
 
 	nd := &node{}
@@ -44,40 +43,10 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	nd.dag = tn.DAG
 	nd.host = tn.Host
 	nd.omg = NewOfferMgr()
-	opts := exchange.Options{
+
+	exchangeOpts := exchange.Options{
 		Blockstore:  nd.bs,
 		MultiStore:  nd.ms,
-		RepoPath:    t.TempDir(),
-		FilecoinAPI: filecoin.NewMockLotusAPI(),
-	}
-	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
-	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, opts)
-	require.NoError(t, err)
-
-	return nd
-}
-
-type ExchangeOption func(*exchange.Options)
-
-func WithFilecoinAPI(api *filecoin.MockLotusAPI) ExchangeOption {
-	return func(e *exchange.Options) { e.FilecoinAPI = api }
-}
-
-func WithRegions(regions []exchange.Region) ExchangeOption {
-	return func(e *exchange.Options) { e.Regions = regions }
-}
-
-func WithCapacity(newCapacity uint64) ExchangeOption {
-	return func(e *exchange.Options) { e.Capacity = newCapacity }
-}
-
-func (n *node) OverrideExchange(ctx context.Context, t testing.TB, opts ...ExchangeOption) *node {
-	var err error
-
-	// define default options
-	exchangeOpts := exchange.Options{
-		Blockstore:  n.bs,
-		MultiStore:  n.ms,
 		RepoPath:    t.TempDir(),
 		FilecoinAPI: filecoin.NewMockLotusAPI(),
 	}
@@ -95,10 +64,24 @@ func (n *node) OverrideExchange(ctx context.Context, t testing.TB, opts ...Excha
 		)
 	}
 
-	n.exch, err = exchange.New(ctx, n.host, n.ds, exchangeOpts)
+	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, exchangeOpts)
 	require.NoError(t, err)
 
-	return n
+	return nd
+}
+
+type ExchangeOption func(*exchange.Options)
+
+func WithFilecoinAPI(api *filecoin.MockLotusAPI) ExchangeOption {
+	return func(e *exchange.Options) { e.FilecoinAPI = api }
+}
+
+func WithRegions(regions []exchange.Region) ExchangeOption {
+	return func(e *exchange.Options) { e.Regions = regions }
+}
+
+func WithCapacity(newCapacity uint64) ExchangeOption {
+	return func(e *exchange.Options) { e.Capacity = newCapacity }
 }
 
 func TestPing(t *testing.T) {
@@ -288,7 +271,7 @@ func TestCommit(t *testing.T) {
 	var err error
 	ctx := context.Background()
 	mn := mocknet.New(ctx)
-	cn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithCapacity(255000))
+	cn := newTestNode(ctx, mn, t, WithCapacity(255000))
 
 	var nds []*node
 	nds = append(nds, newTestNode(ctx, mn, t))
@@ -391,12 +374,14 @@ func TestGet(t *testing.T) {
 	pn := newTestNode(ctx, mn, t)
 
 	cfapi := filecoin.NewMockLotusAPI()
-	cn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(cfapi))
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi))
 
-	from := cn.exch.Wallet().DefaultAddress()
-	to := pn.exch.Wallet().DefaultAddress()
+	balance, err := filecoin.ParseFIL("2FIL")
+	require.NoError(t, err)
 
-	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
+	cfapi.SetActorState(&filecoin.ActorState{
+		Balance: filecoin.BigInt(balance),
+	})
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -618,11 +603,11 @@ func TestPreload(t *testing.T) {
 
 	// Provider setup
 	pfapi := filecoin.NewMockLotusAPI()
-	pn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
+	pn := newTestNode(ctx, mn, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
 
 	// Client setup
 	cfapi := filecoin.NewMockLotusAPI()
-	cn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -664,7 +649,12 @@ func TestPreload(t *testing.T) {
 	var chAddr address.Address
 	var settle func()
 
-	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
+	balance, err := filecoin.ParseFIL("2FIL")
+	require.NoError(t, err)
+
+	cfapi.SetActorState(&filecoin.ActorState{
+		Balance: filecoin.BigInt(balance),
+	})
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String()})
 	require.NoError(t, err)
@@ -776,11 +766,11 @@ func TestLoadKey(t *testing.T) {
 
 	// Provider setup
 	pfapi := filecoin.NewMockLotusAPI()
-	pn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
+	pn := newTestNode(ctx, mn, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
 
 	// Client setup
 	cfapi := filecoin.NewMockLotusAPI()
-	cn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -821,7 +811,12 @@ func TestLoadKey(t *testing.T) {
 	var chAddr address.Address
 	var settle func()
 
-	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
+	balance, err := filecoin.ParseFIL("2FIL")
+	require.NoError(t, err)
+
+	cfapi.SetActorState(&filecoin.ActorState{
+		Balance: filecoin.BigInt(balance),
+	})
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "second"})
 	require.NoError(t, err)
@@ -889,11 +884,11 @@ func TestLoadAll(t *testing.T) {
 
 	// Provider setup
 	pfapi := filecoin.NewMockLotusAPI()
-	pn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
+	pn := newTestNode(ctx, mn, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
 
 	// Client setup
 	cfapi := filecoin.NewMockLotusAPI()
-	cn := newTestNode(ctx, mn, t).OverrideExchange(ctx, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -934,7 +929,12 @@ func TestLoadAll(t *testing.T) {
 	var chAddr address.Address
 	var settle func()
 
-	MockFilBalance(t, from, to, cfapi, filecoin.NewInt(2_000_000_000_000_000_000))
+	balance, err := filecoin.ParseFIL("2FIL")
+	require.NoError(t, err)
+
+	cfapi.SetActorState(&filecoin.ActorState{
+		Balance: filecoin.BigInt(balance),
+	})
 
 	results, err := cn.Load(ctx, &GetArgs{Cid: root.String(), Key: "*"})
 	require.NoError(t, err)
@@ -1089,58 +1089,4 @@ func prepChannel(t *testing.T, from, to address.Address, c, p *filecoin.MockLotu
 	}
 
 	return chAddr, collect
-}
-
-func MockFilBalance(t *testing.T, from, to address.Address, c *filecoin.MockLotusAPI, createAmt big.Int) {
-	var blockGen = blocksutil.NewBlockGenerator()
-	payerAddr := tutils.NewIDAddr(t, 102)
-	payeeAddr := tutils.NewIDAddr(t, 103)
-
-	act := &filecoin.Actor{
-		Code:    blockGen.Next().Cid(),
-		Head:    blockGen.Next().Cid(),
-		Nonce:   1,
-		Balance: createAmt,
-	}
-	c.SetActor(act)
-
-	chAddr := tutils.NewIDAddr(t, 101)
-	initActorAddr := tutils.NewIDAddr(t, 100)
-	hasher := func(data []byte) [32]byte { return [32]byte{} }
-
-	builder := mock.NewBuilder(chAddr).
-		WithBalance(createAmt, abi.NewTokenAmount(0)).
-		WithEpoch(abi.ChainEpoch(1)).
-		WithCaller(initActorAddr, builtin.InitActorCodeID).
-		WithActorType(payeeAddr, builtin.AccountActorCodeID).
-		WithActorType(payerAddr, builtin.AccountActorCodeID).
-		WithHasher(hasher)
-
-	// We need this mutex so we can read the actor state from inside goroutines
-	rt := builder.Build(t)
-	params := &paych.ConstructorParams{To: payeeAddr, From: payerAddr}
-	rt.ExpectValidateCallerType(builtin.InitActorCodeID)
-	actor := paych.Actor{}
-	rt.Call(actor.Constructor, params)
-
-	var st paych.State
-	rt.GetState(&st)
-
-	actState := filecoin.ActorState{
-		Balance: createAmt,
-		State:   st,
-	}
-	// We need to set an actor state as creating a voucher will query the state from the chain
-	// both apis are sharing the same state
-	c.SetActorState(&actState)
-	// See channel tests for note about this
-	objReader := func(c cid.Cid) []byte {
-		var bg testutil.BytesGetter
-		rt.StoreGet(c, &bg)
-		return bg.Bytes()
-	}
-	c.SetObjectReader(objReader)
-
-	c.SetAccountKey(payerAddr, from)
-	c.SetAccountKey(payeeAddr, to)
 }
