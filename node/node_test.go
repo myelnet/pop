@@ -364,7 +364,6 @@ func TestCommit(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	var err error
 	bgCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
