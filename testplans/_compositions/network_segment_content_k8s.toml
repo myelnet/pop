@@ -1,0 +1,68 @@
+[metadata]
+  name = "network_segment_content"
+
+[global]
+  plan = "testplans"
+  case = "routing_gossip"
+  total_instances = 40
+  builder = "docker:go"
+  runner = "cluster:k8s"
+
+[global.run.test_params]
+  bootstrap = "10"
+  providers = "3"
+
+[global.build_config]
+  push_registry=true
+  go_proxy_mode="remote"
+  go_proxy_url="https://proxy.golang.org"
+  registry_type="aws"
+
+[[groups]]
+  id = "bystanders_glob"
+    [groups.instances]
+    count = 4
+    [groups.run.test_params]
+    regions = '["Global"]'
+
+[[groups]]
+  id = "bystanders_as"
+    [groups.instances]
+    count = 9
+    [groups.run.test_params]
+    regions = '["Asia"]'
+
+[[groups]]
+  id = "bystanders_oc"
+    [groups.instances]
+    count = 10
+    [groups.run.test_params]
+    regions = '["Oceania"]'
+
+[[groups]]
+  id = "bystanders_us"
+    [groups.instances]
+    count = 9
+    [groups.run.test_params]
+    regions = '["NorthAmerica"]'
+
+[[groups]]
+  id = "bystanders_eur"
+    [groups.instances]
+    count = 4
+    [groups.run.test_params]
+    regions = '["Europe"]'
+
+[[groups]]
+  id = "providers"
+   [groups.instances]
+    count = 3
+  [groups.run.test_params]
+    regions = '["Europe"]'
+
+[[groups]]
+  id = "clients"
+  [groups.instances]
+    count = 1
+  [groups.run.test_params]
+    regions = '["Europe"]'
