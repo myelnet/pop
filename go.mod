@@ -3,7 +3,6 @@ module github.com/myelnet/pop
 go 1.16
 
 require (
-	github.com/AlecAivazis/survey/v2 v2.2.9
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/docker/go-units v0.4.0
 	github.com/filecoin-project/filecoin-ffi v0.30.4-0.20200910194244-f640612a1a1f
