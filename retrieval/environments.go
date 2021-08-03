@@ -101,14 +101,14 @@ type providerValidationEnvironment struct {
 
 // CheckDealParams verifies the given deal params are acceptable
 func (pve *providerValidationEnvironment) CheckDealParams(ds deal.ProviderState) error {
-	ask := pve.p.GetAsk(ds.PayloadCID)
-	if ds.PricePerByte.LessThan(ask.MinPricePerByte) {
+	offer := pve.p.offers.GetOfferForCid(ds.PayloadCID)
+	if ds.PricePerByte.LessThan(offer.MinPricePerByte) {
 		return errors.New("price per byte too low")
 	}
-	if ds.PaymentInterval > ask.MaxPaymentInterval {
+	if ds.PaymentInterval > offer.MaxPaymentInterval {
 		return errors.New("payment interval too large")
 	}
-	if ds.PaymentIntervalIncrease > ask.MaxPaymentIntervalIncrease {
+	if ds.PaymentIntervalIncrease > offer.MaxPaymentIntervalIncrease {
 		return errors.New("payment interval increase too large")
 	}
 	return nil

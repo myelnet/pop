@@ -121,6 +121,34 @@ func (m *mockStoreIDGetter) GetStoreID(c cid.Cid) (multistore.StoreID, error) {
 	return m.id, m.err
 }
 
+type mockOfferStore struct {
+	lk   sync.RWMutex
+	asks map[cid.Cid]deal.Offer
+}
+
+func (s *mockOfferStore) SetOfferForCid(k cid.Cid, ask deal.Offer) error {
+	s.lk.Lock()
+	defer s.lk.Unlock()
+
+	s.asks[k] = ask
+	return nil
+}
+
+func (s *mockOfferStore) GetOfferForCid(k cid.Cid) deal.Offer {
+	s.lk.RLock()
+	defer s.lk.RUnlock()
+
+	a, ok := s.asks[k]
+	if !ok {
+		return deal.Offer{
+			MinPricePerByte:            big.Zero(),
+			MaxPaymentInterval:         deal.DefaultPaymentInterval,
+			MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
+		}
+	}
+	return a
+}
+
 func TestRetrieval(t *testing.T) {
 
 	testCases := []struct {
@@ -223,7 +251,8 @@ func TestRetrieval(t *testing.T) {
 				chAddr:     chAddr,
 				chFunds:    &chFunds,
 			}
-			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, n1.Host.ID())
+			offers1 := &mockOfferStore{asks: make(map[cid.Cid]deal.Offer)}
+			r1, err := New(bgCtx, n1.Ms, n1.Ds, pay1, n1.Dt, offers1, n1.Host.ID())
 			require.NoError(t, err)
 
 			fname := n2.CreateRandomFile(t, testCase.filesize)
@@ -235,7 +264,8 @@ func TestRetrieval(t *testing.T) {
 			pay2 := &mockPayments{
 				chFunds: &chFunds,
 			}
-			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, n2.Host.ID())
+			offers2 := &mockOfferStore{asks: make(map[cid.Cid]deal.Offer)}
+			r2, err := New(bgCtx, n2.Ms, n2.Ds, pay2, n2.Dt, offers2, n2.Host.ID())
 			require.NoError(t, err)
 
 			clientAddr, err := address.NewIDAddress(uint64(10))
@@ -305,7 +335,7 @@ totalFunds: %s
 				ask.MinPricePerByte = big.Add(pricePerByte, abi.NewTokenAmount(int64(20)))
 			}
 			// We need to set the ask first
-			r2.Provider().SetAsk(rootCid, ask)
+			r2.Provider().offers.SetOfferForCid(rootCid, ask)
 
 			// We offset it a bit since it's usually higher with ipld encoding
 			expectedTotal := big.Mul(pricePerByte, abi.NewTokenAmount(int64(stat.Size)))

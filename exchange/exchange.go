@@ -35,6 +35,8 @@ type Exchange struct {
 	pay payments.Manager
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
+	// offers manages pricing for retrieval deals
+	offers *Offers
 	// Routing service
 	rou *GossipRouting
 	// Replication scheme
@@ -62,12 +64,13 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 
 	// register a pubsub topic for each region
 	exch := &Exchange{
-		h:    h,
-		ds:   ds,
-		opts: opts,
-		idx:  idx,
-		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
-		pay:  payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
+		h:      h,
+		ds:     ds,
+		opts:   opts,
+		idx:    idx,
+		rou:    NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+		pay:    payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
+		offers: NewOffers(opts.Regions),
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
@@ -88,6 +91,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		exch.pay,
 		opts.DataTransfer,
+		exch.offers,
 		h.ID(),
 	)
 	if err != nil {
@@ -120,7 +124,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	if err != nil || stats.Size == 0 {
 		return deal.Offer{}, fmt.Errorf("%s content unavailable: %w", e.h.ID(), err)
 	}
-	ask := deal.Offer{
+	offer := deal.Offer{
 		PayloadCID:                 q.PayloadCID,
 		Size:                       uint64(stats.Size),
 		PaymentAddress:             e.opts.Wallet.DefaultAddress(),
@@ -130,8 +134,8 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// We need to remember the offer we made so we can validate against it once
 	// clients start the retrieval
-	e.rtv.Provider().SetAsk(q.PayloadCID, ask)
-	return ask, nil
+	e.offers.SetOfferForCid(q.PayloadCID, offer)
+	return offer, nil
 }
 
 // Tx returns a new transaction. The caller must also call tx.Close to cleanup and perist the new blocks

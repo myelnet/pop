@@ -2,12 +2,13 @@ package exchange
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/libp2p/go-eventbus"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestHeyEvtPeerMgr(t *testing.T) {

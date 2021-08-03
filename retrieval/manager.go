@@ -37,6 +37,12 @@ type StoreIDGetter interface {
 	GetStoreID(cid.Cid) (multistore.StoreID, error)
 }
 
+// OfferManager organizes and stores offers for authorizing retrieval deals
+type OfferManager interface {
+	SetOfferForCid(cid.Cid, deal.Offer) error
+	GetOfferForCid(cid.Cid) deal.Offer
+}
+
 // Retrieval manager implementation
 type Retrieval struct {
 	c *Client
@@ -81,20 +87,7 @@ type Provider struct {
 	requestValidator *ProviderRequestValidator
 	revalidator      *ProviderRevalidator
 	pay              payments.Manager
-	askStore         *AskStore
-}
-
-// GetAsk returns the current deal parameters this provider accepts for a given content ID
-func (p *Provider) GetAsk(k cid.Cid) deal.Offer {
-	return p.askStore.GetAsk(k)
-}
-
-// SetAsk sets the deal parameters this provider accepts
-func (p *Provider) SetAsk(k cid.Cid, ask deal.Offer) {
-	err := p.askStore.SetAsk(k, ask)
-	if err != nil {
-		log.Error().Err(err).Msg("error setting retrieval ask")
-	}
+	offers           OfferManager
 }
 
 func (p *Provider) notifySubscribers(eventName fsm.EventName, state fsm.StateType) {
@@ -118,6 +111,7 @@ func New(
 	ds datastore.Batching,
 	pay payments.Manager,
 	dt datatransfer.Manager,
+	offers OfferManager,
 	self peer.ID,
 ) (Manager, error) {
 	var err error
@@ -146,9 +140,7 @@ func New(
 		subscribers:  pubsub.New(provider.Dispatcher),
 		dataTransfer: dt,
 		pay:          pay,
-		askStore: &AskStore{
-			asks: make(map[cid.Cid]deal.Offer),
-		},
+		offers:       offers,
 	}
 	p.stateMachines, err = fsm.New(namespace.Wrap(ds, datastore.NewKey("provider-v0")), fsm.Parameters{
 		Environment:     &providerDealEnvironment{p},
