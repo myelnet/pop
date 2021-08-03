@@ -32,7 +32,6 @@ type KeyType string
 // Only supporting secp for now since bls cannot be stored in ipfs keystore
 const (
 	KTSecp256k1 KeyType = "secp256k1"
-	KTBLS       KeyType = "bls"
 )
 
 func init() {
@@ -85,8 +84,6 @@ func (k *Key) Type() pb.KeyType {
 	switch k.KType {
 	case KTSecp256k1:
 		return pb.KeyType_Secp256k1
-	case KTBLS:
-		return pb.KeyType(4) // 4 doesnt' exist in libp2p
 	default:
 		// No unknown so we fall back to RSA as our unknown
 		return pb.KeyType_RSA
@@ -129,11 +126,6 @@ func NewKeyFromKeyInfo(ki KeyInfo) (*Key, error) {
 		if err != nil {
 			return nil, err
 		}
-	case KTBLS:
-		k.Address, err = address.NewBLSAddress(k.PublicKey)
-		if err != nil {
-			return nil, err
-		}
 	default:
 		return nil, fmt.Errorf("key type not supported")
 	}
@@ -146,8 +138,6 @@ func NewKeyFromLibp2p(pk ci.PrivKey, sigs map[KeyType]Signer) (*Key, error) {
 	switch pk.Type() {
 	case pb.KeyType_Secp256k1:
 		tp = KTSecp256k1
-	case 4:
-		tp = KTBLS
 	default:
 		return nil, fmt.Errorf("key type not supported")
 	}
@@ -207,13 +197,6 @@ type KeystoreWallet struct {
 
 // Option is an optional configuration of the wallet
 type Option func(kw *KeystoreWallet)
-
-// WithBLSSig adds a signer for the BLS key type
-func WithBLSSig(sig Signer) Option {
-	return func(kw *KeystoreWallet) {
-		kw.sigs[KTBLS] = sig
-	}
-}
 
 // WithFilAPI sets the filecoin API client
 func WithFilAPI(f fil.API) Option {
@@ -481,8 +464,6 @@ func SigTypeSig(st crypto.SigType, sigs map[KeyType]Signer) (Signer, error) {
 	switch st {
 	case crypto.SigTypeSecp256k1:
 		return KeyTypeSig(KTSecp256k1, sigs)
-	case crypto.SigTypeBLS:
-		return KeyTypeSig(KTBLS, sigs)
 	default:
 		return nil, fmt.Errorf("sig type not supported")
 	}
@@ -491,8 +472,6 @@ func SigTypeSig(st crypto.SigType, sigs map[KeyType]Signer) (Signer, error) {
 // ActSigType converts a key type to a Filecoin signature type
 func ActSigType(typ KeyType) crypto.SigType {
 	switch typ {
-	case KTBLS:
-		return crypto.SigTypeBLS
 	case KTSecp256k1:
 		return crypto.SigTypeSecp256k1
 	default:

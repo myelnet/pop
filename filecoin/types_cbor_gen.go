@@ -543,8 +543,8 @@ func (t *BlockHeader) MarshalCBOR(w io.Writer) error {
 		return xerrors.Errorf("failed to write cid field t.Messages: %w", err)
 	}
 
-	// t.BLSAggregate (crypto.Signature) (struct)
-	if err := t.BLSAggregate.MarshalCBOR(w); err != nil {
+	// t.SECAggregate (crypto.Signature) (struct)
+	if err := t.SECAggregate.MarshalCBOR(w); err != nil {
 		return err
 	}
 
@@ -793,7 +793,7 @@ func (t *BlockHeader) UnmarshalCBOR(r io.Reader) error {
 		t.Messages = c
 
 	}
-	// t.BLSAggregate (crypto.Signature) (struct)
+	// t.SECAggregate (crypto.Signature) (struct)
 
 	{
 
@@ -805,9 +805,9 @@ func (t *BlockHeader) UnmarshalCBOR(r io.Reader) error {
 			if err := br.UnreadByte(); err != nil {
 				return err
 			}
-			t.BLSAggregate = new(crypto.Signature)
-			if err := t.BLSAggregate.UnmarshalCBOR(br); err != nil {
-				return xerrors.Errorf("unmarshaling t.BLSAggregate pointer: %w", err)
+			t.SECAggregate = new(crypto.Signature)
+			if err := t.SECAggregate.UnmarshalCBOR(br); err != nil {
+				return xerrors.Errorf("unmarshaling t.SECAggregate pointer: %w", err)
 			}
 		}
 

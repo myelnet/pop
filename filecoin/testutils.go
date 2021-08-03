@@ -34,12 +34,12 @@ func testBlockHeader() *BlockHeader {
 		},
 		Parents:               []cid.Cid{c, c},
 		ParentMessageReceipts: c,
-		BLSAggregate:          &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("bls signature")},
+		SECAggregate:          &crypto.Signature{Type: crypto.SigTypeSecp256k1, Data: []byte("secp256k1 signature")},
 		ParentWeight:          NewInt(123125126212),
 		Messages:              c,
 		Height:                85919298723,
 		ParentStateRoot:       c,
-		BlockSig:              &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("block signature")},
+		BlockSig:              &crypto.Signature{Type: crypto.SigTypeSecp256k1, Data: []byte("block signature")},
 		ParentBaseFee:         NewInt(3432432843291),
 	}
 }

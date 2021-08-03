@@ -296,7 +296,7 @@ type BlockHeader struct {
 
 	Messages cid.Cid // 10
 
-	BLSAggregate *crypto.Signature // 11
+	SECAggregate *crypto.Signature // 11
 
 	Timestamp uint64 // 12
 
@@ -439,10 +439,6 @@ type SignedMessage struct {
 }
 
 func (sm *SignedMessage) ToStorageBlock() (block.Block, error) {
-	if sm.Signature.Type == crypto.SigTypeBLS {
-		return sm.Message.ToStorageBlock()
-	}
-
 	data, err := sm.Serialize()
 	if err != nil {
 		return nil, err
@@ -457,10 +453,6 @@ func (sm *SignedMessage) ToStorageBlock() (block.Block, error) {
 }
 
 func (sm *SignedMessage) Cid() cid.Cid {
-	if sm.Signature.Type == crypto.SigTypeBLS {
-		return sm.Message.Cid()
-	}
-
 	sb, err := sm.ToStorageBlock()
 	if err != nil {
 		panic(err)

@@ -50,7 +50,7 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 		RepoPath:    t.TempDir(),
 		FilecoinAPI: filecoin.NewMockLotusAPI(),
 	}
-	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
+	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI))
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, opts)
 	require.NoError(t, err)
 
@@ -259,7 +259,7 @@ func TestCommit(t *testing.T) {
 		FilecoinAPI: filecoin.NewMockLotusAPI(),
 		Capacity:    255000,
 	}
-	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
+	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI))
 
 	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, opts)
 	require.NoError(t, err)

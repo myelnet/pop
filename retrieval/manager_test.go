@@ -63,7 +63,7 @@ func (p *mockPayments) CreateVoucher(ctx context.Context, addr address.Address, 
 			Shortfall: big.Sub(amt, p.chFunds.ConfirmedAmt),
 		}, nil
 	}
-	// sig := &crypto.Signature{Type: crypto.SigTypeBLS, Data: []byte("doesn't matter")}
+
 	vouch := &paych.SignedVoucher{
 		ChannelAddr: addr,
 		TimeLockMin: abi.ChainEpoch(1),
