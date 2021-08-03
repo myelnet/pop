@@ -16,13 +16,13 @@ spec:
   etcdClusters:
   - cpuRequest: 200m
     etcdMembers:
-    - instanceGroup: master-${AWS_MASTER_REGION}
+    - instanceGroup: master-${ZONE_A}
       name: a
     memoryRequest: 100Mi
     name: main
   - cpuRequest: 100m
     etcdMembers:
-    - instanceGroup: master-${AWS_MASTER_REGION}
+    - instanceGroup: master-${ZONE_A}
       name: a
     memoryRequest: 100Mi
     name: events
@@ -44,9 +44,13 @@ spec:
   - 0.0.0.0/0
   subnets:
   - cidr: 172.20.32.0/19
-    name: ${AWS_MASTER_REGION}
+    name: ${ZONE_A}
     type: Public
-    zone: ${AWS_MASTER_REGION}
+    zone: ${ZONE_A}
+  - cidr: 172.20.64.0/19
+    name: ${ZONE_B}
+    type: Public
+    zone: ${ZONE_B}
   topology:
     dns:
       type: Public
@@ -74,17 +78,17 @@ metadata:
   creationTimestamp: null
   labels:
     kops.k8s.io/cluster: ${CLUSTER_NAME}
-  name: master-${AWS_MASTER_REGION}
+  name: master-${ZONE_A}
 spec:
   image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210503
   machineType: ${MASTER_NODE_TYPE}
   maxSize: ${MASTER_NODES}
   minSize: ${MASTER_NODES}
   nodeLabels:
-    kops.k8s.io/instancegroup: master-${AWS_MASTER_REGION}
+    kops.k8s.io/instancegroup: master-${ZONE_A}
   role: Master
   subnets:
-  - ${AWS_MASTER_REGION}
+  - ${ZONE_A}
 
 ---
 
@@ -114,4 +118,5 @@ spec:
     kops.k8s.io/instancegroup: nodes
   role: Node
   subnets:
-  - ${AWS_WORKER_REGION}
+  - ${ZONE_A}
+  - ${ZONE_B}
