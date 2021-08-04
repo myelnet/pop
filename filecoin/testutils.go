@@ -34,7 +34,7 @@ func testBlockHeader() *BlockHeader {
 		},
 		Parents:               []cid.Cid{c, c},
 		ParentMessageReceipts: c,
-		SECAggregate:          &crypto.Signature{Type: crypto.SigTypeSecp256k1, Data: []byte("secp256k1 signature")},
+		BLSAggregate:          &crypto.Signature{Type: crypto.SigTypeSecp256k1, Data: []byte("secp256k1 signature")},
 		ParentWeight:          NewInt(123125126212),
 		Messages:              c,
 		Height:                85919298723,

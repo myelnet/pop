@@ -296,7 +296,7 @@ type BlockHeader struct {
 
 	Messages cid.Cid // 10
 
-	SECAggregate *crypto.Signature // 11
+	BLSAggregate *crypto.Signature // 11
 
 	Timestamp uint64 // 12
 

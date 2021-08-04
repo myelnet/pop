@@ -32,6 +32,7 @@ type KeyType string
 // Only supporting secp for now since bls cannot be stored in ipfs keystore
 const (
 	KTSecp256k1 KeyType = "secp256k1"
+	KTBLS       KeyType = "bls"
 )
 
 func init() {
@@ -126,6 +127,8 @@ func NewKeyFromKeyInfo(ki KeyInfo) (*Key, error) {
 		if err != nil {
 			return nil, err
 		}
+	case KTBLS:
+		return nil, fmt.Errorf("bls key type not supported")
 	default:
 		return nil, fmt.Errorf("key type not supported")
 	}
