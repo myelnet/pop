@@ -51,7 +51,7 @@ The 'pop start' command starts a pop daemon service.
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
 		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "/dns4/myel.cloud/tcp/41504/p2p/12D3KooWMETXkWySAajFMqjiq8Q9xwMR8ceBrEAQFh6k8KHLAPNy", "bootstrap peer to discover others (add multiple addresses separated by commas)")
-		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "wss://infura.myel.cloud", "endpoint to reach a filecoin api")
+		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "https://infura.myel.cloud", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
@@ -108,7 +108,6 @@ Manage your Myel point of presence from the command line.
 -----------------------------------------------------------
 `)
 
-	// init returns whether we're creating a repo for the first time
 	path, err := setupRepo()
 	if err != nil {
 		return err
