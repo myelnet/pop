@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
@@ -51,15 +50,15 @@ The 'pop start' command starts a pop daemon service.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
-		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "", "bootstrap peer to discover others (add multiple addresses separated by commas)")
+		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "/dns4/myel.cloud/tcp/41504/p2p/12D3KooWMETXkWySAajFMqjiq8Q9xwMR8ceBrEAQFh6k8KHLAPNy", "bootstrap peer to discover others (add multiple addresses separated by commas)")
 		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "wss://infura.myel.cloud", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
-		fs.StringVar(&startArgs.Capacity, "capacity", "", "storage space allocated for the node")
+		fs.StringVar(&startArgs.Capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
-		fs.IntVar(&startArgs.MaxPPB, "maxppb", 0, "max price per byte")
+		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
 		return fs
 	})(),
@@ -110,7 +109,7 @@ Manage your Myel point of presence from the command line.
 `)
 
 	// init returns whether we're creating a repo for the first time
-	path, init, err := setupRepo()
+	path, err := setupRepo()
 	if err != nil {
 		return err
 	}
@@ -118,7 +117,7 @@ Manage your Myel point of presence from the command line.
 		defer os.RemoveAll(path)
 	}
 
-	privKey := setupWallet(init)
+	privKey := setupWallet()
 
 	regions := setupRegions()
 
@@ -159,8 +158,6 @@ Manage your Myel point of presence from the command line.
 			mapDuplicates[addr] = struct{}{}
 			bAddrs = append(bAddrs, addr)
 		}
-
-		// bAddrs = append(bAddrs, "/ip4/3.129.144.139/tcp/41505/p2p/12D3KooWLJp52qe5Fa2ND3nsWocdnRhi7ERo2SzkApE1q8jUg2Xy")
 	}
 
 	var capacity uint64
@@ -192,75 +189,36 @@ Manage your Myel point of presence from the command line.
 }
 
 // setupRepo will persist our initial configurations so we can remember them when we need to restart the node
-func setupRepo() (string, bool, error) {
+// it will create a temporary repo if the flag is passed or a new repo if none exist yet.
+func setupRepo() (string, error) {
 	var err error
 	path, err := utils.FullPath(utils.RepoPath())
 	if err != nil {
-		return path, false, err
+		return path, err
 	}
 
 	exists, err := utils.RepoExists(path)
 	if err != nil {
-		return path, false, err
+		return path, err
 	}
 
 	if startArgs.temp {
 		path, err = os.MkdirTemp("", ".pop")
 		if err != nil {
-			return path, false, err
+			return path, err
 		}
 		fmt.Printf("==> Created temporary repo\n")
-		return path, !exists, nil
+		return path, nil
 	}
 
 	if exists {
-		return path, false, nil
+		return path, nil
 	}
-
-	// These prompts are only executed when starting the node for the first time
-	// and creating a new repo. Once done, the configs will be persisted into a JSON config file.
-	var qs []*survey.Question
-	if startArgs.Bootstrap == "" {
-		qs = append(qs, &survey.Question{
-			Name: "bootstrap",
-			Prompt: &survey.Multiline{
-				Message: "Bootstrap peers",
-				Default: "/dns4/bootstrap.myel.cloud/tcp/4001/ipfs/12D3KooWML7NMZudk8H4v1AptitsTZdDqLKgEzoAdLUwuKPqkLyy",
-			},
-		})
-	}
-	if startArgs.MaxPPB == 0 {
-		qs = append(qs, &survey.Question{
-			Name: "maxppb",
-			Prompt: &survey.Input{
-				Message: "Max price per byte in attoFIL",
-				Default: "5",
-			},
-		})
-	}
-	if startArgs.Capacity == "" {
-		qs = append(qs, &survey.Question{
-			Name: "Capacity",
-			Prompt: &survey.Input{
-				Message: "Storage capacity",
-				Default: "10GB",
-			},
-		})
-	}
-
-	if len(qs) > 0 {
-		if err := survey.Ask(qs, &startArgs); err != nil {
-			return path, false, err
-		}
-	}
-
-	// replace line breaks by commas, to be splitted later as slice of addresses
-	startArgs.Bootstrap = strings.ReplaceAll(startArgs.Bootstrap, "\n", ",")
 
 	// Make our root repo dir and datastore dir
 	err = os.MkdirAll(filepath.Join(path, "datastore"), 0755)
 	if err != nil {
-		return path, false, err
+		return path, err
 	}
 	// default configs
 	// Regions aren't set in a static config object as we aim to make them
@@ -269,45 +227,26 @@ func setupRepo() (string, bool, error) {
 	e := json.NewEncoder(buf)
 	e.SetIndent("", "    ")
 	if err := e.Encode(startArgs); err != nil {
-		return path, false, err
+		return path, err
 	}
 	c, err := os.Create(filepath.Join(path, "PopConfig.json"))
 	if err != nil {
-		return path, false, err
+		return path, err
 	}
 	_, err = c.Write(buf.Bytes())
 	if err != nil {
-		return path, false, err
+		return path, err
 	}
 	if err := c.Close(); err != nil {
-		return path, false, err
+		return path, err
 	}
 	fmt.Printf("==> Initialized pop repo in %s\n", path)
 
-	return path, true, nil
+	return path, nil
 }
 
 // setupWallet prompts user to import a key or generate a new one
-func setupWallet(init bool) string {
-	// If we're not initializing the repo we don't prompt for key
-	if startArgs.privKeyPath == "" && init {
-		var a int
-		prompt := &survey.Select{
-			Message: "Setup wallet",
-			Options: []string{
-				"Generate a default address",
-				"Import a new address",
-			},
-		}
-		survey.AskOne(prompt, &a)
-		if a == 1 {
-			prompt := &survey.Input{
-				Message: "Path to hex encoded key file",
-			}
-			survey.AskOne(prompt, &startArgs.privKeyPath)
-		}
-	}
-
+func setupWallet() string {
 	var privKey string
 	if startArgs.privKeyPath != "" {
 		fdata, err := os.ReadFile(startArgs.privKeyPath)
@@ -324,25 +263,6 @@ func setupWallet(init bool) string {
 // setupRegions formats the regions to join from cli flag or user prompt
 func setupRegions() []string {
 	var regions []string
-	if startArgs.regions == "" {
-		prompt := &survey.MultiSelect{
-			Message: "Choose regions to join",
-			Options: []string{
-				"Asia",
-				"Africa",
-				"SouthAmerica",
-				"NorthAmerica",
-				"Europe",
-				"Oceania",
-				"Global",
-			},
-			Help: `
-Region impact which providers server your content or which clients retrieve from your pop.
-The global region allows free transfers while specific regions offer better performance.
-`,
-		}
-		survey.AskOne(prompt, &regions, survey.WithValidator(survey.Required))
-	}
 	if startArgs.regions != "" {
 		regions = strings.Split(startArgs.regions, ",")
 	}
