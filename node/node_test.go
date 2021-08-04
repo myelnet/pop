@@ -60,7 +60,6 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...
 		exchangeOpts.Wallet = wallet.NewFromKeystore(
 			keystore.NewMemKeystore(),
 			wallet.WithFilAPI(exchangeOpts.FilecoinAPI),
-			wallet.WithBLSSig(bls{}),
 		)
 	}
 
