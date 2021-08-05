@@ -8,9 +8,8 @@ import (
 	"sort"
 
 	address "github.com/filecoin-project/go-address"
-	piecestore "github.com/filecoin-project/go-fil-markets/piecestore"
 	multistore "github.com/filecoin-project/go-multistore"
-	paych "github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
+	paych "github.com/filecoin-project/specs-actors/actors/builtin/paych"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	cbg "github.com/whyrusleeping/cbor-gen"
@@ -1969,7 +1968,7 @@ func (t *ProviderState) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{171}); err != nil {
+	if _, err := w.Write([]byte{170}); err != nil {
 		return err
 	}
 
@@ -2020,22 +2019,6 @@ func (t *ProviderState) MarshalCBOR(w io.Writer) error {
 	}
 
 	if err := t.ChannelID.MarshalCBOR(w); err != nil {
-		return err
-	}
-
-	// t.PieceInfo (piecestore.PieceInfo) (struct)
-	if len("PieceInfo") > cbg.MaxLength {
-		return xerrors.Errorf("Value in field \"PieceInfo\" was too long")
-	}
-
-	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len("PieceInfo"))); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(w, string("PieceInfo")); err != nil {
-		return err
-	}
-
-	if err := t.PieceInfo.MarshalCBOR(w); err != nil {
 		return err
 	}
 
@@ -2232,26 +2215,6 @@ func (t *ProviderState) UnmarshalCBOR(r io.Reader) error {
 
 				if err := t.ChannelID.UnmarshalCBOR(br); err != nil {
 					return xerrors.Errorf("unmarshaling t.ChannelID: %w", err)
-				}
-
-			}
-			// t.PieceInfo (piecestore.PieceInfo) (struct)
-		case "PieceInfo":
-
-			{
-
-				b, err := br.ReadByte()
-				if err != nil {
-					return err
-				}
-				if b != cbg.CborNull[0] {
-					if err := br.UnreadByte(); err != nil {
-						return err
-					}
-					t.PieceInfo = new(piecestore.PieceInfo)
-					if err := t.PieceInfo.UnmarshalCBOR(br); err != nil {
-						return xerrors.Errorf("unmarshaling t.PieceInfo pointer: %w", err)
-					}
 				}
 
 			}
