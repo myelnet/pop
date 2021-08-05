@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-statemachine/fsm"
 	fsmtest "github.com/filecoin-project/go-statemachine/fsm/testutil"
-	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/stretchr/testify/require"
 
 	"github.com/myelnet/pop/payments"
@@ -41,7 +42,7 @@ type mockClientEnvironment struct {
 }
 
 func (e *mockClientEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *deal.Proposal) (datatransfer.ChannelID, error) {
-	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to}, e.OpenDataTransferError
+	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to, Initiator: GeneratePeers(1)[0]}, e.OpenDataTransferError
 }
 
 func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *deal.Payment) error {
@@ -98,4 +99,17 @@ func makeClientDealState(status deal.Status) *deal.ClientState {
 			Params: params,
 		},
 	}
+}
+
+var peerSeq int
+
+// GeneratePeers creates n peer ids.
+func GeneratePeers(n int) []peer.ID {
+	peerIds := make([]peer.ID, 0, n)
+	for i := 0; i < n; i++ {
+		peerSeq++
+		p := peer.ID(fmt.Sprint(peerSeq))
+		peerIds = append(peerIds, p)
+	}
+	return peerIds
 }
