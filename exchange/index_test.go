@@ -13,6 +13,7 @@ import (
 	dss "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-graphsync/ipldutil"
 	"github.com/ipfs/go-graphsync/storeutil"
+	gstestutil "github.com/ipfs/go-graphsync/testutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	"github.com/ipld/go-ipld-prime"
@@ -658,12 +659,12 @@ func TestCleanBlockStore(t *testing.T) {
 	idx, err := NewIndex(ds, bs)
 	require.NoError(t, err)
 
-	// generate random block1
+	// generate random block1 (codec: dagcbor)
 	blk1 := testutil.CreateRandomBlock(t, idx.Bstore())
 	require.NoError(t, idx.Bstore().Put(blk1))
 
-	// generate random block2
-	blk2 := testutil.CreateRandomBlock(t, idx.Bstore())
+	// generate random block2 (codec: raw)
+	blk2 := gstestutil.GenerateBlocksOfSize(1, 10000)[0]
 	require.NoError(t, idx.Bstore().Put(blk2))
 
 	// set blk1-ref1 in index
