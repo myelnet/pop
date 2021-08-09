@@ -442,7 +442,6 @@ func (sm *SignedMessage) ToStorageBlock() (block.Block, error) {
 	if sm.Signature.Type == crypto.SigTypeBLS {
 		return sm.Message.ToStorageBlock()
 	}
-
 	data, err := sm.Serialize()
 	if err != nil {
 		return nil, err
@@ -460,7 +459,6 @@ func (sm *SignedMessage) Cid() cid.Cid {
 	if sm.Signature.Type == crypto.SigTypeBLS {
 		return sm.Message.Cid()
 	}
-
 	sb, err := sm.ToStorageBlock()
 	if err != nil {
 		panic(err)

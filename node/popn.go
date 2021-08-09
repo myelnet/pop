@@ -233,7 +233,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	eopts.Wallet = wallet.NewFromKeystore(
 		ks,
 		wallet.WithFilAPI(eopts.FilecoinAPI),
-		wallet.WithBLSSig(bls{}),
 	)
 
 	var addr address.Address

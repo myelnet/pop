@@ -13,6 +13,4 @@ else
     rm -rf "$key_file"
 fi
 
-cp /install-filcrypto-distro ./extern/filecoin-ffi/install-filcrypto 
-
 goreleaser "$@"

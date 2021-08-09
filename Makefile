@@ -1,23 +1,8 @@
-all: build install
+all: install
 
-FFI_PATH:=./extern/filecoin-ffi/
-FFI_DEPS:=.install-filcrypto
-FFI_DEPS:=$(addprefix $(FFI_PATH),$(FFI_DEPS))
 GO_BUILDER_VERSION=v1.16.3
 
 ldflags=-X=github.com/myelnet/pop/build.Version=$(shell cat ./build/VERSION.txt)-$(shell git describe --always --match=NeVeRmAtCh --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
-
-$(FFI_DEPS): .filecoin-build ;
-
-.filecoin-build: $(FFI_PATH)
-	$(MAKE) -C $(FFI_PATH) $(FFI_DEPS:$(FFI_PATH)%=%)
-	@touch $@
-
-.update-modules:
-	git submodule update --init --recursive
-	@touch $@
-
-build: .update-modules .filecoin-build
 
 install:
 	rm -f pop

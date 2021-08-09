@@ -130,10 +130,7 @@ func NewKeyFromKeyInfo(ki KeyInfo) (*Key, error) {
 			return nil, err
 		}
 	case KTBLS:
-		k.Address, err = address.NewBLSAddress(k.PublicKey)
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("bls key type not supported")
 	default:
 		return nil, fmt.Errorf("key type not supported")
 	}
@@ -207,13 +204,6 @@ type KeystoreWallet struct {
 
 // Option is an optional configuration of the wallet
 type Option func(kw *KeystoreWallet)
-
-// WithBLSSig adds a signer for the BLS key type
-func WithBLSSig(sig Signer) Option {
-	return func(kw *KeystoreWallet) {
-		kw.sigs[KTBLS] = sig
-	}
-}
 
 // WithFilAPI sets the filecoin API client
 func WithFilAPI(f fil.API) Option {

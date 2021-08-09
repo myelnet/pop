@@ -60,7 +60,6 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...
 		exchangeOpts.Wallet = wallet.NewFromKeystore(
 			keystore.NewMemKeystore(),
 			wallet.WithFilAPI(exchangeOpts.FilecoinAPI),
-			wallet.WithBLSSig(bls{}),
 		)
 	}
 
@@ -566,19 +565,35 @@ func TestMultipleGet(t *testing.T) {
 	})
 }
 
-//todo TesExportKey
-func TestImportKey(t *testing.T) {
+func TestImportExportKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	mn := mocknet.New(ctx)
 	n := newTestNode(ctx, mn, t)
 
-	h := "7b2254797065223a22626c73222c22507269766174654b6579223a226a6b55704e6a53493749664a4632434f6f505169344f79477a475241532b766b616c314e5a616f7a3853633d227d"
+	// Import private key
+	h := "7b2254797065223a22736563703235366b31222c22507269766174654b6579223a22514d736f78494d72626235353534376e2b6d44646a524644417334386c7038497031306267696b513436553d227d"
 	err := n.importPrivateKey(ctx, h)
 	require.NoError(t, err)
 
-	expected, _ := address.NewFromString("f3w2ll4guubkslpmxseiqhtemwtmxdnhnshogd25gfrbhe6dso6kly2aj756wmcx2gq4jehn6x2z3ji4zlzioq")
+	expected, _ := address.NewFromString("f1m75ifn664mo4hlp6hs2y4ouoetvhc4h3eh5rmhi")
 	require.Equal(t, expected, n.exch.Wallet().DefaultAddress())
+
+	// Export private key
+	keyPath := t.TempDir() + "/key.txt"
+	defaultAddress := n.exch.Wallet().DefaultAddress().String()
+
+	err = n.exportPrivateKey(ctx, defaultAddress, keyPath)
+	require.NoError(t, err)
+
+	f, err := os.Open(keyPath)
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(f)
+	require.NoError(t, err)
+
+	// Assert that imported & exported keys are the same
+	require.EqualValues(t, h, string(data))
 }
 
 // Preload is a full integration test for gradually retrieving a DAG paid with a single
