@@ -32,9 +32,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
+func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...ExchangeOption) *node {
 	var err error
-
 	tn := testutil.NewTestNode(mn, t)
 
 	nd := &node{}
@@ -44,17 +43,45 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T) *node {
 	nd.dag = tn.DAG
 	nd.host = tn.Host
 	nd.omg = NewOfferMgr()
-	opts := exchange.Options{
+
+	exchangeOpts := exchange.Options{
 		Blockstore:  nd.bs,
 		MultiStore:  nd.ms,
 		RepoPath:    t.TempDir(),
 		FilecoinAPI: filecoin.NewMockLotusAPI(),
 	}
-	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
-	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, opts)
+
+	// override options
+	for _, o := range opts {
+		o(&exchangeOpts)
+	}
+
+	if exchangeOpts.Wallet == nil {
+		exchangeOpts.Wallet = wallet.NewFromKeystore(
+			keystore.NewMemKeystore(),
+			wallet.WithFilAPI(exchangeOpts.FilecoinAPI),
+			wallet.WithBLSSig(bls{}),
+		)
+	}
+
+	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, exchangeOpts)
 	require.NoError(t, err)
 
 	return nd
+}
+
+type ExchangeOption func(*exchange.Options)
+
+func WithFilecoinAPI(api *filecoin.MockLotusAPI) ExchangeOption {
+	return func(e *exchange.Options) { e.FilecoinAPI = api }
+}
+
+func WithRegions(regions []exchange.Region) ExchangeOption {
+	return func(e *exchange.Options) { e.Regions = regions }
+}
+
+func WithCapacity(newCapacity uint64) ExchangeOption {
+	return func(e *exchange.Options) { e.Capacity = newCapacity }
 }
 
 func TestPing(t *testing.T) {
@@ -244,25 +271,7 @@ func TestCommit(t *testing.T) {
 	var err error
 	ctx := context.Background()
 	mn := mocknet.New(ctx)
-	tn := testutil.NewTestNode(mn, t)
-
-	cn := &node{}
-	cn.ds = tn.Ds
-	cn.bs = tn.Bs
-	cn.ms = tn.Ms
-	cn.dag = tn.DAG
-	cn.host = tn.Host
-	opts := exchange.Options{
-		Blockstore:  cn.bs,
-		MultiStore:  cn.ms,
-		RepoPath:    t.TempDir(),
-		FilecoinAPI: filecoin.NewMockLotusAPI(),
-		Capacity:    255000,
-	}
-	opts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(opts.FilecoinAPI), wallet.WithBLSSig(bls{}))
-
-	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, opts)
-	require.NoError(t, err)
+	cn := newTestNode(ctx, mn, t, WithCapacity(255000))
 
 	var nds []*node
 	nds = append(nds, newTestNode(ctx, mn, t))
@@ -413,7 +422,7 @@ func TestGet(t *testing.T) {
 	// We should be able to request again this time from local storage
 	got := make(chan GetResult, 1)
 	cn.notify = func(n Notify) {
-		require.Equal(t, n.GetResult.Err, "")
+		require.Equal(t, "", n.GetResult.Err)
 		got <- *n.GetResult
 	}
 	out := filepath.Join(dir, "dataout")
@@ -578,50 +587,17 @@ func TestPreload(t *testing.T) {
 	var err error
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	mn := mocknet.New(ctx)
 
+	mn := mocknet.New(ctx)
 	region := exchange.Regions["Europe"]
 
 	// Provider setup
-	tn1 := testutil.NewTestNode(mn, t)
-	pn := &node{}
-	pn.ds = tn1.Ds
-	pn.bs = tn1.Bs
-	pn.ms = tn1.Ms
-	pn.dag = tn1.DAG
-	pn.host = tn1.Host
 	pfapi := filecoin.NewMockLotusAPI()
-	popts := exchange.Options{
-		Blockstore:  pn.bs,
-		MultiStore:  pn.ms,
-		RepoPath:    t.TempDir(),
-		Regions:     []exchange.Region{region},
-		FilecoinAPI: pfapi,
-	}
-	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
-	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
-	require.NoError(t, err)
+	pn := newTestNode(ctx, mn, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
 
 	// Client setup
-	tn2 := testutil.NewTestNode(mn, t)
-	cn := &node{}
-	cn.ds = tn2.Ds
-	cn.bs = tn2.Bs
-	cn.ms = tn2.Ms
-	cn.dag = tn2.DAG
-	cn.host = tn2.Host
-	cn.omg = NewOfferMgr()
 	cfapi := filecoin.NewMockLotusAPI()
-	copts := exchange.Options{
-		Blockstore:  cn.bs,
-		MultiStore:  cn.ms,
-		RepoPath:    t.TempDir(),
-		Regions:     []exchange.Region{region},
-		FilecoinAPI: cfapi,
-	}
-	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
-	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
-	require.NoError(t, err)
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -772,45 +748,12 @@ func TestLoadKey(t *testing.T) {
 	region := exchange.Regions["Europe"]
 
 	// Provider setup
-	tn1 := testutil.NewTestNode(mn, t)
-	pn := &node{}
-	pn.ds = tn1.Ds
-	pn.bs = tn1.Bs
-	pn.ms = tn1.Ms
-	pn.dag = tn1.DAG
-	pn.host = tn1.Host
 	pfapi := filecoin.NewMockLotusAPI()
-	popts := exchange.Options{
-		Blockstore:  pn.bs,
-		MultiStore:  pn.ms,
-		RepoPath:    t.TempDir(),
-		Regions:     []exchange.Region{region},
-		FilecoinAPI: pfapi,
-	}
-	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
-	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
-	require.NoError(t, err)
+	pn := newTestNode(ctx, mn, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
 
 	// Client setup
-	tn2 := testutil.NewTestNode(mn, t)
-	cn := &node{}
-	cn.ds = tn2.Ds
-	cn.bs = tn2.Bs
-	cn.ms = tn2.Ms
-	cn.dag = tn2.DAG
-	cn.host = tn2.Host
-	cn.omg = NewOfferMgr()
 	cfapi := filecoin.NewMockLotusAPI()
-	copts := exchange.Options{
-		Blockstore:  cn.bs,
-		MultiStore:  cn.ms,
-		RepoPath:    t.TempDir(),
-		Regions:     []exchange.Region{region},
-		FilecoinAPI: cfapi,
-	}
-	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
-	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
-	require.NoError(t, err)
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
@@ -916,45 +859,12 @@ func TestLoadAll(t *testing.T) {
 	region := exchange.Regions["Europe"]
 
 	// Provider setup
-	tn1 := testutil.NewTestNode(mn, t)
-	pn := &node{}
-	pn.ds = tn1.Ds
-	pn.bs = tn1.Bs
-	pn.ms = tn1.Ms
-	pn.dag = tn1.DAG
-	pn.host = tn1.Host
 	pfapi := filecoin.NewMockLotusAPI()
-	popts := exchange.Options{
-		Blockstore:  pn.bs,
-		MultiStore:  pn.ms,
-		RepoPath:    t.TempDir(),
-		Regions:     []exchange.Region{region},
-		FilecoinAPI: pfapi,
-	}
-	popts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(popts.FilecoinAPI))
-	pn.exch, err = exchange.New(ctx, pn.host, pn.ds, popts)
-	require.NoError(t, err)
+	pn := newTestNode(ctx, mn, t, WithFilecoinAPI(pfapi), WithRegions([]exchange.Region{region}))
 
 	// Client setup
-	tn2 := testutil.NewTestNode(mn, t)
-	cn := &node{}
-	cn.ds = tn2.Ds
-	cn.bs = tn2.Bs
-	cn.ms = tn2.Ms
-	cn.dag = tn2.DAG
-	cn.host = tn2.Host
-	cn.omg = NewOfferMgr()
 	cfapi := filecoin.NewMockLotusAPI()
-	copts := exchange.Options{
-		Blockstore:  cn.bs,
-		MultiStore:  cn.ms,
-		RepoPath:    t.TempDir(),
-		Regions:     []exchange.Region{region},
-		FilecoinAPI: cfapi,
-	}
-	copts.Wallet = wallet.NewFromKeystore(keystore.NewMemKeystore(), wallet.WithFilAPI(copts.FilecoinAPI))
-	cn.exch, err = exchange.New(ctx, cn.host, cn.ds, copts)
-	require.NoError(t, err)
+	cn := newTestNode(ctx, mn, t, WithFilecoinAPI(cfapi), WithRegions([]exchange.Region{region}))
 
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
