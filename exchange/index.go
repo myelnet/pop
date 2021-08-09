@@ -534,7 +534,8 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 	cidSet := cid.NewSet()
 
 	err := utils.WalkDAG(ctx, idx.rootCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
-		cidSet.Add(blk.Cid())
+		key := cid.NewCidV1(cid.Raw, blk.Cid().Hash())
+		cidSet.Add(key)
 		return nil
 	})
 	if err != nil {
@@ -546,8 +547,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 		return err
 	}
 	for k := range kc {
-		key := cid.NewCidV1(cid.DagCBOR, k.Hash())
-		if cidSet.Has(key) {
+		if cidSet.Has(k) {
 			continue
 		}
 		err = idx.Bstore().DeleteBlock(k)
