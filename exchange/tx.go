@@ -293,18 +293,18 @@ func (tx *Tx) buildRoot() error {
 
 // Ref returns the DataRef associated with this transaction
 func (tx *Tx) Ref() *DataRef {
-	var keys [][]byte
+	keys := map[string]struct{}{}
 
 	if len(tx.entries) > 0 {
 		for k := range tx.entries {
-			keys = append(keys, []byte(k))
+			keys[k] = struct{}{}
 		}
 	} else {
 		kl, err := utils.MapLoadableKeys(context.TODO(), tx.root, tx.Store().Loader)
 		if err != nil {
 			tx.Err = err
 		} else {
-			keys = kl.AsBytes()
+			keys = kl.AsMap()
 		}
 	}
 

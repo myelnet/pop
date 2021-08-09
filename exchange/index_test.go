@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -275,7 +276,7 @@ func TestIndexUpdateRef(t *testing.T) {
 	ref := &DataRef{
 		PayloadCID:  c,
 		PayloadSize: 256000,
-		Keys:        [][]byte{[]byte("data1")},
+		Keys:        map[string]struct{}{"data1": {}},
 	}
 	require.NoError(t, idx.SetRef(ref))
 
@@ -283,7 +284,7 @@ func TestIndexUpdateRef(t *testing.T) {
 	ref2 := &DataRef{
 		PayloadCID:  c,
 		PayloadSize: 256000,
-		Keys:        [][]byte{[]byte("data2")},
+		Keys:        map[string]struct{}{"data2": {}},
 	}
 	// must fail because a ref with the same cid already exists
 	require.Error(t, ErrRefAlreadyExists, idx.SetRef(ref2))
@@ -300,8 +301,11 @@ func TestIndexUpdateRef(t *testing.T) {
 
 	// we should have the 2 keys data1 & data2
 	require.Equal(t, 2, len(ref.Keys))
-	require.Equal(t, "data1", string(ref.Keys[0]))
-	require.Equal(t, "data2", string(ref.Keys[1]))
+
+	_, exists := ref.Keys["data1"]
+	require.Equal(t, true, exists)
+	_, exists = ref.Keys["data2"]
+	require.Equal(t, true, exists)
 }
 
 func TestIndexListRefs(t *testing.T) {
@@ -717,4 +721,22 @@ func TestCleanBlockStore(t *testing.T) {
 	// check we didn't remove index blocks
 	idx, err = NewIndex(ds, bs)
 	require.NoError(t, err)
+}
+
+func TestDataRefMarshaling(t *testing.T) {
+	ref := &DataRef{
+		PayloadCID:  blockGen.Next().Cid(),
+		PayloadSize: 100,
+		Keys:        map[string]struct{}{"hello": {}, "world": {}},
+	}
+
+	buf := new(bytes.Buffer)
+	err := ref.MarshalCBOR(buf)
+	require.NoError(t, err)
+
+	newRef := &DataRef{}
+	err = newRef.UnmarshalCBOR(buf)
+	require.NoError(t, err)
+
+	require.Equal(t, true, reflect.DeepEqual(ref, newRef))
 }

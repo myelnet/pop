@@ -113,11 +113,11 @@ func WalkDAG(
 // KeyList is a list of strings representing all the keys in an IPLD Map
 type KeyList []string
 
-// AsBytes returns all the keys as byte slices
-func (kl KeyList) AsBytes() [][]byte {
-	out := make([][]byte, len(kl))
-	for i, k := range kl {
-		out[i] = []byte(k)
+// AsMap returns all the keys as byte slices
+func (kl KeyList) AsMap() map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, k := range kl {
+		out[k] = struct{}{}
 	}
 	return out
 }

@@ -414,7 +414,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 				ref := &DataRef{
 					PayloadCID:  req.PayloadCID,
 					PayloadSize: int64(req.Size),
-					Keys:        keys.AsBytes(),
+					Keys:        keys.AsMap(),
 				}
 
 				err = r.idx.SetRef(ref)

@@ -195,7 +195,7 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 		return e.idx.SetRef(&DataRef{
 			PayloadCID:  root,
 			PayloadSize: int64(res.Size),
-			Keys:        keys.AsBytes(),
+			Keys:        keys.AsMap(),
 		})
 
 	case <-ctx.Done():

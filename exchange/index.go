@@ -74,7 +74,7 @@ type Index struct {
 type DataRef struct {
 	PayloadCID  cid.Cid
 	PayloadSize int64
-	Keys        [][]byte
+	Keys        map[string]struct{}
 	Freq        int64
 	BucketID    int64
 	// do not serialize
@@ -82,12 +82,8 @@ type DataRef struct {
 }
 
 func (d DataRef) Has(key string) bool {
-	for _, elt := range d.Keys {
-		if bytes.Compare(elt, []byte(key)) == 0 {
-			return true
-		}
-	}
-	return false
+	_, exists := d.Keys[key]
+	return exists
 }
 
 // IndexOption customizes the behavior of the index
@@ -264,27 +260,21 @@ func (idx *Index) DropRef(k cid.Cid) error {
 }
 
 // UpdateRef updates a ref in the index
-func (idx *Index) UpdateRef(ref *DataRef) error {
-	k := ref.PayloadCID.String()
+func (idx *Index) UpdateRef(newRef *DataRef) error {
+	k := newRef.PayloadCID.String()
 
 	curef, exists := idx.Refs[k]
 	if !exists {
 		return ErrRefNotFound
 	}
 
-	// If the ref is already there we merge the keys without duplicating them
-	seen := make(map[string]bool, len(curef.Keys))
-	for _, k := range curef.Keys {
-		seen[string(k)] = true
-	}
-
-	for _, k := range ref.Keys {
-		if !seen[string(k)] {
-			curef.Keys = append(curef.Keys, k)
+	for k := range newRef.Keys {
+		if !curef.Has(k) {
+			curef.Keys[k] = struct{}{}
 		}
 	}
 
-	if err := idx.root.Set(context.TODO(), k, ref); err != nil {
+	if err := idx.root.Set(context.TODO(), k, newRef); err != nil {
 		return err
 	}
 
