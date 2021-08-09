@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -42,7 +41,7 @@ type mockClientEnvironment struct {
 }
 
 func (e *mockClientEnvironment) OpenDataTransfer(ctx context.Context, to peer.ID, proposal *deal.Proposal) (datatransfer.ChannelID, error) {
-	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to, Initiator: GeneratePeers(1)[0]}, e.OpenDataTransferError
+	return datatransfer.ChannelID{ID: datatransfer.TransferID(rand.Uint64()), Responder: to, Initiator: peer.ID("1")}, e.OpenDataTransferError
 }
 
 func (e *mockClientEnvironment) SendDataTransferVoucher(_ context.Context, _ datatransfer.ChannelID, _ *deal.Payment) error {
@@ -99,17 +98,4 @@ func makeClientDealState(status deal.Status) *deal.ClientState {
 			Params: params,
 		},
 	}
-}
-
-var peerSeq int
-
-// GeneratePeers creates n peer ids.
-func GeneratePeers(n int) []peer.ID {
-	peerIds := make([]peer.ID, 0, n)
-	for i := 0; i < n; i++ {
-		peerSeq++
-		p := peer.ID(fmt.Sprint(peerSeq))
-		peerIds = append(peerIds, p)
-	}
-	return peerIds
 }

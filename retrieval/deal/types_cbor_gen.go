@@ -9,7 +9,7 @@ import (
 
 	address "github.com/filecoin-project/go-address"
 	multistore "github.com/filecoin-project/go-multistore"
-	paych "github.com/filecoin-project/specs-actors/actors/builtin/paych"
+	paych "github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	cbg "github.com/whyrusleeping/cbor-gen"
