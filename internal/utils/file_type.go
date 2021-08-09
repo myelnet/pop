@@ -11,30 +11,30 @@ import (
 type FileType int
 
 const (
-	Unknown FileType = iota
-	Application
-	Audio
-	Video
-	Image
-	Chemical
-	Font
-	Message
-	Model
-	Text
-	Archive
+	FTUnknown FileType = iota
+	FTApplication
+	FTAudio
+	FTVideo
+	FTImage
+	FTChemical
+	FTFont
+	FTMessage
+	FTModel
+	FTText
+	FTArchive
 )
 
 var MimeTypes = map[string]FileType{
-	"application": Application,
-	"archive":     Archive,
-	"audio":       Audio,
-	"video":       Video,
-	"image":       Image,
-	"text":        Text,
-	"chemical":    Chemical,
-	"font":        Font,
-	"message":     Message,
-	"model":       Model,
+	"application": FTApplication,
+	"archive":     FTArchive,
+	"audio":       FTAudio,
+	"video":       FTVideo,
+	"image":       FTImage,
+	"text":        FTText,
+	"chemical":    FTChemical,
+	"font":        FTFont,
+	"message":     FTMessage,
+	"model":       FTModel,
 }
 
 // DetectFileType detects the FileType of a file using it's extension.
@@ -56,7 +56,7 @@ func DetectFileType(path string, buf io.ReadSeeker) FileType {
 
 		mtype, err = mimetype.DetectReader(buf)
 		if err != nil || mtype.Extension() == "" {
-			return Unknown
+			return FTUnknown
 		}
 	}
 
@@ -65,36 +65,36 @@ func DetectFileType(path string, buf io.ReadSeeker) FileType {
 	return fileTypeByExtension(ext)
 }
 
-// fileTypeByExtension matches an extension with its FileType, i.e : fileTypeByExtension("file.mp3") returns Audio
+// fileTypeByExtension matches an extension with its FileType, i.e : fileTypeByExtension("file.mp3") returns FTAudio
 func fileTypeByExtension(ext string) FileType {
 	// Since some Archive types are not always found by filepath.Ext(), like ".gz"
 	// And because archive types are considered as an Application mimetype,
 	// we bypass the process and compare the extension with a hardcoded "archive" map
 	_, ok := archive[ext]
 	if ok {
-		return Archive
+		return FTArchive
 	}
 
 	// get full mime from extension: ".mp3" -> "audio/mpeg"
 	fullMime := mime.TypeByExtension(ext)
 	if fullMime == "" {
-		return Unknown
+		return FTUnknown
 	}
 
 	// extract mimetype: "audio/mpeg" -> "audio"
 	mimes := strings.Split(fullMime, "/")
 	if len(mimes) != 2 {
-		return Unknown
+		return FTUnknown
 	}
 	mimeType := mimes[0]
 
-	// get the FileType from a mimeType: "audio" -> Audio
+	// get the FileType from a mimeType: "audio" -> FTAudio
 	fileType, ok := MimeTypes[mimeType]
 	if ok {
 		return fileType
 	}
 
-	return Unknown
+	return FTUnknown
 }
 
 // list of all archive mime types :

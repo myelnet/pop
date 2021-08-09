@@ -11,22 +11,22 @@ import (
 func TestDetectFileType(t *testing.T) {
 	// guess file type using file's extension
 	fileType := DetectFileType("/foo/image.png", bytes.NewReader([]byte("")))
-	require.Equal(t, Image, fileType)
+	require.Equal(t, FTImage, fileType)
 
 	fileType = DetectFileType("/foo/image.mp3", bytes.NewReader([]byte("")))
-	require.Equal(t, Audio, fileType)
+	require.Equal(t, FTAudio, fileType)
 
 	fileType = DetectFileType("/foo/image.avi", bytes.NewReader([]byte("")))
-	require.Equal(t, Video, fileType)
+	require.Equal(t, FTVideo, fileType)
 
 	fileType = DetectFileType("/foo/image.tar.gz", bytes.NewReader([]byte("")))
-	require.Equal(t, Archive, fileType)
+	require.Equal(t, FTArchive, fileType)
 
 	fileType = DetectFileType("/foo/image.txt", bytes.NewReader([]byte("")))
-	require.Equal(t, Text, fileType)
+	require.Equal(t, FTText, fileType)
 
 	fileType = DetectFileType("/foo/image.qsdfqfq", bytes.NewReader([]byte("")))
-	require.Equal(t, Unknown, fileType)
+	require.Equal(t, FTUnknown, fileType)
 
 	// guess file type by reading file's content, given a path with no file extension
 	dir := t.TempDir()
@@ -34,21 +34,21 @@ func TestDetectFileType(t *testing.T) {
 	err := os.WriteFile(p, ZIP_ARCHIVE, 0666)
 	require.NoError(t, err)
 	fileType = DetectFileType(p, bytes.NewReader([]byte("")))
-	require.Equal(t, Archive, fileType)
+	require.Equal(t, FTArchive, fileType)
 
 	// guess file type using a buffer only
 	fileType = DetectFileType("", bytes.NewReader(GIF_IMAGE))
-	require.Equal(t, Image, fileType)
+	require.Equal(t, FTImage, fileType)
 
 	r := bytes.NewReader(UNKNOWN)
 	fileType = DetectFileType("", r)
-	require.Equal(t, Unknown, fileType)
+	require.Equal(t, FTUnknown, fileType)
 
 	// make sure we don't consume the original buffer
 	r = bytes.NewReader(GIF_IMAGE)
 	fileType = DetectFileType("", r)
 	require.Equal(t, r.Len(), len(GIF_IMAGE))
-	require.Equal(t, Image, fileType)
+	require.Equal(t, FTImage, fileType)
 }
 
 var UNKNOWN = []byte{

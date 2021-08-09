@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -979,11 +980,13 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 	}
 }
 
+// DAGParams is a set of features used to chunk and format files into DAGs
 type DAGParams struct {
 	chunker chunk.Splitter
 	layout  func(*helpers.DagBuilderHelper) (ipldformat.Node, error)
 }
 
+// NewDAGParams initializes default params for generating a DAG
 func NewDAGParams(buf io.ReadSeeker) *DAGParams {
 	return &DAGParams{
 		chunker: DefaultChunker(buf),
@@ -991,14 +994,17 @@ func NewDAGParams(buf io.ReadSeeker) *DAGParams {
 	}
 }
 
+// DAGOption is a functional option overriding default DAG params
 type DAGOption func(*DAGParams)
 
+// WithChunker overrides the default chunker with a given chunker interface
 func WithChunker(chunker chunk.Splitter) DAGOption {
 	return func(d *DAGParams) {
 		d.chunker = chunker
 	}
 }
 
+// WithLayout overrides the default dag layout with a layout function defining the overall layout of a DAG
 func WithLayout(layout func(*helpers.DagBuilderHelper) (ipldformat.Node, error)) func(n *DAGParams) {
 	return func(d *DAGParams) {
 		d.layout = layout
@@ -1045,33 +1051,31 @@ func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.ReadS
 }
 
 // selectDAGParams returns the best chunk params according to the file's type
-func selectDAGParams(filepath string, buf io.ReadSeeker) (
-	chunker chunk.Splitter,
-	layout func(*helpers.DagBuilderHelper) (ipldformat.Node, error),
-) {
+func selectDAGParams(filepath string, buf io.ReadSeeker) []DAGOption {
 	fileType := utils.DetectFileType(filepath, buf)
+	chunker := DefaultChunker(buf)
+	layout := DefaultLayout
 
 	switch fileType {
-	case utils.Audio, utils.Video:
-		chunkSize := int64(1_000_000)
+	case utils.FTAudio, utils.FTVideo:
+		chunkSize := int64(units.MiB)
 		chunker = chunk.NewSizeSplitter(buf, chunkSize)
 		layout = trickle.Layout
 
-	case utils.Image, utils.Archive:
-		chunkSize := int64(1_000_000)
+	case utils.FTImage, utils.FTArchive:
+		chunkSize := int64(units.MiB)
 		chunker = chunk.NewSizeSplitter(buf, chunkSize)
 		layout = balanced.Layout
 
-	case utils.Text, utils.Font:
+	case utils.FTText, utils.FTFont:
 		chunker = chunk.NewBuzhash(buf)
 		layout = balanced.Layout
-
-	default:
-		chunker = DefaultChunker(buf)
-		layout = DefaultLayout
 	}
 
-	return
+	return []DAGOption{
+		WithChunker(chunker),
+		WithLayout(layout),
+	}
 }
 
 // getRef is an internal function to find a ref with a given string cid
@@ -1115,8 +1119,8 @@ func (nd *node) addRecursive(ctx context.Context, name string, file files.Node, 
 		}
 		return it.Err()
 	case files.File:
-		chunker, layout := selectDAGParams(name, f)
-		froot, err := nd.Add(ctx, nd.tx.Store().DAG, f, WithChunker(chunker), WithLayout(layout))
+		dagOptions := selectDAGParams(name, f)
+		froot, err := nd.Add(ctx, nd.tx.Store().DAG, f, dagOptions...)
 		if err != nil {
 			return err
 		}

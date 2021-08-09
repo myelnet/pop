@@ -248,9 +248,9 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			fileReader := files.NewReaderFile(part)
-			chunker, layout := selectDAGParams(part.FileName(), fileReader)
+			dagOptions := selectDAGParams(part.FileName(), fileReader)
 
-			c, err := s.node.Add(r.Context(), tx.Store().DAG, fileReader, WithChunker(chunker), WithLayout(layout))
+			c, err := s.node.Add(r.Context(), tx.Store().DAG, fileReader, dagOptions...)
 			if err != nil {
 				http.Error(w, "failed to add file", http.StatusInternalServerError)
 				return
@@ -284,9 +284,9 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		root = tx.Root()
 	} else {
 		fileReader := files.NewReaderFile(r.Body)
-		chunker, layout := selectDAGParams("", fileReader)
+		dagOptions := selectDAGParams("", fileReader)
 
-		c, err := s.node.Add(r.Context(), s.node.dag, fileReader, WithChunker(chunker), WithLayout(layout))
+		c, err := s.node.Add(r.Context(), s.node.dag, fileReader, dagOptions...)
 		if err != nil {
 			http.Error(w, "failed to add file to blockstore", http.StatusInternalServerError)
 			return
