@@ -15,8 +15,8 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
-	"github.com/myelnet/pop/node"
 	"github.com/myelnet/pop/metrics"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog/log"
@@ -29,12 +29,15 @@ type PopConfig struct {
 	regions      string
 	replInterval time.Duration
 	// Exported fields can be set by survey.Ask
-	Bootstrap    string `json:"bootstrap"`
-	Capacity     string `json:"capacity"`
-	MaxPPB       int    `json:"maxppb"`
-	FilEndpoint  string `json:"fil-endpoint"`
-	FilToken     string `json:"fil-token"`
-	FilTokenType string `json:"fil-token-type"`
+	Bootstrap           string `json:"bootstrap"`
+	Capacity            string `json:"capacity"`
+	MaxPPB              int    `json:"maxppb"`
+	FilEndpoint         string `json:"fil-endpoint"`
+	FilToken            string `json:"fil-token"`
+	FilTokenType        string `json:"fil-token-type"`
+	ProviderDomainToken string `json:"provider-domain-token"`
+	ProviderDomainName  string `json:"provider-domain-name"`
+	ProviderSubdomain   string `json:"provider-subdomain"`
 }
 
 var startArgs PopConfig
@@ -59,6 +62,9 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.Capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
+		fs.StringVar(&startArgs.ProviderDomainToken, "provider-domain-token", "", "provider's api token when the node is a Facilitator")
+		fs.StringVar(&startArgs.ProviderDomainName, "provider-domain-name", "", "domain name to use when the node is a Facilitator or Provider")
+		fs.StringVar(&startArgs.ProviderSubdomain, "provider-subdomain", "", "subdomain to use when the node is a Provider")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
 		return fs
@@ -169,7 +175,7 @@ Manage your Myel point of presence from the command line.
 
 	opts := node.Options{
 		RepoPath:       path,
-		Metrics: 				metrics.GetInfluxParams(),
+		Metrics:        metrics.GetInfluxParams(),
 		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,

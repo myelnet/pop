@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	gopath "path"
 	"strconv"
 	"strings"
@@ -19,12 +20,16 @@ import (
 
 	"runtime/debug"
 
+	"github.com/caddyserver/certmagic"
 	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/gorilla/websocket"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	ipath "github.com/ipfs/go-path"
 	"github.com/jpillora/backoff"
+	"github.com/koding/websocketproxy"
+	"github.com/libdns/cloudflare"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
@@ -372,9 +377,58 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
+	// this is not used by cmux since it's listening for browsers on port 443
+	go serveHTTPS(opts.ProviderDomainToken, opts.ProviderDomainName, opts.ProviderSubdomain)
+
 	<-ctx.Done()
 
 	return ctx.Err()
+}
+
+func serveHTTPS(apiToken, domainName, subdomain string) {
+	isFacilitator := apiToken != "" && domainName != ""
+	isProvider := domainName != "" && subdomain != ""
+	if !isFacilitator && !isProvider {
+		return
+	}
+
+	var domains []string
+
+	switch {
+	case isFacilitator:
+		certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
+			DNSProvider: &cloudflare.Provider{
+				APIToken: apiToken,
+			},
+		}
+		domains = []string{
+			domainName,
+			"*." + domainName,
+		}
+
+	case isProvider:
+		domains = []string{subdomain + "." + domainName}
+	}
+
+	proxyUrl, err := url.Parse("ws://localhost:41505")
+	if err != nil {
+		log.Panic().Err(err).Msg("error when parsing url")
+	}
+
+	wsProxy := websocketproxy.NewProxy(proxyUrl)
+	wsProxy.Upgrader = &websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+		EnableCompression: true,
+	}
+
+	err = certmagic.HTTPS(domains, wsProxy)
+	if err != nil {
+		log.Panic().Err(err).Msg("error when serving https")
+	}
 }
 
 func serveHTTP(server *server, l net.Listener) {

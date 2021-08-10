@@ -3,6 +3,7 @@ module github.com/myelnet/pop
 go 1.16
 
 require (
+	github.com/caddyserver/certmagic v0.14.1
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20190912175916-7055855a373f // indirect
 	github.com/docker/go-units v0.4.0
@@ -18,6 +19,7 @@ require (
 	github.com/filecoin-project/specs-actors/v5 v5.0.0-20210512015452-4fe3889fff57
 	github.com/gabriel-vasile/mimetype v1.1.2
 	github.com/google/uuid v1.2.0
+	github.com/gorilla/websocket v1.4.2
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
 	github.com/hannahhoward/go-pubsub v0.0.0-20200423002714-8d62886cc36e
 	github.com/influxdata/influxdb-client-go/v2 v2.5.0
@@ -42,8 +44,9 @@ require (
 	github.com/ipfs/go-unixfs v0.2.4
 	github.com/ipld/go-codec-dagpb v1.3.0
 	github.com/ipld/go-ipld-prime v0.12.0
-	github.com/ipld/go-ipld-prime-proto v0.1.1
 	github.com/jpillora/backoff v1.0.0
+	github.com/koding/websocketproxy v0.0.0-20181220232114-7ed82d81a28c
+	github.com/libdns/cloudflare v0.1.0
 	github.com/libp2p/go-eventbus v0.2.1
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-blankhost v0.2.0
@@ -74,8 +77,6 @@ require (
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210219115102-f37d292932f2
 	github.com/xorcare/golden v0.6.1-0.20191112154924-b87f686d7542 // indirect
 	go.opencensus.io v0.22.5 // indirect
-	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2 // indirect
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
-	golang.org/x/net v0.0.0-20210420210106-798c2154c571 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
