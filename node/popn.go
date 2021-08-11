@@ -132,7 +132,6 @@ type node struct {
 	is   cbor.IpldStore
 	dag  ipldformat.DAGService
 	exch *exchange.Exchange
-	omg  *OfferMgr
 
 	// opts keeps all the node params set when starting the node
 	opts Options
@@ -265,8 +264,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	nd.omg = NewOfferMgr()
 
 	if opts.PrivKey != "" {
 		err = nd.importPrivateKey(ctx, opts.PrivKey)
@@ -742,7 +739,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		}
 
 		// If we already have an offer we can skip routing queries
-		offer, err := nd.omg.GetOffer(root)
+		offer, err := nd.exch.Offers().FindOfferByCid(root)
 		if err != nil {
 
 			err = tx.Query(s)
@@ -857,7 +854,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 
 		select {
 		case res := <-tx.Done():
-			log.Info().Msg("finished transfer")
+			log.Info().Str("spent", filecoin.FIL(res.Spent).String()).Msg("finished transfer")
 			if res.Err != nil {
 				log.Error().Err(res.Err).Msg("transfer failed")
 				sendErr(res.Err)
@@ -867,7 +864,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			if args.Key == "" {
 				// transfer was successful so we keep the offer around
 				// we were just retrieving the index
-				err := nd.omg.SetOffer(root, offer)
+				err := nd.exch.Offers().SetOfferForCid(root, offer)
 				if err != nil {
 					log.Error().Err(err).Msg("setting offer")
 				}
@@ -916,7 +913,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				// TODO: when blocks are properly deduplicated we can check if paych
 				// available funds are 0.
 				if len(mk) == 0 || remain.IsZero() {
-					err := nd.omg.RemoveOffer(root)
+					err := nd.exch.Offers().RemoveOffer(root)
 					if err != nil {
 						log.Error().Err(err).Msg("removing offer")
 					}

@@ -42,7 +42,6 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...
 	nd.ms = tn.Ms
 	nd.dag = tn.DAG
 	nd.host = tn.Host
-	nd.omg = NewOfferMgr()
 
 	exchangeOpts := exchange.Options{
 		Blockstore:  nd.bs,
@@ -746,7 +745,7 @@ loop:
 	require.Equal(t, 1, len(channels))
 
 	// We retrieved all the keys so the offer should be removed
-	_, err = cn.omg.GetOffer(root)
+	_, err = cn.exch.Offers().FindOfferByCid(root)
 	require.Error(t, err)
 
 	// update the actor state so the manager can settle things

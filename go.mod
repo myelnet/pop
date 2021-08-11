@@ -16,7 +16,6 @@ require (
 	github.com/filecoin-project/go-multistore v0.0.3
 	github.com/filecoin-project/go-state-types v0.1.1-0.20210506134452-99b279731c48
 	github.com/filecoin-project/go-statemachine v0.0.0-20200925024713-05bd7c71fbfe
-	github.com/filecoin-project/specs-actors v0.9.13
 	github.com/filecoin-project/specs-actors/v5 v5.0.0-20210512015452-4fe3889fff57
 	github.com/gabriel-vasile/mimetype v1.1.2
 	github.com/google/uuid v1.2.0
