@@ -247,3 +247,8 @@ func (e *Exchange) Index() *Index {
 func (e *Exchange) Payments() payments.Manager {
 	return e.pay
 }
+
+// Offers returns the offer manager
+func (e *Exchange) Offers() *Offers {
+	return e.offers
+}

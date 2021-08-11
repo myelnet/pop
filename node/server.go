@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"runtime/debug"
+
 	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/ipfs/go-cid"
@@ -28,7 +30,6 @@ import (
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
 	"github.com/soheilhy/cmux"
-	"runtime/debug"
 )
 
 // server listens for connection and controls the node to execute requests
@@ -158,7 +159,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if !has {
 		// If there is already a payment channel open we can handle it
 		// else the delay for loading a payment channel is not reasonnable for an HTTP request
-		_, err = s.node.omg.GetOffer(root)
+		_, err = s.node.exch.Offers().FindOfferByCid(root)
 		if err != nil {
 			http.Error(w, "content not cached on this node", http.StatusNotFound)
 			return
