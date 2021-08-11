@@ -32,15 +32,20 @@ and more at the prototype stage so feel free to open an issue if you have any su
 
 As a CLI:
 
-Install dependencies:
+####Install dependencies:
+Since CGO is required, you will need GCC
 
+#### Mac
 ```commandline
-brew install go bzr jq pkg-config rustup hwloc
+$ brew install gcc make
+```
+
+#### Linux
+```commandline
+$ sudo apt install gcc make
 ```
 
 Clone the repo.
-If you are running on arm64 architecture, you will need to build filecoin-ffi from source.
-Simply do that by adding the env variable: `FFI_BUILD_FROM_SOURCE=1` 
 
 run:
 ```commandline
@@ -62,16 +67,21 @@ USAGE
   pop subcommand [flags]
 
 This CLI is still under active development. Commands and flags will
-change until the first stable release.
+change until a first stable release. To get started run 'pop start'.
 
 SUBCOMMANDS
   start   Starts a POP daemon
+  off     Gracefully shuts down the Pop daemon
   ping    Ping the local daemon or a given peer
   put     Put a file into an exchange transaction for storage
   status  Print the state of any ongoing transaction
-  commit  Commit a DAG transaction to storage
+  commit  Commit a DAG transaction
   get     Retrieve content from the network
   list    List all content indexed in this pop
+  wallet  Manage your wallet
+
+FLAGS
+  -log info  Set logging mode
 ```
 
 ## Library Usage
