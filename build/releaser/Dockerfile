@@ -39,36 +39,9 @@ RUN \
 	chmod +x /
 
 ENV CGO_CFLAGS="-D__BLST_PORTABLE__"
-ENV RUSTFLAGS="-C target-cpu=native -g"
-ENV FFI_BUILD_FROM_SOURCE=0
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-
-RUN apt-get update -y && \
-    apt-get install hwloc cron git mesa-opencl-icd ocl-icd-opencl-dev gcc git bzr jq pkg-config clang  libhwloc-dev -y
-RUN rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update
-RUN apt-get install -y opencl-headers
-RUN apt-get install -y ocl-icd-opencl-dev
-RUN apt-get install -y ocl-icd-libopencl1
-RUN apt-get install -y clinfo
-
-ENV LDFLAGS="-L/usr/local/lib"
-ENV CPPFLAGS="-I/usr/local/include"
-ENV CPATH=/usr/local/include
-ENV LIBRARY_PATH=/usr/local/lib
-ENV LD_LIBRARY_PATH=/usr/local/lib
-
-COPY build/entrypoint.sh /
+COPY build/releaser/entrypoint.sh /
 RUN chmod +x /entrypoint.sh
 RUN chmod +x /tmp
 
-COPY build/install-filcrypto-distro /
-RUN chmod +x /install-filcrypto-distro
-
 ENTRYPOINT ["bash", "/entrypoint.sh"]
-
-# CMD ["goreleaser", "-v"]
