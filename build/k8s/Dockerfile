@@ -1,20 +1,9 @@
 FROM debian:latest
 
 RUN apt-get update -y && \
-    apt-get install build-essential curl wget hwloc cron git mesa-opencl-icd ocl-icd-opencl-dev gcc git bzr jq pkg-config clang libhwloc-dev -y
+    apt-get install -y build-essential curl wget git
 
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="~/.cargo/bin:${PATH}"
-
-ENV LDFLAGS="-L/usr/local/lib"
-ENV CPPFLAGS="-I/usr/local/include"
-ENV CPATH=/usr/local/include
-ENV LIBRARY_PATH=/usr/local/lib
-ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV CGO_CFLAGS="-D__BLST_PORTABLE__"
-ENV RUSTFLAGS="-C target-cpu=native -g"
-ENV FFI_BUILD_FROM_SOURCE=0
 
 ARG GO_VERSION=1.16.3
 ARG GOLANG_DIST_SHA=951a3c7c6ce4e56ad883f97d9db74d3d6d80d5fec77455c6ada6c1f7ac4776d2
