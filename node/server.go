@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/user"
 	gopath "path"
 	"strconv"
 	"strings"
@@ -29,7 +30,6 @@ import (
 	ipath "github.com/ipfs/go-path"
 	"github.com/jpillora/backoff"
 	"github.com/koding/websocketproxy"
-	"github.com/libdns/cloudflare"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
@@ -378,37 +378,19 @@ func Run(ctx context.Context, opts Options) error {
 	}()
 
 	// this is not used by cmux since it's listening for browsers on port 443
-	go serveHTTPS(opts.ProviderDomainToken, opts.ProviderDomainName, opts.ProviderSubdomain)
+	go serveHTTPS(opts.ProviderDomainName, opts.ProviderSubdomain)
 
 	<-ctx.Done()
 
 	return ctx.Err()
 }
 
-func serveHTTPS(apiToken, domainName, subdomain string) {
-	isFacilitator := apiToken != "" && domainName != ""
-	isProvider := domainName != "" && subdomain != ""
-	if !isFacilitator && !isProvider {
+func serveHTTPS(domainName, subdomain string) {
+	if domainName == "" || subdomain == "" {
 		return
 	}
 
-	var domains []string
-
-	switch {
-	case isFacilitator:
-		certmagic.DefaultACME.DNS01Solver = &certmagic.DNS01Solver{
-			DNSProvider: &cloudflare.Provider{
-				APIToken: apiToken,
-			},
-		}
-		domains = []string{
-			domainName,
-			"*." + domainName,
-		}
-
-	case isProvider:
-		domains = []string{subdomain + "." + domainName}
-	}
+	domains := []string{subdomain + "." + domainName}
 
 	proxyUrl, err := url.Parse("ws://localhost:41505")
 	if err != nil {
@@ -424,6 +406,14 @@ func serveHTTPS(apiToken, domainName, subdomain string) {
 		},
 		EnableCompression: true,
 	}
+
+	usr, err := user.Current()
+	if err != nil {
+		log.Panic().Err(err).Msg("error when getting home dir")
+	}
+	dir := usr.HomeDir
+
+	certmagic.Default.Storage = &certmagic.FileStorage{Path: dir + "/.pop/certmagic"}
 
 	err = certmagic.HTTPS(domains, wsProxy)
 	if err != nil {

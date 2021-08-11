@@ -46,7 +46,6 @@ require (
 	github.com/ipld/go-ipld-prime v0.12.0
 	github.com/jpillora/backoff v1.0.0
 	github.com/koding/websocketproxy v0.0.0-20181220232114-7ed82d81a28c
-	github.com/libdns/cloudflare v0.1.0
 	github.com/libp2p/go-eventbus v0.2.1
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-blankhost v0.2.0

@@ -122,9 +122,7 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
-	// ProviderDomainToken defines the domain name provider's api token when the node is a facilitator
-	ProviderDomainToken string
-	// ProviderDomainName defines the domain name to use when the node is a facilitator or provider
+	// ProviderDomainName defines the domain name to use when the node is a provider
 	ProviderDomainName string
 	// ProviderSubdomain defines the subdomain to use when the node is a provider
 	ProviderSubdomain string
