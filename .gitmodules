@@ -1,6 +1,0 @@
-[submodule "extern/filecoin-ffi"]
-	path = extern/filecoin-ffi
-	url = https://github.com/filecoin-project/filecoin-ffi.git
-[submodule "extern/darwin-sysroot"]
-	path = extern/darwin-sysroot
-	url = https://github.com/myelnet/darwin-sysroot.git
