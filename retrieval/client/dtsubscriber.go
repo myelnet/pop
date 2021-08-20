@@ -28,12 +28,14 @@ func eventFromDealStatus(response *deal.Response) (Event, []interface{}) {
 	case deal.StatusDealNotFound:
 		return EventDealNotFound, []interface{}{response.Message}
 	case deal.StatusAccepted:
+		fmt.Println("==> Accepted")
 		return EventDealAccepted, nil
 	case deal.StatusFundsNeededUnseal:
 		return EventUnsealPaymentRequested, []interface{}{response.PaymentOwed}
 	case deal.StatusFundsNeededLastPayment:
 		return EventLastPaymentRequested, []interface{}{response.PaymentOwed}
 	case deal.StatusCompleted:
+		fmt.Println("==> Completed")
 		return EventComplete, nil
 	case deal.StatusFundsNeeded, deal.StatusOngoing:
 		return EventPaymentRequested, []interface{}{response.PaymentOwed}

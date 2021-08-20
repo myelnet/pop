@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	chunk "github.com/ipfs/go-ipfs-chunker"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
+	"github.com/ipfs/go-unixfs"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipld/go-ipld-prime"
@@ -166,4 +168,37 @@ func TestCompareStatWithGraphSync(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMapLoadableKeys(t *testing.T) {
+	mn := mocknet.New(context.Background())
+	tn := testutil.NewTestNode(mn, t)
+
+	file1 := tn.CreateRandomFile(t, 128000)
+	lnk1, storeID, _ := tn.LoadFileToNewStore(context.TODO(), t, file1)
+	store, err := tn.Ms.Get(storeID)
+	require.NoError(t, err)
+
+	file2 := tn.CreateRandomFile(t, 128000)
+	lnk2, _ := tn.LoadFileToStore(context.TODO(), t, store, file2)
+
+	_, key1 := filepath.Split(file1)
+	cid1 := lnk1.(cidlink.Link).Cid
+	_, key2 := filepath.Split(file2)
+	cid2 := lnk2.(cidlink.Link).Cid
+
+	dir := unixfs.EmptyDirNode()
+	dir.AddRawLink(key1, &ipldformat.Link{
+		Size: 128000,
+		Cid:  cid1,
+	})
+	dir.AddRawLink(key2, &ipldformat.Link{
+		Size: 128000,
+		Cid:  cid2,
+	})
+	store.Bstore.Put(dir)
+
+	keys, err := MapLoadableKeys(context.TODO(), dir.Cid(), store.Loader)
+	require.NoError(t, err)
+	require.Equal(t, KeyList([]string{key1, key2}).Sorted(), keys.Sorted())
 }

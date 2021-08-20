@@ -81,7 +81,7 @@ func (p *Payments) GetChannel(ctx context.Context, from, to address.Address, amt
 		// ConfirmedAmt is the current channel balance
 		// VoucherRedeemedAmt is all the voucher we spent that will be deducted from that balance
 		available := big.Sub(afunds.ConfirmedAmt, afunds.VoucherRedeemedAmt)
-		if available.GreaterThan(amt) {
+		if available.GreaterThanEqual(amt) {
 			return &ChannelResponse{
 				Channel:      *ci.Channel,
 				WaitSentinel: cid.Undef,

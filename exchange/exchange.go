@@ -19,7 +19,6 @@ import (
 	"github.com/myelnet/pop/retrieval"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/selectors"
-	sel "github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
 )
 
@@ -35,8 +34,8 @@ type Exchange struct {
 	pay payments.Manager
 	// retrieval handles all metered data transfers
 	rtv retrieval.Manager
-	// offers manages pricing for retrieval deals
-	offers *Offers
+	// deal managaer manages pricing for retrieval deals
+	dmgr *deal.Mgr
 	// Routing service
 	rou *GossipRouting
 	// Replication scheme
@@ -64,13 +63,13 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 
 	// register a pubsub topic for each region
 	exch := &Exchange{
-		h:      h,
-		ds:     ds,
-		opts:   opts,
-		idx:    idx,
-		rou:    NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
-		pay:    payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
-		offers: NewOffers(opts.Regions),
+		h:    h,
+		ds:   ds,
+		opts: opts,
+		idx:  idx,
+		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
+		pay:  payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
+		dmgr: deal.NewManager(opts.Regions[0].PPB),
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
@@ -91,7 +90,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		ds,
 		exch.pay,
 		opts.DataTransfer,
-		exch.offers,
+		exch.dmgr,
 		h.ID(),
 	)
 	if err != nil {
@@ -134,7 +133,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 	}
 	// We need to remember the offer we made so we can validate against it once
 	// clients start the retrieval
-	e.offers.SetOfferForCid(q.PayloadCID, offer)
+	e.dmgr.SetOfferForCid(q.PayloadCID, offer)
 	return offer, nil
 }
 
@@ -153,9 +152,11 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		ms:         e.opts.MultiStore,
 		rou:        e.rou,
 		retriever:  e.rtv.Client(),
+		deals:      e.dmgr,
 		index:      e.idx,
 		repl:       e.rpl,
 		cacheRF:    6,
+		codec:      0x71,
 		clientAddr: e.opts.Wallet.DefaultAddress(),
 		sel:        selectors.All(),
 		done:       make(chan TxResult, 1),
@@ -181,7 +182,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 	tx := e.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
 	defer tx.Close()
-	err := tx.Query(sel.All())
+	err := tx.Query()
 	if err != nil {
 		return err
 	}
@@ -248,7 +249,7 @@ func (e *Exchange) Payments() payments.Manager {
 	return e.pay
 }
 
-// Offers returns the offer manager
-func (e *Exchange) Offers() *Offers {
-	return e.offers
+// Deals returns the deal manager
+func (e *Exchange) Deals() *deal.Mgr {
+	return e.dmgr
 }

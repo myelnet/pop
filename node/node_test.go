@@ -408,6 +408,7 @@ func TestGet(t *testing.T) {
 	})
 	<-committed
 
+	// Get will block until the transfer is completed
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.GetResult.Err, "")
 	}
@@ -425,7 +426,7 @@ func TestGet(t *testing.T) {
 	}
 	out := filepath.Join(dir, "dataout")
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 		Out:      out,
@@ -543,13 +544,13 @@ func TestMultipleGet(t *testing.T) {
 		require.Equal(t, n.GetResult.Err, "")
 	}
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data1", ref.PayloadCID),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
 
 	cn.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
@@ -558,7 +559,7 @@ func TestMultipleGet(t *testing.T) {
 		require.Equal(t, "", n.GetResult.Err)
 	}
 	cn2.Get(ctx, &GetArgs{
-		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID.String()),
+		Cid:      fmt.Sprintf("/%s/data2", ref.PayloadCID),
 		Strategy: "SelectFirst",
 		Timeout:  1,
 	})
@@ -745,7 +746,7 @@ loop:
 	require.Equal(t, 1, len(channels))
 
 	// We retrieved all the keys so the offer should be removed
-	_, err = cn.exch.Offers().FindOfferByCid(root)
+	_, err = cn.exch.Deals().FindOfferByCid(root)
 	require.Error(t, err)
 
 	// update the actor state so the manager can settle things

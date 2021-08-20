@@ -14,7 +14,9 @@ import (
 	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
+	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-path"
+	"github.com/ipfs/go-unixfs"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -84,7 +86,7 @@ func TestTx(t *testing.T) {
 	require.NoError(t, mn.ConnectAllButSelf())
 
 	tx = client.Tx(ctx, WithRoot(root), WithStrategy(SelectFirst))
-	require.NoError(t, tx.Query(sel.Key(KeyFromPath(fname))))
+	require.NoError(t, tx.Query(KeyFromPath(fname)))
 
 loop:
 	for {
@@ -144,66 +146,92 @@ func genTestFiles(t *testing.T) (map[string]string, []string) {
 }
 
 func TestTxPutGet(t *testing.T) {
-	ctx := context.Background()
-	mn := mocknet.New(ctx)
+	codecs := []uint64{0x70, 0x71}
+	for _, codec := range codecs {
+		t.Run(fmt.Sprintf("Codec %d", codec), func(t *testing.T) {
+			ctx := context.Background()
+			mn := mocknet.New(ctx)
 
-	n := testutil.NewTestNode(mn, t)
-	opts := Options{
-		RepoPath: n.DTTmpDir,
+			n := testutil.NewTestNode(mn, t)
+			opts := Options{
+				RepoPath: n.DTTmpDir,
+			}
+			exch, err := New(ctx, n.Host, n.Ds, opts)
+			require.NoError(t, err)
+
+			filevals, filepaths := genTestFiles(t)
+
+			tx := exch.Tx(ctx, WithCodec(codec))
+			sID := tx.StoreID()
+
+			// compare with merkledag implementation
+			dir := unixfs.EmptyDirNode()
+
+			for _, p := range filepaths {
+				link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), p)
+				rootCid := link.(cidlink.Link).Cid
+				require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
+
+				if codec == 0x70 {
+					dir.AddRawLink(KeyFromPath(p), &ipldformat.Link{
+						Size: uint64(len(bytes)),
+						Cid:  rootCid,
+					})
+				}
+			}
+
+			status, err := tx.Status()
+			require.NoError(t, err)
+			require.Equal(t, len(filepaths), len(status))
+
+			require.NoError(t, tx.Commit())
+			r := tx.Root()
+			require.NoError(t, exch.Index().SetRef(tx.Ref()))
+			require.NoError(t, tx.Close())
+
+			if codec == 0x70 {
+				dir.SetCidBuilder(cid.Prefix{
+					Version:  1,
+					Codec:    codec,
+					MhType:   DefaultHashFunction,
+					MhLength: -1,
+				})
+				require.Equal(t, r, dir.Cid())
+			}
+
+			tx = exch.Tx(ctx, WithCodec(codec))
+
+			link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), filepaths[0])
+			rootCid := link.(cidlink.Link).Cid
+			require.NoError(t, tx.Put(KeyFromPath(filepaths[0]), rootCid, int64(len(bytes))))
+
+			// We should have a new store with a single entry
+			status, err = tx.Status()
+			require.NoError(t, err)
+			require.Equal(t, 1, len(status))
+
+			require.NotEqual(t, sID, tx.StoreID())
+
+			// Test that we can retrieve local content stored by a previous transaction
+			tx = exch.Tx(ctx, WithRoot(r), WithCodec(codec))
+			for k, v := range filevals {
+				nd, err := tx.GetFile(k)
+				require.NoError(t, err)
+				f := nd.(files.File)
+				bytes, err := io.ReadAll(f)
+				require.NoError(t, err)
+
+				require.Equal(t, bytes, []byte(v))
+			}
+			// Generate a path to look for
+			p := fmt.Sprintf("/%s/line1.txt", r.String())
+			pp := path.FromString(p)
+			root, segs, err := path.SplitAbsPath(pp)
+			require.NoError(t, err)
+			require.Equal(t, root, r)
+			require.Equal(t, segs, []string{"line1.txt"})
+		})
 	}
-	exch, err := New(ctx, n.Host, n.Ds, opts)
-	require.NoError(t, err)
-
-	filevals, filepaths := genTestFiles(t)
-
-	tx := exch.Tx(ctx)
-	sID := tx.StoreID()
-	for _, p := range filepaths {
-		link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), p)
-		rootCid := link.(cidlink.Link).Cid
-		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
-	}
-
-	status, err := tx.Status()
-	require.NoError(t, err)
-	require.Equal(t, len(filepaths), len(status))
-
-	require.NoError(t, tx.Commit())
-	r := tx.Root()
-	require.NoError(t, exch.Index().SetRef(tx.Ref()))
-	require.NoError(t, tx.Close())
-
-	tx = exch.Tx(ctx)
-
-	link, bytes := n.LoadFileToStore(ctx, t, tx.Store(), filepaths[0])
-	rootCid := link.(cidlink.Link).Cid
-	require.NoError(t, tx.Put(KeyFromPath(filepaths[0]), rootCid, int64(len(bytes))))
-
-	// We should have a new store with a single entry
-	status, err = tx.Status()
-	require.NoError(t, err)
-	require.Equal(t, 1, len(status))
-
-	require.NotEqual(t, sID, tx.StoreID())
-
-	// Test that we can retrieve local content stored by a previous transaction
-	tx = exch.Tx(ctx, WithRoot(r))
-	for k, v := range filevals {
-		nd, err := tx.GetFile(k)
-		require.NoError(t, err)
-		f := nd.(files.File)
-		bytes, err := io.ReadAll(f)
-		require.NoError(t, err)
-
-		require.Equal(t, bytes, []byte(v))
-	}
-	// Generate a path to look for
-	p := fmt.Sprintf("/%s/line1.txt", r.String())
-	pp := path.FromString(p)
-	root, segs, err := path.SplitAbsPath(pp)
-	require.NoError(t, err)
-	require.Equal(t, root, r)
-	require.Equal(t, segs, []string{"line1.txt"})
 }
 
 func BenchmarkAdd(b *testing.B) {
@@ -303,20 +331,16 @@ func TestMapFieldSelector(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
-	stat, err := utils.Stat(ctx, tx.Store(), tx.Root(), sel.Key("line2.txt"))
-	require.NoError(t, err)
-	require.Equal(t, 2, stat.NumBlocks)
-	require.Equal(t, 683, stat.Size)
-
 	// Close the transaction
 	require.NoError(t, tx.Close())
 
 	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key := KeyFromPath(filepaths[0])
+	gtx.paths = []string{key}
 
 	// We skip discovery and request an offer directly
 	info := host.InfoFromHost(n1.Host)
-	offer, err := gtx.QueryOffer(*info, sel.Key(key))
+	offer, err := gtx.QueryOffer(*info, sel.All())
 	require.NoError(t, err)
 	gtx.ApplyOffer(offer)
 
@@ -386,7 +410,7 @@ func TestMultiTx(t *testing.T) {
 
 	gtx1 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key1 := KeyFromPath(filepaths[0])
-	require.NoError(t, gtx1.Query(sel.Key(key1)))
+	require.NoError(t, gtx1.Query(key1))
 
 loop:
 	for {
@@ -406,7 +430,7 @@ loop:
 
 	gtx2 := cn1.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
 	key2 := KeyFromPath(filepaths[1])
-	require.NoError(t, gtx2.Query(sel.Key(key2)))
+	require.NoError(t, gtx2.Query(key2))
 
 loop2:
 	for {
@@ -470,7 +494,7 @@ func TestTxGetEntries(t *testing.T) {
 	time.Sleep(time.Second)
 
 	gtx := cn.Tx(ctx, WithRoot(tx.Root()), WithStrategy(SelectFirst))
-	require.NoError(t, gtx.Query(sel.Entries()))
+	require.NoError(t, gtx.Query())
 
 loop:
 	for {

@@ -159,7 +159,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if !has {
 		// If there is already a payment channel open we can handle it
 		// else the delay for loading a payment channel is not reasonnable for an HTTP request
-		_, err = s.node.exch.Offers().FindOfferByCid(root)
+		_, err = s.node.exch.Deals().FindOfferByCid(root)
 		if err != nil {
 			http.Error(w, "content not cached on this node", http.StatusNotFound)
 			return
