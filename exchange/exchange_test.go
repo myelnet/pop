@@ -280,7 +280,7 @@ func TestExchangeE2E(t *testing.T) {
 			// Now we fetch it again from our providers
 			tx := client.Tx(ctx, WithRoot(rootCid), WithStrategy(SelectFirst), WithTriage())
 
-			err = tx.Query(sel.All())
+			err = tx.Query("*")
 			require.NoError(t, err)
 
 			selected, err := tx.Triage()

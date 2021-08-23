@@ -16,7 +16,6 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -34,7 +33,6 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipfs/go-unixfs/importer/trickle"
-	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -438,7 +436,7 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 	nd.txmu.Lock()
 	defer nd.txmu.Unlock()
 	if nd.tx == nil {
-		nd.tx = nd.exch.Tx(ctx)
+		nd.tx = nd.exch.Tx(ctx, exchange.WithCodec(args.Codec))
 	}
 
 	fstat, err := os.Stat(args.Path)
@@ -630,6 +628,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			return
 		}
 		for res := range results {
+			log.Info().Str("status", res.Status).Msg("transfer progress")
 			if args.Verbose || res.Status != "" {
 				nd.send(Notify{
 					GetResult: &res,
@@ -707,16 +706,14 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 
 		unsub := nd.exch.Retrieval().Client().SubscribeToEvents(
 			func(event client.Event, state deal.ClientState) {
-				if state.PayloadCID == root {
-					select {
-					case results <- GetResult{
-						TotalFunds:    filecoin.FIL(state.TotalFunds).Short(),
-						TotalSpent:    filecoin.FIL(state.FundsSpent).Short(),
-						Status:        deal.Statuses[state.Status],
-						TotalReceived: int64(state.TotalReceived),
-					}:
-					default:
-					}
+				select {
+				case results <- GetResult{
+					TotalFunds:    filecoin.FIL(state.TotalFunds).Short(),
+					TotalSpent:    filecoin.FIL(state.FundsSpent).Short(),
+					Status:        deal.Statuses[state.Status],
+					TotalReceived: int64(state.TotalReceived),
+				}:
+				default:
 				}
 			},
 		)
@@ -729,199 +726,129 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithStrategy(strategy), exchange.WithTriage())
 		defer tx.Close()
 
-		var s ipld.Node
-		switch args.Key {
-		// If we're looking to retrieve entries, we still ask for the price for everything
-		case "", "*":
-			s = sel.All()
-		default:
-			s = sel.Key(args.Key)
-		}
-
-		// If we already have an offer we can skip routing queries
-		offer, err := nd.exch.Offers().FindOfferByCid(root)
+		err = tx.Query(args.Key)
 		if err != nil {
-
-			err = tx.Query(s)
-			if err != nil {
-				sendErr(err)
-				return
-			}
-			// We can query a specific miner on top of gossip
-			// that offer will be at the top of the list if we receive it
-			if args.Miner != "" {
-				miner, err := address.NewFromString(args.Miner)
-				if err != nil {
-					sendErr(err)
-				}
-				info, err := nd.filMinerInfo(ctx, miner)
-				if err != nil {
-					sendErr(err)
-				}
-				offer, err := tx.QueryOffer(*info, s)
-				if err != nil {
-					// We shouldn't fail here, the transfer could still work with other peers
-					log.Error().Err(err).Str("id", info.ID.String()).Msg("querying from peer")
-				} else {
-					tx.ApplyOffer(offer)
-				}
-			}
-
-			log.Info().Msg("waiting for triage")
-
-			// The selection comes back for ALL the content
-			selection, err := tx.Triage()
-			if err != nil {
-				sendErr(err)
-				return
-			}
-			offer = selection.Offer
-
-			funds := offer.RetrievalPrice()
-			// If we're fetching entries, the selector and funds need to be updated
-			if args.Key == "" {
-				// for now we must pad the funds quite a bit to account for overlapping blocks
-				// because data-transfer doesn't dedup them yet
-				// added funds are based on an average of 100bytes per key and 10 keys per tx so:
-				// (indexSize = 100 * 10) * (numTransfers = 10) * ppb
-				funds = big.Add(offer.RetrievalPrice(), big.Mul(abi.NewTokenAmount(10000), offer.MinPricePerByte))
-				// Select blocks for the index only
-				s = sel.Entries()
-			}
-
-			log.Info().Str("funds", filecoin.FIL(funds).String()).Msg("selected an offer")
-
-			results <- GetResult{
-				Size:         int64(offer.Size),
-				Status:       "DealStatusSelectedOffer",
-				UnsealPrice:  filecoin.FIL(offer.UnsealPrice).Short(),
-				TotalFunds:   filecoin.FIL(funds).String(),
-				PricePerByte: filecoin.FIL(offer.MinPricePerByte).Short(),
-			}
-
-			// The offer will execute retrieval of the index only but load the payment channel for
-			// retrieving everything
-			selection.Exec(exchange.DealSel(s), exchange.DealFunds(funds))
-		} else {
-			info, err := offer.AddrInfo()
-			if err != nil {
-				sendErr(err)
-				// TODO: fallback to regular query?
-				return
-			}
-
-			// Will be selected automatically in the strategy
-			offer, err := tx.QueryOffer(*info, s)
-			if err != nil {
-				// TODO: fallback to regular query?
-				sendErr(err)
-				return
-			}
-			tx.ApplyOffer(offer)
-
-			results <- GetResult{
-				Size:         int64(offer.Size),
-				Status:       "DealStatusSelectedOffer",
-				UnsealPrice:  filecoin.FIL(offer.UnsealPrice).Short(),
-				TotalFunds:   filecoin.FIL(offer.RetrievalPrice()).String(),
-				PricePerByte: filecoin.FIL(offer.MinPricePerByte).Short(),
-			}
-
-			selection, err := tx.Triage()
-			if err != nil {
-				sendErr(err)
-				return
-			}
-			selection.Exec()
+			sendErr(err)
+			return
 		}
+		// We can query a specific miner on top of gossip
+		// that offer will be at the top of the list if we receive it
+		if args.Miner != "" {
+			miner, err := address.NewFromString(args.Miner)
+			if err != nil {
+				sendErr(err)
+			}
+			info, err := nd.filMinerInfo(ctx, miner)
+			if err != nil {
+				sendErr(err)
+			}
+			offer, err := tx.QueryOffer(*info, sel.All())
+			if err != nil {
+				// We shouldn't fail here, the transfer could still work with other peers
+				log.Error().Err(err).Str("id", info.ID.String()).Msg("querying from peer")
+			} else {
+				tx.ApplyOffer(offer)
+			}
+		}
+
+		log.Info().Msg("waiting for triage")
+
+		// The selection comes back for ALL the content
+		selection, err := tx.Triage()
+		if err != nil {
+			sendErr(err)
+			return
+		}
+		offer := selection.Offer
+		funds := nd.exch.Deals().GetFundsForCid(root)
+		// if no funds have been loaded we will be loading funds for the whole dag
+		if funds.IsZero() {
+			funds = offer.RetrievalPrice()
+		}
+
+		log.Info().Msg("selected an offer")
+
+		results <- GetResult{
+			Size:         int64(offer.Size),
+			Status:       "DealStatusSelectedOffer",
+			TotalFunds:   filecoin.FIL(funds).String(),
+			UnsealPrice:  filecoin.FIL(offer.UnsealPrice).Short(),
+			PricePerByte: filecoin.FIL(offer.MinPricePerByte).Short(),
+		}
+
+		selection.Exec()
 
 		now := time.Now()
 		discDuration := now.Sub(start)
 
 		var dref exchange.DealRef
-		select {
-		case dref = <-tx.Ongoing():
-		case <-ctx.Done():
-			sendErr(ctx.Err())
-			return
-		}
-
-		log.Info().Msg("started transfer")
-
-		results <- GetResult{
-			DealID: dref.ID.String(),
-		}
-
-		select {
-		case res := <-tx.Done():
-			log.Info().Str("spent", filecoin.FIL(res.Spent).String()).Msg("finished transfer")
-			if res.Err != nil {
-				log.Error().Err(res.Err).Msg("transfer failed")
-				sendErr(res.Err)
-				return
-			}
-
-			if args.Key == "" {
-				// transfer was successful so we keep the offer around
-				// we were just retrieving the index
-				err := nd.exch.Offers().SetOfferForCid(root, offer)
-				if err != nil {
-					log.Error().Err(err).Msg("setting offer")
-				}
-			}
-
-			ref := tx.Ref()
-			err = nd.exch.Index().SetRef(tx.Ref())
-			if err == exchange.ErrRefAlreadyExists {
-				if err := nd.exch.Index().UpdateRef(ref); err != nil {
-					log.Error().Err(err).Msg("updating ref")
-				}
-			} else if err != nil {
-				sendErr(err)
-				return
-			}
-
-			end := time.Now()
-			transDuration := end.Sub(start) - discDuration
-
+		for {
 			select {
-			case results <- GetResult{
-				Status:          "Completed",
-				DiscLatSeconds:  discDuration.Seconds(),
-				TransLatSeconds: transDuration.Seconds(),
-			}:
+			case dref = <-tx.Ongoing():
+				results <- GetResult{
+					Status: "NewDeal",
+					DealID: dref.ID.String(),
+				}
+				log.Info().Uint64("id", uint64(dref.ID)).Msg("started new deal")
+			case res := <-tx.Done():
+				log.Info().Str("spent", filecoin.FIL(res.Spent).String()).Msg("finished transfer")
+				if res.Err != nil {
+					log.Error().Err(res.Err).Msg("transfer failed")
+					sendErr(res.Err)
+					return
+				}
+
+				ref := tx.Ref()
+				err = nd.exch.Index().SetRef(ref)
+				if err == exchange.ErrRefAlreadyExists {
+					if err := nd.exch.Index().UpdateRef(ref); err != nil {
+						log.Error().Err(err).Msg("updating ref")
+					}
+				} else if err != nil {
+					sendErr(err)
+					return
+				}
+
+				end := time.Now()
+				transDuration := end.Sub(start) - discDuration
+
+				select {
+				case results <- GetResult{
+					Status:          "Completed",
+					DiscLatSeconds:  discDuration.Seconds(),
+					TransLatSeconds: transDuration.Seconds(),
+				}:
+				case <-ctx.Done():
+					sendErr(ctx.Err())
+					return
+				}
+
+				if res.PayCh != address.Undef {
+					err := tx.Close()
+					if err != nil {
+						log.Error().Err(err).Msg("closing tx")
+					}
+					mk, err := utils.MapMissingKeys(ctx, root, storeutil.LoaderForBlockstore(nd.bs))
+					if err != nil {
+						log.Error().Err(err).Msg("getting missing keys")
+					}
+					funds := nd.exch.Deals().GetFundsForCid(root)
+					// If we fetched all the keys we can remove the offer
+					// TODO: when blocks are properly deduplicated we can check if paych
+					// available funds are 0.
+					if len(mk) == 0 || funds.IsZero() {
+						err := nd.exch.Deals().RemoveOffer(root)
+						if err != nil {
+							log.Error().Err(err).Msg("removing offer")
+						}
+					}
+				}
+				return
 			case <-ctx.Done():
+				log.Error().Msg("load timed out")
 				sendErr(ctx.Err())
 				return
 			}
-
-			if res.PayCh != address.Undef {
-				err := tx.Close()
-				if err != nil {
-					log.Error().Err(err).Msg("closing tx")
-				}
-				mk, err := utils.MapMissingKeys(ctx, root, storeutil.LoaderForBlockstore(nd.bs))
-				if err != nil {
-					log.Error().Err(err).Msg("getting missing keys")
-				}
-				funds, err := nd.exch.Payments().ChannelAvailableFunds(res.PayCh)
-				if err != nil {
-					log.Error().Err(err).Msg("getting available funds")
-				}
-				remain := big.Sub(funds.ConfirmedAmt, funds.VoucherRedeemedAmt)
-				// If we fetched all the keys we can remove the offer
-				// TODO: when blocks are properly deduplicated we can check if paych
-				// available funds are 0.
-				if len(mk) == 0 || remain.IsZero() {
-					err := nd.exch.Offers().RemoveOffer(root)
-					if err != nil {
-						log.Error().Err(err).Msg("removing offer")
-					}
-				}
-			}
-			return
-		case <-ctx.Done():
-			return
 		}
 
 	}()

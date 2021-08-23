@@ -21,8 +21,10 @@ import (
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-merkledag"
+	"github.com/ipfs/go-unixfs"
 	unixfile "github.com/ipfs/go-unixfs/file"
 	"github.com/ipld/go-ipld-prime"
+	dagpb "github.com/ipld/go-ipld-prime-proto"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -37,8 +39,7 @@ import (
 )
 
 // DefaultHashFunction used for generating CIDs of imported data
-// although less convenient than SHA2, BLAKE2B seems to be more peformant in most cases
-const DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
+const DefaultHashFunction = uint64(mh.SHA2_256)
 
 // ErrNoStrategy is returned when we try querying content without a read strategy
 var ErrNoStrategy = errors.New("no strategy")
@@ -79,6 +80,8 @@ type Tx struct {
 	rou *GossipRouting
 	// retriever manages the state of the transfer once we have a good offer
 	retriever *retrieval.Client
+	// deals keeps track of ongoing provider offers to use instead of querying the network
+	deals *deal.Mgr
 	// index is the exchange content index
 	index *Index
 	// repl is the replication module
@@ -91,11 +94,15 @@ type Tx struct {
 	size int64
 	// chunk size is the chunk size to use when adding files
 	chunkSize int64
+	// codec defines what IPLD multicodec to use for assembling the entries
+	codec uint64
 	// cacheRF is the cache replication factor used when committing to storage
 	cacheRF int
 	// sel is the selector used to select specific nodes only to retrieve. if not provided we select
 	// all the nodes by default
 	sel ipld.Node
+	// we can also declare the nodes to retrieve using a list of paths
+	paths []string
 	// done is the final message telling us we have received all the blocks and all is well. if the error
 	// is not nil we've run out of options and nothing we can do at this time will get us the content.
 	done chan TxResult
@@ -145,6 +152,13 @@ func WithRoot(r cid.Cid) TxOption {
 func WithTriage() TxOption {
 	return func(tx *Tx) {
 		tx.triage = make(chan DealSelection)
+	}
+}
+
+// WithCodec changes the codec to use for aggregating the entries in a single root
+func WithCodec(codec uint64) TxOption {
+	return func(tx *Tx) {
+		tx.codec = codec
 	}
 }
 
@@ -200,57 +214,94 @@ func (tx *Tx) Status() (Status, error) {
 	return Status(tx.entries), nil
 }
 
+// rootProto returns the node prototype to use for assembling entries
+func (tx *Tx) rootProto() (ipld.NodePrototype, error) {
+	var proto ipld.NodePrototype
+	switch tx.codec {
+	case 0x70:
+		proto = dagpb.Type.PBNode
+	case 0x71:
+		proto = basicnode.Prototype.Map
+	default:
+		return nil, errors.New("codec invalid")
+	}
+	return proto, nil
+}
+
+// EntrySlice is a slice of entries exposing method for sorting
+type EntrySlice []Entry
+
+func (es EntrySlice) Len() int           { return len(es) }
+func (es EntrySlice) Swap(a, b int)      { es[a], es[b] = es[b], es[a] }
+func (es EntrySlice) Less(a, b int) bool { return es[a].Key < es[b].Key }
+
 // assemble all the entries into a single dag Node
 func (tx *Tx) assembleEntries() (ipld.Node, error) {
-	// We need a single root CID so we make a list with the roots of all dagpb roots
-	nb := basicnode.Prototype.Map.NewBuilder()
+	proto, err := tx.rootProto()
+	if err != nil {
+		return nil, err
+	}
+	nb := proto.NewBuilder()
 	as, err := nb.BeginMap(len(tx.entries))
 	if err != nil {
 		return nil, err
 	}
-
-	for k, v := range tx.entries {
-		eas, err := as.AssembleEntry(k)
+	// Create an entry for all the links
+	lks, err := as.AssembleEntry("Links")
+	if err != nil {
+		return nil, err
+	}
+	// Create a list of entries
+	lm, err := lks.BeginList(len(tx.entries))
+	if err != nil {
+		return nil, err
+	}
+	entries, err := tx.Entries()
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range entries {
+		mas, err := lm.AssembleValue().BeginMap(3)
 		if err != nil {
 			return nil, err
 		}
-		// Each entry is also a map with 2 keys: Name and Link
-		mas, err := eas.BeginMap(2)
+		nas, err := mas.AssembleEntry("Name")
 		if err != nil {
 			return nil, err
 		}
-		nas, err := mas.AssembleEntry("Key")
+		if err := nas.AssignString(v.Key); err != nil {
+			return nil, err
+		}
+		has, err := mas.AssembleEntry("Hash")
 		if err != nil {
 			return nil, err
 		}
-		err = nas.AssignString(k)
+		if err := has.AssignLink(cidlink.Link{Cid: v.Value}); err != nil {
+			return nil, err
+		}
+		sas, err := mas.AssembleEntry("Tsize")
 		if err != nil {
 			return nil, err
 		}
-		las, err := mas.AssembleEntry("Value")
-		if err != nil {
+		if err := sas.AssignInt(int(v.Size)); err != nil {
 			return nil, err
 		}
-		clk := cidlink.Link{Cid: v.Value}
-		err = las.AssignLink(clk)
-		if err != nil {
-			return nil, err
-		}
-		sas, err := mas.AssembleEntry("Size")
-		if err != nil {
-			return nil, err
-		}
-		err = sas.AssignInt(int(v.Size))
-		if err != nil {
-			return nil, err
-		}
-		err = mas.Finish()
-		if err != nil {
+		if err := mas.Finish(); err != nil {
 			return nil, err
 		}
 	}
-	err = as.Finish()
+	if err := lm.Finish(); err != nil {
+		return nil, err
+	}
+	// Add folder pb data to stay compatible with unixfs
+	dt, err := as.AssembleEntry("Data")
 	if err != nil {
+		return nil, err
+	}
+	if err := dt.AssignBytes(unixfs.FolderPBData()); err != nil {
+		return nil, err
+	}
+	if err := as.Finish(); err != nil {
 		return nil, err
 	}
 	return nb.Build(), nil
@@ -258,30 +309,25 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 
 // updateDAG stores the current contents of the index in an array to yield a single root CID
 func (tx *Tx) buildRoot() error {
-	lb := cidlink.LinkBuilder{
-		Prefix: cid.Prefix{
-			Version:  1,
-			Codec:    0x71, // dag-cbor as per multicodec
-			MhType:   DefaultHashFunction,
-			MhLength: -1,
-		},
-	}
-
 	var size int64
 	for _, e := range tx.entries {
 		size += e.Size
+	}
+
+	lb := cidlink.LinkBuilder{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    tx.codec,
+			MhType:   DefaultHashFunction,
+			MhLength: -1,
+		},
 	}
 
 	nd, err := tx.assembleEntries()
 	if err != nil {
 		return err
 	}
-	lnk, err := lb.Build(
-		tx.ctx,
-		ipld.LinkContext{},
-		nd,
-		tx.store.Storer,
-	)
+	lnk, err := lb.Build(tx.ctx, ipld.LinkContext{}, nd, tx.store.Storer)
 	if err != nil {
 		return err
 	}
@@ -426,42 +472,99 @@ func (tx *Tx) Keys() ([]string, error) {
 	return keys, nil
 }
 
+func (tx *Tx) getEntry(key string, loader ipld.Loader) (en Entry, err error) {
+	lk := cidlink.Link{Cid: tx.root}
+	proto, err := tx.rootProto()
+	if err != nil {
+		return en, err
+	}
+	nb := proto.NewBuilder()
+
+	err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return en, err
+	}
+	nd := nb.Build()
+	links, err := nd.LookupByString("Links")
+	if err != nil {
+		return en, err
+	}
+	it := links.ListIterator()
+
+	for !it.Done() {
+		_, v, err := it.Next()
+		if err != nil {
+			return en, err
+		}
+		nn, err := v.LookupByString("Name")
+		if err != nil {
+			return en, err
+		}
+		name, err := nn.AsString()
+		if err != nil {
+			return en, err
+		}
+		if name != key {
+			continue
+		}
+		ln, err := v.LookupByString("Hash")
+		if err != nil {
+			return en, err
+		}
+		l, err := ln.AsLink()
+		if err != nil {
+			return en, err
+		}
+		sn, err := v.LookupByString("Tsize")
+		if err != nil {
+			return en, err
+		}
+		s, err := sn.AsInt()
+		if err != nil {
+			return en, err
+		}
+		return Entry{
+			Key:   key,
+			Value: l.(cidlink.Link).Cid,
+			Size:  int64(s),
+		}, nil
+	}
+	return en, errors.New("entry not found")
+}
+
 // RootFor returns the root of a given key
 // @TODO: improve scaling and performance for accessing subroots
 func (tx *Tx) RootFor(key string) (cid.Cid, error) {
+	if key == "*" {
+		return tx.root, nil
+	}
 	loader := storeutil.LoaderForBlockstore(tx.bs)
 	if _, err := tx.index.GetRef(tx.root); err != nil {
 		// Keys might still be in multistore
 		loader = tx.store.Loader
 	}
-
-	lk := cidlink.Link{Cid: tx.root}
-	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
-	nb := basicnode.Prototype.Map.NewBuilder()
-	// Use a loader from the link to read all the children blocks from the global store
-	err := lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	entry, err := tx.getEntry(key, loader)
 	if err != nil {
 		return cid.Undef, err
 	}
-	// load the IPLD tree
-	nd := nb.Build()
-	entry, err := nd.LookupByString(key)
-	if err != nil {
-		return cid.Undef, err
-	}
-	vnd, err := entry.LookupByString("Value")
-	if err != nil {
-		return cid.Undef, err
-	}
-	l, err := vnd.AsLink()
-	if err != nil {
-		return cid.Undef, err
-	}
-	return l.(cidlink.Link).Cid, nil
+	return entry.Value, nil
 }
 
-// Entries returns all the entries in the root map of this transaction
+// Entries returns all the entries in the root map of this transaction sorted by key
 func (tx *Tx) Entries() ([]Entry, error) {
+	// If this transaction has entries we just return them otherwise
+	// we're looking at a different transaction
+	if len(tx.entries) > 0 {
+		entries := make([]Entry, len(tx.entries))
+		i := 0
+		for _, v := range tx.entries {
+			entries[i] = v
+			i++
+		}
+		sort.Stable(EntrySlice(entries))
+		return entries, nil
+	}
+
 	loader := storeutil.LoaderForBlockstore(tx.bs)
 	if _, err := tx.index.GetRef(tx.root); err != nil {
 		// Keys might still be in multistore
@@ -469,34 +572,47 @@ func (tx *Tx) Entries() ([]Entry, error) {
 	}
 
 	lk := cidlink.Link{Cid: tx.root}
+	proto, err := tx.rootProto()
+	if err != nil {
+		return nil, err
+	}
 	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
-	nb := basicnode.Prototype.Map.NewBuilder()
+	nb := proto.NewBuilder()
 	// Use a loader from the link to read all the children blocks from the global store
-	err := lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
 	if err != nil {
 		return nil, err
 	}
 	// load the IPLD tree
 	nd := nb.Build()
+
+	links, err := nd.LookupByString("Links")
+	if err != nil {
+		return nil, err
+	}
 	// Gather the keys in an array
-	entries := make([]Entry, nd.Length())
-	it := nd.MapIterator()
+	entries := make([]Entry, links.Length())
+	it := links.ListIterator()
 	i := 0
 	// Iterate over all the map entries
 	for !it.Done() {
-		k, v, err := it.Next()
+		_, v, err := it.Next()
 		// all succeed or fail
 		if err != nil {
 			return nil, err
 		}
 
-		key, err := k.AsString()
+		nn, err := v.LookupByString("Name")
+		if err != nil {
+			return nil, err
+		}
+		key, err := nn.AsString()
 		if err != nil {
 			return nil, err
 		}
 
 		// An entry with no value should fail
-		vn, err := v.LookupByString("Value")
+		vn, err := v.LookupByString("Hash")
 		if err != nil {
 			return nil, err
 		}
@@ -512,7 +628,7 @@ func (tx *Tx) Entries() ([]Entry, error) {
 		i++
 
 		// An entry with no size is still fine
-		sn, err := v.LookupByString("Size")
+		sn, err := v.LookupByString("Tsize")
 		if err != nil {
 			log.Debug().Str("key", key).Msg("no size present in entry")
 			continue
@@ -529,28 +645,11 @@ func (tx *Tx) Entries() ([]Entry, error) {
 }
 
 func (tx *Tx) loadFileEntry(k string, store *multistore.Store) (files.Node, error) {
-	lk := cidlink.Link{Cid: tx.root}
-	nb := basicnode.Prototype.Map.NewBuilder()
-
-	err := lk.Load(tx.ctx, ipld.LinkContext{}, nb, store.Loader)
+	entry, err := tx.getEntry(k, store.Loader)
 	if err != nil {
 		return nil, err
 	}
-	nd := nb.Build()
-	entry, err := nd.LookupByString(k)
-	if err != nil {
-		return nil, err
-	}
-	ln, err := entry.LookupByString("Value")
-	if err != nil {
-		return nil, err
-	}
-	l, err := ln.AsLink()
-	if err != nil {
-		return nil, err
-	}
-	flk := l.(cidlink.Link).Cid
-	return tx.getUnixDAG(flk, store.DAG)
+	return tx.getUnixDAG(entry.Value, store.DAG)
 }
 
 // WatchDispatch registers a function to be called every time
@@ -639,12 +738,32 @@ func (ds DealSelection) Next() {
 }
 
 // Query the discovery service for offers
-func (tx *Tx) Query(sel ipld.Node) error {
-	tx.sel = sel
-	if tx.worker != nil {
-		return tx.rou.Query(tx.ctx, tx.root, sel)
+func (tx *Tx) Query(paths ...string) error {
+	if tx.worker == nil {
+		return ErrNoStrategy
 	}
-	return ErrNoStrategy
+	// For now we assume providers must have all the blocks from a given root
+	// to send a valid offer. When selectors improve we may be able to query for partial offers.
+	tx.sel = selectors.All()
+	// clean paths
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		tx.paths = append(tx.paths, p)
+	}
+	offer, err := tx.deals.FindOfferByCid(tx.root)
+	if err == nil {
+		info, err := offer.AddrInfo()
+		if err == nil {
+			newoffer, err := tx.QueryOffer(*info, tx.sel)
+			if err == nil {
+				tx.ApplyOffer(newoffer)
+				return nil
+			}
+		}
+	}
+	return tx.rou.Query(tx.ctx, tx.root, selectors.All())
 }
 
 // QueryOffer allows querying directly from a given peer
@@ -662,7 +781,31 @@ func (tx *Tx) ApplyOffer(offer deal.Offer) {
 
 // Execute starts a retrieval operation for a given offer and returns the deal ID for that operation
 func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
-	result := make(chan TxResult, 1)
+	info, err := of.AddrInfo()
+	if err != nil {
+		return TxResult{
+			Err: err,
+		}
+	}
+	// Make sure our provider is in our peerstore
+	tx.rou.AddAddrs(info.ID, info.Addrs)
+
+	// number of transfers is 1 by default
+	transferCount := 1
+
+	var root cid.Cid
+	if len(tx.paths) > 0 && tx.paths[0] != "*" {
+		// number of transfers based on path + initial index if needed
+		transferCount = len(tx.paths)
+		// check if we can already get the root of the first path
+		root, err = tx.RootFor(tx.paths[0])
+		if err != nil {
+			// we need to retrieve the entries first
+			transferCount++
+		}
+	}
+
+	results := make(chan TxResult, transferCount)
 	tx.unsub = tx.retriever.SubscribeToEvents(func(event client.Event, state deal.ClientState) {
 		switch state.Status {
 		case deal.StatusCompleted:
@@ -671,17 +814,16 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 				payCh = state.PaymentInfo.PayCh
 			}
 			select {
-			case result <- TxResult{
+			case results <- TxResult{
 				Size:  state.TotalReceived,
 				Spent: state.FundsSpent,
 				PayCh: payCh,
 			}:
 			default:
 			}
-			return
 		case deal.StatusCancelled, deal.StatusErrored:
 			select {
-			case result <- TxResult{
+			case results <- TxResult{
 				Err: errors.New(deal.Statuses[state.Status]),
 			}:
 			default:
@@ -690,63 +832,95 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 		}
 	})
 
-	info, err := of.AddrInfo()
-	if err != nil {
-		return TxResult{
-			Err: err,
-		}
-	}
-	if p.Selector == nil {
-		p.Selector = tx.sel
-	}
-	// Make sure our provider is in our peerstore
-	tx.rou.AddAddrs(info.ID, info.Addrs)
-	params, err := deal.NewParams(
-		of.MinPricePerByte,
-		of.MaxPaymentInterval,
-		of.MaxPaymentIntervalIncrease,
-		p.Selector,
-		nil,
-		of.UnsealPrice,
-	)
-	if err != nil {
-		return TxResult{
-			Err: err,
-		}
+	final := TxResult{
+		Spent: abi.NewTokenAmount(0),
 	}
 
-	id, err := tx.retriever.Retrieve(
-		tx.ctx,
-		tx.root,
-		params,
-		p.TotalFunds,
-		info.ID,
-		tx.clientAddr,
-		of.PaymentAddress,
-		&tx.storeID,
-	)
-	if err != nil {
-		return TxResult{
-			Err: err,
+	for i := 0; i < transferCount; i++ {
+
+		funds := tx.deals.GetFundsForCid(tx.root)
+
+		sel := selectors.All()
+		if root == cid.Undef {
+			root = tx.root
+			if len(tx.paths) == 0 || tx.paths[i] != "*" {
+				// if we will be fetching some paths we need to retrieve the entries first
+				sel = selectors.Entries()
+			}
+			// set the funds as for the total size of the DAG
+			funds = of.RetrievalPrice()
+
+		}
+
+		// we've fetched the entries already or the root from the first path,
+		// switch the root to the next path
+		if i > 0 {
+			root, err = tx.RootFor(tx.paths[i-1])
+			if err != nil {
+				return TxResult{
+					Err: err,
+				}
+			}
+		}
+		params, err := deal.NewParams(
+			of.MinPricePerByte,
+			of.MaxPaymentInterval,
+			of.MaxPaymentIntervalIncrease,
+			sel,
+			nil,
+			of.UnsealPrice,
+		)
+		if err != nil {
+			return TxResult{
+				Err: err,
+			}
+		}
+
+		id, err := tx.retriever.Retrieve(
+			tx.ctx,
+			root,
+			params,
+			funds,
+			info.ID,
+			tx.clientAddr,
+			of.PaymentAddress,
+			&tx.storeID,
+		)
+		if err != nil {
+			final.Err = err
+			return final
+		}
+		tx.ongoing <- DealRef{
+			ID:    id,
+			Offer: of,
+		}
+		select {
+		case res := <-results:
+			if res.Err == nil {
+				tx.committed = true
+			}
+			if root.Equals(tx.root) {
+				err := tx.deals.SetOfferForCid(root, of)
+				if err != nil {
+					log.Error().Err(err).Msg("failed to set offer")
+				}
+			}
+			// For now we just return the error and assume the transfer is failed
+			// we do have access to the status in order to try and restart the deal or something else
+			final.Size += res.Size
+			final.Spent = filecoin.BigAdd(final.Spent, res.Spent)
+			final.PayCh = res.PayCh
+
+			remaining := filecoin.BigSub(funds, res.Spent)
+			tx.deals.SetFundsForCid(tx.root, remaining)
+
+			continue
+		case <-tx.ctx.Done():
+			final.Err = tx.ctx.Err()
+			return final
 		}
 	}
-	tx.ongoing <- DealRef{
-		ID:    id,
-		Offer: of,
-	}
-	select {
-	case res := <-result:
-		if res.Err == nil {
-			tx.committed = true
-		}
-		// For now we just return the error and assume the transfer is failed
-		// we do have access to the status in order to try and restart the deal or something else
-		return res
-	case <-tx.ctx.Done():
-		return TxResult{
-			Err: tx.ctx.Err(),
-		}
-	}
+	return final
 }
 
 // Confirm takes an offer and blocks to wait for user confirmation before returning true or false

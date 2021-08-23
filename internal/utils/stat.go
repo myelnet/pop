@@ -3,8 +3,10 @@ package utils
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/filecoin-project/go-multistore"
 	blocks "github.com/ipfs/go-block-format"
@@ -122,82 +124,110 @@ func (kl KeyList) AsBytes() [][]byte {
 	return out
 }
 
+// Sorted ensures the key list is sorted
+func (kl KeyList) Sorted() KeyList {
+	sort.Strings(kl)
+	return kl
+}
+
 // MapLoadableKeys returns all the keys of a Tx, given its cid and a loader
 // this only returns the keys for entries where the blocks are available in the blockstore
+// it supports both dagpb and dagcbor nodes
 func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) {
 	// Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
-	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
-	nb := basicnode.Prototype.Map.NewBuilder()
-	// Use a loader from the link to read all the children blocks from a given store
-	err := lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+
+	nodeType, err := Chooser(lk, ipld.LinkContext{})
+	if err != nil {
+		return nil, err
+	}
+	nb := nodeType.NewBuilder()
+
+	err = lk.Load(ctx, ipld.LinkContext{}, nb, loader)
 	if err != nil {
 		return nil, err
 	}
 	// load the IPLD tree
 	nd := nb.Build()
+
 	// Gather the keys in an array
 	var entries []string
-	it := nd.MapIterator()
-	// Iterate over all the map entries
+
+	links, err := nd.LookupByString("Links")
+	if err != nil {
+		return nil, err
+	}
+	it := links.ListIterator()
+
 	for !it.Done() {
-		k, v, err := it.Next()
-		// all succeed or fail
+		_, v, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		vnd, err := v.LookupByString("Value")
+		ln, err := v.LookupByString("Hash")
 		if err != nil {
 			return nil, err
-		}
-		l, err := vnd.AsLink()
-		if err != nil {
-			return nil, err
-		}
-		nodeType, err := Chooser(l, ipld.LinkContext{})
-		if err != nil {
-			return nil, err
-		}
-		builder := nodeType.NewBuilder()
-		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
-		if err != nil {
-			// The block might not be available in the store
-			continue
 		}
 
-		// The key IPLD node needs to be decoded as a string
-		key, err := k.AsString()
+		l, err := ln.AsLink()
+		if err != nil {
+			return nil, err
+		}
+		nt, err := Chooser(l, ipld.LinkContext{})
+		if err != nil {
+			return nil, err
+		}
+		builder := nt.NewBuilder()
+		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
+		if err != nil {
+			continue
+		}
+		kn, err := v.LookupByString("Name")
+		if err != nil {
+			return nil, err
+		}
+		key, err := kn.AsString()
 		if err != nil {
 			return nil, err
 		}
 		entries = append(entries, key)
 	}
-	return KeyList(entries), nil
+	return entries, nil
 }
 
 // MapMissingKeys returns keys for values for which the links are not loadable
 func MapMissingKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) { // Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
-	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
-	nb := basicnode.Prototype.Map.NewBuilder()
-	// Use a loader from the link to read all the children blocks from a given store
-	err := lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+	nodeType, err := Chooser(lk, ipld.LinkContext{})
 	if err != nil {
 		return nil, err
 	}
+	nb := nodeType.NewBuilder()
+
+	err = lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+	if err != nil {
+		return nil, err
+	}
+
 	// load the IPLD tree
 	nd := nb.Build()
 	// Gather the keys in an array
 	var entries []string
-	it := nd.MapIterator()
+
+	links, err := nd.LookupByString("Links")
+	if err != nil {
+		return nil, err
+	}
+	it := links.ListIterator()
+
 	// Iterate over all the map entries
 	for !it.Done() {
-		k, v, err := it.Next()
+		_, v, err := it.Next()
 		// all succeed or fail
 		if err != nil {
 			return nil, err
 		}
-		vnd, err := v.LookupByString("Value")
+		vnd, err := v.LookupByString("Hash")
 		if err != nil {
 			return nil, err
 		}
@@ -212,8 +242,12 @@ func MapMissingKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyL
 		builder := nodeType.NewBuilder()
 		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
 		if err != nil {
+			kn, err := v.LookupByString("Name")
+			if err != nil {
+				return nil, err
+			}
 			// The block is not available in the store
-			key, err := k.AsString()
+			key, err := kn.AsString()
 			if err != nil {
 				return nil, err
 			}
@@ -248,4 +282,16 @@ func MigrateSelectBlocks(ctx context.Context, from blockstore.Blockstore, to blo
 	return WalkDAG(ctx, root, from, sel, func(block blocks.Block) error {
 		return to.Put(block)
 	})
+}
+
+// CodecFromString returns a codec code from a string name
+func CodecFromString(name string) (uint64, error) {
+	switch name {
+	case "dagcbor":
+		return 0x71, nil
+	case "dagpb":
+		return 0x70, nil
+	default:
+		return 0, errors.New("invalid codec name")
+	}
 }

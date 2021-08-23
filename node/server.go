@@ -159,7 +159,7 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if !has {
 		// If there is already a payment channel open we can handle it
 		// else the delay for loading a payment channel is not reasonnable for an HTTP request
-		_, err = s.node.exch.Offers().FindOfferByCid(root)
+		_, err = s.node.exch.Deals().FindOfferByCid(root)
 		if err != nil {
 			http.Error(w, "content not cached on this node", http.StatusNotFound)
 			return
@@ -232,8 +232,17 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 
 	var root cid.Cid
 	if mediatype == "multipart/form-data" {
+		codec := uint64(0x71)
+		codecString := r.Header.Get("Codec-Type")
+		if codecString != "" {
+			codec, err = utils.CodecFromString(codecString)
+			if err != nil {
+				http.Error(w, "invalid codec name", http.StatusBadRequest)
+				return
+			}
+		}
 		mr := multipart.NewReader(r.Body, params["boundary"])
-		tx := s.node.exch.Tx(r.Context())
+		tx := s.node.exch.Tx(r.Context(), exchange.WithCodec(codec))
 		defer tx.Close()
 
 		// Set Cache Replication-Factor
