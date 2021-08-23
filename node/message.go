@@ -25,6 +25,7 @@ type PingArgs struct {
 type PutArgs struct {
 	Path      string
 	ChunkSize int
+	Codec     uint64
 }
 
 // StatusArgs get passed to the Status command

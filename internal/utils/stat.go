@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -281,4 +282,16 @@ func MigrateSelectBlocks(ctx context.Context, from blockstore.Blockstore, to blo
 	return WalkDAG(ctx, root, from, sel, func(block blocks.Block) error {
 		return to.Put(block)
 	})
+}
+
+// CodecFromString returns a codec code from a string name
+func CodecFromString(name string) (uint64, error) {
+	switch name {
+	case "dagcbor":
+		return 0x71, nil
+	case "dagpb":
+		return 0x70, nil
+	default:
+		return 0, errors.New("invalid codec name")
+	}
 }

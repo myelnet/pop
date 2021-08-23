@@ -436,7 +436,7 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 	nd.txmu.Lock()
 	defer nd.txmu.Unlock()
 	if nd.tx == nil {
-		nd.tx = nd.exch.Tx(ctx)
+		nd.tx = nd.exch.Tx(ctx, exchange.WithCodec(args.Codec))
 	}
 
 	fstat, err := os.Stat(args.Path)
@@ -799,7 +799,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				}
 
 				ref := tx.Ref()
-				err = nd.exch.Index().SetRef(tx.Ref())
+				err = nd.exch.Index().SetRef(ref)
 				if err == exchange.ErrRefAlreadyExists {
 					if err := nd.exch.Index().UpdateRef(ref); err != nil {
 						log.Error().Err(err).Msg("updating ref")

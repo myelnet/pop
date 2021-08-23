@@ -232,8 +232,17 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 
 	var root cid.Cid
 	if mediatype == "multipart/form-data" {
+		codec := uint64(0x71)
+		codecString := r.Header.Get("Codec-Type")
+		if codecString != "" {
+			codec, err = utils.CodecFromString(codecString)
+			if err != nil {
+				http.Error(w, "invalid codec name", http.StatusBadRequest)
+				return
+			}
+		}
 		mr := multipart.NewReader(r.Body, params["boundary"])
-		tx := s.node.exch.Tx(r.Context())
+		tx := s.node.exch.Tx(r.Context(), exchange.WithCodec(codec))
 		defer tx.Close()
 
 		// Set Cache Replication-Factor

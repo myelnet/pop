@@ -11,12 +11,14 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
 var putArgs struct {
 	chunkSize int
+	codec     string
 }
 
 var putCmd = &ffcli.Command{
@@ -33,6 +35,7 @@ stores the blocks in the block store. The DAG is then staged in a pending or new
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("put", flag.ExitOnError)
 		fs.IntVar(&putArgs.chunkSize, "chunk-size", 1024, "chunk size in bytes")
+		fs.StringVar(&putArgs.codec, "codec", "dagcbor", "codec used for aggregating transaction entries. supports dagcbor or dagpb")
 		return fs
 	})(),
 }
@@ -60,9 +63,15 @@ func runPut(ctx context.Context, args []string) error {
 		filePath = filepath.Join(mydir, filePath)
 	}
 
+	codec, err := utils.CodecFromString(putArgs.codec)
+	if err != nil {
+		return err
+	}
+
 	cc.Put(&node.PutArgs{
 		Path:      filePath,
 		ChunkSize: putArgs.chunkSize,
+		Codec:     codec,
 	})
 
 	buf := bytes.NewBuffer(nil)
