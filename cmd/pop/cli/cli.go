@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	ilog "github.com/ipfs/go-log"
 	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3"
@@ -84,11 +83,11 @@ func Run(args []string) error {
 	}
 
 	// Uncomment to debug data transfers
-	ilog.SetLogLevel("dt_graphsync", "debug")
-	ilog.SetLogLevel("dt-chanmon", "debug")
-	ilog.SetLogLevel("dt-impl", "debug")
-	ilog.SetLogLevel("data_transfer", "debug")
-	ilog.SetLogLevel("data_transfer_network", "debug")
+	// ilog.SetLogLevel("dt_graphsync", "debug")
+	// ilog.SetLogLevel("dt-chanmon", "debug")
+	// ilog.SetLogLevel("dt-impl", "debug")
+	// ilog.SetLogLevel("data_transfer", "debug")
+	// ilog.SetLogLevel("data_transfer_network", "debug")
 
 	rootCmd := &ffcli.Command{
 		Name:       "pop",

@@ -112,8 +112,6 @@ func (rv *ProviderRequestValidator) ValidatePull(isRestart bool, chid datatransf
 		return nil, err
 	}
 
-	fmt.Println("==> Accept Deal")
-
 	return &response, nil
 }
 
@@ -373,7 +371,6 @@ func (pr *ProviderRevalidator) OnComplete(chid datatransfer.ChannelID) (bool, da
 
 	paymentOwed := big.Mul(abi.NewTokenAmount(int64(channel.totalSent-channel.totalPaidFor)), channel.pricePerByte)
 	if paymentOwed.Equals(big.Zero()) {
-		fmt.Println("==> OnComplete")
 		return true, &deal.Response{
 			ID:     channel.dealID.DealID,
 			Status: deal.StatusCompleted,

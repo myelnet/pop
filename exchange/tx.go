@@ -850,9 +850,6 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 			// set the funds as for the total size of the DAG
 			funds = of.RetrievalPrice()
 
-			fmt.Println("--- fetching entries")
-		} else {
-			fmt.Println("--- fetching entry")
 		}
 
 		// we've fetched the entries already or the root from the first path,
