@@ -122,6 +122,7 @@ func TestPut(t *testing.T) {
 	cn.Put(ctx, &PutArgs{
 		Path:      file.Name(),
 		ChunkSize: 1024,
+		Codec:     0x71,
 	})
 	<-added
 
@@ -185,6 +186,7 @@ func TestPutRace(t *testing.T) {
 			cn.Put(ctx, &PutArgs{
 				Path:      file.Name(),
 				ChunkSize: 1024,
+				Codec:     0x71,
 			})
 		}()
 	}
@@ -222,6 +224,7 @@ func TestPutGet(t *testing.T) {
 	cn.Put(ctx, &PutArgs{
 		Path:      p1,
 		ChunkSize: 1024,
+		Codec:     0x71,
 	})
 	<-added
 
@@ -295,6 +298,7 @@ func TestCommit(t *testing.T) {
 	cn.Put(ctx, &PutArgs{
 		Path:      p,
 		ChunkSize: 1024,
+		Codec:     0x71,
 	})
 	cid1 := <-added
 
@@ -332,6 +336,7 @@ func TestCommit(t *testing.T) {
 	cn.Put(ctx, &PutArgs{
 		Path:      p2,
 		ChunkSize: 1024,
+		Codec:     0x71,
 	})
 	cid2 := <-added
 
@@ -393,6 +398,7 @@ func TestGet(t *testing.T) {
 	pn.Put(ctx, &PutArgs{
 		Path:      p,
 		ChunkSize: 1024,
+		Codec:     0x71,
 	})
 	<-added
 
@@ -505,6 +511,7 @@ func TestMultipleGet(t *testing.T) {
 	pn.Put(ctx, &PutArgs{
 		Path:      p1,
 		ChunkSize: 1024,
+		Codec:     0x71,
 	})
 	<-added1
 
