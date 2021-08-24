@@ -16,6 +16,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
+	"github.com/myelnet/pop/metrics"
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog/log"
@@ -77,31 +78,31 @@ The 'pop start' command starts a pop daemon service.
 
 func runStart(ctx context.Context, args []string) error {
 	fmt.Printf(`
-. 　　   .  　 *  ✵ 　 　　 ✦ 
+. 　　   .  　 *  ✵ 　 　　 ✦
 　 　　　　　
  ·  ✦  　 　　.  *  　　　　　　
     　.  ·  ·
-  . ·   *  * ·  .  
+  . ·   *  * ·  .
  ·　　 ·  ✧     　　 ·
-                                                          
-ppppp   ppppppppp      ooooooooooo   ppppp   ppppppppp   
-p::::ppp:::::::::p   oo:::::::::::oo p::::ppp:::::::::p  
-p:::::::::::::::::p o:::::::::::::::op:::::::::::::::::p 
+
+ppppp   ppppppppp      ooooooooooo   ppppp   ppppppppp
+p::::ppp:::::::::p   oo:::::::::::oo p::::ppp:::::::::p
+p:::::::::::::::::p o:::::::::::::::op:::::::::::::::::p
 pp::::::ppppp::::::po:::::ooooo:::::opp::::::ppppp::::::p
  p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
  p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
  p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
  p:::::p    p::::::po::::o     o::::o p:::::p    p::::::p
  p:::::ppppp:::::::po:::::ooooo:::::o p:::::ppppp:::::::p
- p::::::::::::::::p o:::::::::::::::o p::::::::::::::::p 
- p::::::::::::::pp   oo:::::::::::oo  p::::::::::::::pp  
- p::::::pppppppp       ooooooooooo    p::::::pppppppp    
- p:::::p                              p:::::p            
- p:::::p                              p:::::p            
-p:::::::p                            p:::::::p           
-p:::::::p                            p:::::::p           
-p:::::::p                            p:::::::p           
-ppppppppp                            ppppppppp           
+ p::::::::::::::::p o:::::::::::::::o p::::::::::::::::p
+ p::::::::::::::pp   oo:::::::::::oo  p::::::::::::::pp
+ p::::::pppppppp       ooooooooooo    p::::::pppppppp
+ p:::::p                              p:::::p
+ p:::::p                              p:::::p
+p:::::::p                            p:::::::p
+p:::::::p                            p:::::::p
+p:::::::p                            p:::::::p
+ppppppppp                            ppppppppp
 
 -----------------------------------------------------------
 Manage your Myel point of presence from the command line.
@@ -168,6 +169,7 @@ Manage your Myel point of presence from the command line.
 
 	opts := node.Options{
 		RepoPath:       path,
+		Metrics: 				metrics.GetInfluxParams(),
 		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,
@@ -184,6 +186,7 @@ Manage your Myel point of presence from the command line.
 		log.Error().Err(err).Msg("node.Run")
 		return err
 	}
+
 	return nil
 }
 

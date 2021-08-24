@@ -23,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
 )
@@ -69,6 +70,8 @@ type Options struct {
 	// ReplInterval is the replication interval after which a worker will try to retrieve fresh new content
 	// on the network
 	ReplInterval time.Duration
+	// WatchQueriesFunc is an optional function that will return any queries received as a provider
+	WatchQueriesFunc func(deal.Query)
 }
 
 // Everything isn't thoroughly validated so we trust users who provide options know what they're doing

@@ -347,6 +347,15 @@ func Run(ctx context.Context, opts Options) error {
 		fmt.Printf("==> Connected to Filecoin RPC at %s\n", opts.FilEndpoint)
 	}
 
+	nd.metrics.Record("check-in",
+				map[string]string{"peer": nd.host.ID().String()},
+				map[string]interface{}{"msg": "logging-on"})
+
+	if nd.metrics.URL() != "" {
+		fmt.Printf("==> Checked-in with InfluxDB at %s\n", nd.metrics.URL())
+	}
+
+
 	server := &server{
 		node: nd,
 	}
