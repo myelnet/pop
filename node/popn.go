@@ -127,10 +127,6 @@ type Options struct {
 	CancelFunc context.CancelFunc
 }
 
-type MetricsRecorder interface {
-    Record(string, map[string]string, map[string]interface{})
-		URL() string
-}
 
 type node struct {
 	host host.Host
@@ -140,7 +136,7 @@ type node struct {
 	is   cbor.IpldStore
 	dag  ipldformat.DAGService
 	exch *exchange.Exchange
-	metrics MetricsRecorder
+	metrics metrics.MetricsRecorder
 
 	// opts keeps all the node params set when starting the node
 	opts Options
@@ -299,9 +295,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	if *opts.Metrics != (metrics.Config{}) {
-		nd.metrics = metrics.NewInfluxDBClient(*opts.Metrics)
-	}
+	nd.metrics = metrics.NewMetrics(opts.Metrics)
 
 	return nd, nil
 }

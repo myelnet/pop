@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	gopath "path"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -339,12 +338,14 @@ func Run(ctx context.Context, opts Options) error {
 		fmt.Printf("==> Connected to Filecoin RPC at %s\n", opts.FilEndpoint)
 	}
 
-	if reflect.TypeOf(nd.metrics) != nil {
-			nd.metrics.Record("check-in",
+	nd.metrics.Record("check-in",
 				map[string]string{"peer": nd.host.ID().String()},
 				map[string]interface{}{"msg": "logging-on"})
-			fmt.Printf("==> Checked-in with InfluxDB at %s\n", nd.metrics.URL())
+
+	if nd.metrics.URL() != "" {
+		fmt.Printf("==> Checked-in with InfluxDB at %s\n", nd.metrics.URL())
 	}
+
 
 	server := &server{
 		node: nd,

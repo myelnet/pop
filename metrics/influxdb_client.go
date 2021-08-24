@@ -12,17 +12,6 @@ const EnvInfluxDBToken = "INFLUXDB_TOKEN"
 const EnvInfluxDBOrg = "INFLUXDB_ORG"
 const EnvInfluxDBBucket = "INFLUXDB_BUCKET"
 
-type RetrievalMeasurement struct {
-  TimeSpent int
-  FileSize int
-  Peer string
-}
-
-type InfluxMessage struct {
-  Peer string
-  Msg string
-}
-
 
 type Config struct {
   InfluxURL string
@@ -31,6 +20,10 @@ type Config struct {
   Bucket string
 }
 
+type MetricsRecorder interface {
+    Record(string, map[string]string, map[string]interface{})
+    URL() string
+}
 
 // implements MetricsRecorder
 type InfluxDBClient struct {
@@ -56,7 +49,17 @@ func (idbc *InfluxDBClient) URL() string {
   return idbc.InfluxURL
 }
 
-func NewInfluxDBClient(params Config) *InfluxDBClient {
+type NullMetrics struct {}
+
+func (*NullMetrics) Record(name string, tag map[string]string, value map[string]interface{}) {}
+
+func (*NullMetrics) URL() string { return "" }
+
+func NewMetrics(params *Config) MetricsRecorder {
+
+  if params == nil {
+    return &NullMetrics{}
+  }
   // Create a new client using an InfluxDB server base URL and an authentication token
   client := influxdb.NewClient(params.InfluxURL, params.InfluxToken)
 
@@ -67,22 +70,22 @@ func NewInfluxDBClient(params Config) *InfluxDBClient {
 func GetInfluxParams() *Config {
   addr := os.Getenv(EnvInfluxDBURL)
 	if addr == "" {
-		return &Config{}
+		return nil
 	}
 
   token := os.Getenv(EnvInfluxDBToken)
 	if token == "" {
-		return &Config{}
+		return nil
 	}
 
   org := os.Getenv(EnvInfluxDBOrg)
   if org == "" {
-    return &Config{}
+    return nil
   }
 
   bucket := os.Getenv(EnvInfluxDBBucket)
   if bucket == "" {
-    return &Config{}
+    return nil
   }
 
   return &Config{addr, token, org, bucket}

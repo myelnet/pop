@@ -25,7 +25,6 @@ import (
 // PopConfig is the json config object we generate with the init command
 type PopConfig struct {
 	temp         bool
-	influxdb     bool
 	privKeyPath  string
 	regions      string
 	replInterval time.Duration
