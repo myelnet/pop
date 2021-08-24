@@ -107,6 +107,9 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 }
 
 func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.Offer, error) {
+	if e.opts.WatchQueriesFunc != nil {
+		e.opts.WatchQueriesFunc(q)
+	}
 	// This is used to increment LFU cache if the node is available
 	// the Stat method actually checks if the content is available.
 	_, _ = e.idx.GetRef(q.PayloadCID)

@@ -53,6 +53,7 @@ import (
 	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
+	"github.com/myelnet/pop/retrieval/provider"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
@@ -127,15 +128,14 @@ type Options struct {
 	CancelFunc context.CancelFunc
 }
 
-
 type node struct {
-	host host.Host
-	ds   datastore.Batching
-	bs   blockstore.Blockstore
-	ms   *multistore.MultiStore
-	is   cbor.IpldStore
-	dag  ipldformat.DAGService
-	exch *exchange.Exchange
+	host    host.Host
+	ds      datastore.Batching
+	bs      blockstore.Blockstore
+	ms      *multistore.MultiStore
+	is      cbor.IpldStore
+	dag     ipldformat.DAGService
+	exch    *exchange.Exchange
 	metrics metrics.MetricsRecorder
 
 	// opts keeps all the node params set when starting the node
@@ -265,6 +265,15 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		fmt.Printf("==> Generated new FIL address: %s\n", addr)
 	}
 
+	if opts.Metrics != nil {
+		eopts.WatchQueriesFunc = func(q deal.Query) {
+			nd.metrics.Record(
+				"routing-query",
+				map[string]string{},
+				map[string]interface{}{"content": q.PayloadCID.String()})
+		}
+	}
+
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {
 		return nil, err
@@ -296,6 +305,20 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	nd.metrics = metrics.New(opts.Metrics)
+
+	// subscribe and log provider events
+	nd.exch.Retrieval().Provider().SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
+		tags := make(map[string]string)
+		tags["requester"] = state.Receiver.String()
+		tags["responder"] = nd.host.ID().String()
+
+		values := make(map[string]interface{})
+		values["event"] = provider.Events[event]
+		values["status"] = deal.Statuses[state.Status]
+		values["content"] = state.PayloadCID.String()
+
+		nd.metrics.Record("retrieval", tags, values)
+	})
 
 	return nd, nil
 }
