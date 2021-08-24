@@ -295,7 +295,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	nd.metrics = metrics.NewMetrics(opts.Metrics)
+	nd.metrics = metrics.New(opts.Metrics)
 
 	return nd, nil
 }

@@ -55,7 +55,7 @@ func (*NullMetrics) Record(name string, tag map[string]string, value map[string]
 
 func (*NullMetrics) URL() string { return "" }
 
-func NewMetrics(params *Config) MetricsRecorder {
+func New(params *Config) MetricsRecorder {
 
   if params == nil {
     return &NullMetrics{}
