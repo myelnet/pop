@@ -21,6 +21,8 @@ require (
 	github.com/google/uuid v1.2.0
 	github.com/hannahhoward/cbor-gen-for v0.0.0-20200817222906-ea96cece81f1
 	github.com/hannahhoward/go-pubsub v0.0.0-20200423002714-8d62886cc36e
+	github.com/influxdata/influxdb-client-go v1.4.0 // indirect
+	github.com/influxdata/influxdb-client-go/v2 v2.5.0 // indirect
 	github.com/ipfs/go-bitswap v0.3.2 // indirect
 	github.com/ipfs/go-block-format v0.0.3
 	github.com/ipfs/go-blockservice v0.1.4

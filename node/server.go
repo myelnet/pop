@@ -26,6 +26,7 @@ import (
 	ipath "github.com/ipfs/go-path"
 	"github.com/jpillora/backoff"
 	"github.com/myelnet/pop/exchange"
+	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
@@ -340,6 +341,16 @@ func Run(ctx context.Context, opts Options) error {
 
 	server := &server{
 		node: nd,
+	}
+
+	if opts.UseInflux {
+		influxParams, _ := metrics.GetInfluxParams()
+		err := metrics.SendMessage(metrics.InfluxMessage{nd.host.ID().String(), "logging-on"}, *influxParams)
+		if err != nil {
+			return fmt.Errorf("metrics.SendMessage: %v", err)
+		} else {
+			fmt.Printf("==> Checked in with InfluxDB at %s\n", influxParams.URL)
+		}
 	}
 
 	server.cs = NewCommandServer(nd, server.writeToClients)

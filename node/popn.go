@@ -101,6 +101,8 @@ var (
 type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
 	RepoPath string
+	// UseInflux is flag determining wether we are pushing pushing statistics to InfluxDB.
+	UseInflux bool
 	// SocketPath is the unix socket path to listen on
 	SocketPath string
 	// BootstrapPeers is a peer address to connect to for discovering other peers

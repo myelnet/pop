@@ -16,6 +16,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
+	"github.com/myelnet/pop/metrics"
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog/log"
@@ -24,6 +25,7 @@ import (
 // PopConfig is the json config object we generate with the init command
 type PopConfig struct {
 	temp         bool
+	influxdb     bool
 	privKeyPath  string
 	regions      string
 	replInterval time.Duration
@@ -50,6 +52,7 @@ The 'pop start' command starts a pop daemon service.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
+		fs.BoolVar(&startArgs.influxdb, "influxdb-stats", false, "send retrieval stats to an influxdb database")
 		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "/dns4/myel.cloud/tcp/41504/p2p/12D3KooWMETXkWySAajFMqjiq8Q9xwMR8ceBrEAQFh6k8KHLAPNy", "bootstrap peer to discover others (add multiple addresses separated by commas)")
 		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "https://infura.myel.cloud", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
@@ -77,31 +80,31 @@ The 'pop start' command starts a pop daemon service.
 
 func runStart(ctx context.Context, args []string) error {
 	fmt.Printf(`
-. 　　   .  　 *  ✵ 　 　　 ✦ 
+. 　　   .  　 *  ✵ 　 　　 ✦
 　 　　　　　
  ·  ✦  　 　　.  *  　　　　　　
     　.  ·  ·
-  . ·   *  * ·  .  
+  . ·   *  * ·  .
  ·　　 ·  ✧     　　 ·
-                                                          
-ppppp   ppppppppp      ooooooooooo   ppppp   ppppppppp   
-p::::ppp:::::::::p   oo:::::::::::oo p::::ppp:::::::::p  
-p:::::::::::::::::p o:::::::::::::::op:::::::::::::::::p 
+
+ppppp   ppppppppp      ooooooooooo   ppppp   ppppppppp
+p::::ppp:::::::::p   oo:::::::::::oo p::::ppp:::::::::p
+p:::::::::::::::::p o:::::::::::::::op:::::::::::::::::p
 pp::::::ppppp::::::po:::::ooooo:::::opp::::::ppppp::::::p
  p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
  p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
  p:::::p     p:::::po::::o     o::::o p:::::p     p:::::p
  p:::::p    p::::::po::::o     o::::o p:::::p    p::::::p
  p:::::ppppp:::::::po:::::ooooo:::::o p:::::ppppp:::::::p
- p::::::::::::::::p o:::::::::::::::o p::::::::::::::::p 
- p::::::::::::::pp   oo:::::::::::oo  p::::::::::::::pp  
- p::::::pppppppp       ooooooooooo    p::::::pppppppp    
- p:::::p                              p:::::p            
- p:::::p                              p:::::p            
-p:::::::p                            p:::::::p           
-p:::::::p                            p:::::::p           
-p:::::::p                            p:::::::p           
-ppppppppp                            ppppppppp           
+ p::::::::::::::::p o:::::::::::::::o p::::::::::::::::p
+ p::::::::::::::pp   oo:::::::::::oo  p::::::::::::::pp
+ p::::::pppppppp       ooooooooooo    p::::::pppppppp
+ p:::::p                              p:::::p
+ p:::::p                              p:::::p
+p:::::::p                            p:::::::p
+p:::::::p                            p:::::::p
+p:::::::p                            p:::::::p
+ppppppppp                            ppppppppp
 
 -----------------------------------------------------------
 Manage your Myel point of presence from the command line.
@@ -166,8 +169,18 @@ Manage your Myel point of presence from the command line.
 		fmt.Println("failed to parse capacity")
 	}
 
+	// checks that environment variables are correctly set before booting the node.
+	if startArgs.influxdb {
+		_, err := metrics.GetInfluxParams()
+		if err != nil {
+			log.Error().Err(err).Msg("GetInfluxParams")
+			return err
+		}
+	}
+
 	opts := node.Options{
 		RepoPath:       path,
+		UseInflux: 			startArgs.influxdb,
 		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,
@@ -184,6 +197,7 @@ Manage your Myel point of presence from the command line.
 		log.Error().Err(err).Msg("node.Run")
 		return err
 	}
+
 	return nil
 }
 
