@@ -516,7 +516,7 @@ func TestMultipleGet(t *testing.T) {
 	<-added1
 
 	// create data2. @BUG: A single block DAG will cause race conditions
-	data2 := make([]byte, 200000)
+	data2 := make([]byte, 100000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data2)
 	p2 := filepath.Join(dir, "data2")
 	err = os.WriteFile(p2, data2, 0666)

@@ -896,9 +896,11 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 		}
 		select {
 		case res := <-results:
-			if res.Err == nil {
-				tx.committed = true
+			if res.Err != nil {
+				final.Err = res.Err
+				return final
 			}
+
 			if root.Equals(tx.root) {
 				err := tx.deals.SetOfferForCid(root, of)
 				if err != nil {
@@ -920,6 +922,7 @@ func (tx *Tx) Execute(of deal.Offer, p DealExecParams) TxResult {
 			return final
 		}
 	}
+	tx.committed = true
 	return final
 }
 

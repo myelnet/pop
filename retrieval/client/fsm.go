@@ -89,7 +89,8 @@ var FSMEvents = fsm.Events{
 			return nil
 		}),
 	fsm.Event(EventDealAccepted).
-		From(deal.StatusWaitForAcceptance).To(deal.StatusAccepted),
+		From(deal.StatusWaitForAcceptance).To(deal.StatusAccepted).
+		From(deal.StatusClientWaitingForLastBlocks).ToNoChange(),
 	fsm.Event(EventUnknownResponseReceived).
 		FromAny().To(deal.StatusFailing).
 		Action(func(ds *deal.ClientState, status deal.Status) error {
@@ -349,6 +350,8 @@ var FSMEvents = fsm.Events{
 			deal.StatusFundsNeeded,
 			deal.StatusFundsNeededLastPayment,
 			deal.StatusBlocksComplete,
+			deal.StatusWaitForAcceptance,
+			deal.StatusAccepted,
 			deal.StatusOngoing).To(deal.StatusCheckComplete).
 		From(deal.StatusFinalizing).To(deal.StatusCompleted),
 	fsm.Event(EventCompleteVerified).
