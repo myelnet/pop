@@ -97,8 +97,6 @@ var FSMEvents = fsm.Events{
 			ds.Message = fmt.Sprintf("Unexpected deal response status: %s", deal.Statuses[status])
 			return nil
 		}),
-	fsm.Event(EventComplete).
-		From(deal.StatusWaitForAcceptance).To(deal.StatusClientWaitingForLastBlocks),
 
 	// Payment channel setup
 	fsm.Event(EventPaymentChannelSkip).
@@ -352,6 +350,8 @@ var FSMEvents = fsm.Events{
 			deal.StatusFundsNeeded,
 			deal.StatusFundsNeededLastPayment,
 			deal.StatusBlocksComplete,
+			deal.StatusWaitForAcceptance,
+			deal.StatusAccepted,
 			deal.StatusOngoing).To(deal.StatusCheckComplete).
 		From(deal.StatusFinalizing).To(deal.StatusCompleted),
 	fsm.Event(EventCompleteVerified).

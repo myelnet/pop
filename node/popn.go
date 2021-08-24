@@ -766,7 +766,9 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			funds = offer.RetrievalPrice()
 		}
 
-		log.Info().Msg("selected an offer")
+		ainf, _ := offer.AddrInfo()
+
+		log.Info().Str("peer", ainf.ID.String()).Msg("selected an offer")
 
 		results <- GetResult{
 			Size:         int64(offer.Size),
