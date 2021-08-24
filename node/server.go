@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	gopath "path"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +27,6 @@ import (
 	ipath "github.com/ipfs/go-path"
 	"github.com/jpillora/backoff"
 	"github.com/myelnet/pop/exchange"
-	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
@@ -339,18 +339,15 @@ func Run(ctx context.Context, opts Options) error {
 		fmt.Printf("==> Connected to Filecoin RPC at %s\n", opts.FilEndpoint)
 	}
 
-	server := &server{
-		node: nd,
+	if reflect.TypeOf(nd.metrics) != nil {
+			nd.metrics.Record("check-in",
+				map[string]string{"peer": nd.host.ID().String()},
+				map[string]interface{}{"msg": "logging-on"})
+			fmt.Printf("==> Checked-in with InfluxDB at %s\n", nd.metrics.URL())
 	}
 
-	if opts.UseInflux {
-		influxParams, _ := metrics.GetInfluxParams()
-		err := metrics.SendMessage(metrics.InfluxMessage{nd.host.ID().String(), "logging-on"}, *influxParams)
-		if err != nil {
-			return fmt.Errorf("metrics.SendMessage: %v", err)
-		} else {
-			fmt.Printf("==> Checked in with InfluxDB at %s\n", influxParams.URL)
-		}
+	server := &server{
+		node: nd,
 	}
 
 	server.cs = NewCommandServer(nd, server.writeToClients)

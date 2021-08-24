@@ -50,6 +50,7 @@ import (
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
+	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/retrieval/client"
 	"github.com/myelnet/pop/retrieval/deal"
 	sel "github.com/myelnet/pop/selectors"
@@ -102,7 +103,7 @@ type Options struct {
 	// RepoPath is the file system path to use to persist our datastore
 	RepoPath string
 	// UseInflux is flag determining wether we are pushing pushing statistics to InfluxDB.
-	UseInflux bool
+	Metrics *metrics.Config
 	// SocketPath is the unix socket path to listen on
 	SocketPath string
 	// BootstrapPeers is a peer address to connect to for discovering other peers
@@ -126,6 +127,11 @@ type Options struct {
 	CancelFunc context.CancelFunc
 }
 
+type MetricsRecorder interface {
+    Record(string, map[string]string, map[string]interface{})
+		URL() string
+}
+
 type node struct {
 	host host.Host
 	ds   datastore.Batching
@@ -134,6 +140,7 @@ type node struct {
 	is   cbor.IpldStore
 	dag  ipldformat.DAGService
 	exch *exchange.Exchange
+	metrics MetricsRecorder
 
 	// opts keeps all the node params set when starting the node
 	opts Options
@@ -290,6 +297,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	err = nd.exch.Index().CleanBlockStore(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	if *opts.Metrics != (metrics.Config{}) {
+		nd.metrics = metrics.NewInfluxDBClient(*opts.Metrics)
 	}
 
 	return nd, nil

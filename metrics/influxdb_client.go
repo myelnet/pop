@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"fmt"
 	"os"
 	"time"
 
@@ -12,7 +11,6 @@ const EnvInfluxDBURL = "INFLUXDB_URL"
 const EnvInfluxDBToken = "INFLUXDB_TOKEN"
 const EnvInfluxDBOrg = "INFLUXDB_ORG"
 const EnvInfluxDBBucket = "INFLUXDB_BUCKET"
-
 
 type RetrievalMeasurement struct {
   TimeSpent int
@@ -26,80 +24,67 @@ type InfluxMessage struct {
 }
 
 
-type InfluxParams struct {
-  URL string
-  Token string
+type Config struct {
+  InfluxURL string
+  InfluxToken string
   Org string
   Bucket string
 }
 
-func GetInfluxParams() (*InfluxParams, error) {
+
+// implements MetricsRecorder
+type InfluxDBClient struct {
+    client influxdb.Client
+    InfluxURL string
+    Org    string
+    Bucket string
+}
+
+func (idbc *InfluxDBClient) Record(name string, tag map[string]string, value map[string]interface{}) {
+  p := influxdb.NewPoint(name, tag, value, time.Now())
+
+  // get non-blocking write client
+  writeAPI := idbc.client.WriteAPI(idbc.Org, idbc.Bucket)
+
+  // write point asynchronously
+  writeAPI.WritePoint(p)
+  // Flush writes
+  writeAPI.Flush()
+}
+
+func (idbc *InfluxDBClient) URL() string {
+  return idbc.InfluxURL
+}
+
+func NewInfluxDBClient(params Config) *InfluxDBClient {
+  // Create a new client using an InfluxDB server base URL and an authentication token
+  client := influxdb.NewClient(params.InfluxURL, params.InfluxToken)
+
+  return &InfluxDBClient{client, params.InfluxURL, params.Org, params.Bucket}
+
+}
+
+func GetInfluxParams() *Config {
   addr := os.Getenv(EnvInfluxDBURL)
 	if addr == "" {
-		return nil, fmt.Errorf("no InfluxDB URL in $%s env var", EnvInfluxDBURL)
+		return &Config{}
 	}
 
   token := os.Getenv(EnvInfluxDBToken)
 	if token == "" {
-		return nil, fmt.Errorf("no InfluxDB Token in $%s env var", EnvInfluxDBToken)
+		return &Config{}
 	}
 
   org := os.Getenv(EnvInfluxDBOrg)
   if org == "" {
-    return nil, fmt.Errorf("no InfluxDB Organization in $%s env var", EnvInfluxDBOrg)
+    return &Config{}
   }
 
   bucket := os.Getenv(EnvInfluxDBBucket)
   if bucket == "" {
-    return nil, fmt.Errorf("no InfluxDB Bucket in $%s env var", EnvInfluxDBBucket)
+    return &Config{}
   }
 
-  return &InfluxParams{addr, token, org, bucket}, nil
+  return &Config{addr, token, org, bucket}
 
-}
-
-func SendMessage(re InfluxMessage, params InfluxParams) error {
-
-  // Create a new client using an InfluxDB server base URL and an authentication token
-  client := influxdb.NewClient(params.URL, params.Token)
-
-  p := influxdb.NewPoint("check-in",
-  map[string]string{"peer": re.Peer},
-  map[string]interface{}{"msg": re.Msg},
-  time.Now())
-
-  // get non-blocking write client
-  writeAPI := client.WriteAPI(params.Org, params.Bucket)
-
-  // write point asynchronously
-  writeAPI.WritePoint(p)
-  // Flush writes
-  writeAPI.Flush()
-
-  client.Close()
-
-  return nil
-}
-
-func NewMeasurement(re RetrievalMeasurement, params InfluxParams) error {
-
-  // Create a new client using an InfluxDB server base URL and an authentication token
-  client := influxdb.NewClient(params.URL, params.Token)
-
-  p := influxdb.NewPoint("retrieval",
-  map[string]string{"peer": re.Peer},
-  map[string]interface{}{"fileSize": re.FileSize, "timeSpent": re.TimeSpent},
-  time.Now())
-
-  // get non-blocking write client
-  writeAPI := client.WriteAPI(params.Org, params.Bucket)
-
-  // write point asynchronously
-  writeAPI.WritePoint(p)
-  // Flush writes
-  writeAPI.Flush()
-
-  client.Close()
-
-  return nil
 }

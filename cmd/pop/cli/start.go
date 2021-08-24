@@ -52,7 +52,6 @@ The 'pop start' command starts a pop daemon service.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
-		fs.BoolVar(&startArgs.influxdb, "influxdb-stats", false, "send retrieval stats to an influxdb database")
 		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "/dns4/myel.cloud/tcp/41504/p2p/12D3KooWMETXkWySAajFMqjiq8Q9xwMR8ceBrEAQFh6k8KHLAPNy", "bootstrap peer to discover others (add multiple addresses separated by commas)")
 		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "https://infura.myel.cloud", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
@@ -169,18 +168,9 @@ Manage your Myel point of presence from the command line.
 		fmt.Println("failed to parse capacity")
 	}
 
-	// checks that environment variables are correctly set before booting the node.
-	if startArgs.influxdb {
-		_, err := metrics.GetInfluxParams()
-		if err != nil {
-			log.Error().Err(err).Msg("GetInfluxParams")
-			return err
-		}
-	}
-
 	opts := node.Options{
 		RepoPath:       path,
-		UseInflux: 			startArgs.influxdb,
+		Metrics: 				metrics.GetInfluxParams(),
 		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,
