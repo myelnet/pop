@@ -21,16 +21,16 @@ type Config struct {
 }
 
 type MetricsRecorder interface {
-    Record(string, map[string]string, map[string]interface{})
-    URL() string
+  Record(string, map[string]string, map[string]interface{})
+  URL() string
 }
 
 // implements MetricsRecorder
 type InfluxDBClient struct {
-    client influxdb.Client
-    InfluxURL string
-    Org    string
-    Bucket string
+  client influxdb.Client
+  InfluxURL string
+  Org    string
+  Bucket string
 }
 
 func (idbc *InfluxDBClient) Record(name string, tag map[string]string, value map[string]interface{}) {
