@@ -1,0 +1,4 @@
+influxdb:
+  service:
+    type: ClusterIP
+    clusterIP: None
