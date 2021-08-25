@@ -25,9 +25,11 @@ RUN git clone https://github.com/myelnet/pop;
 RUN cd pop; make all;
 
 COPY ./install-playbook/pop-env.sh /root/pop-env.sh
+COPY ./install-playbook/influxdb-env.sh /root/influxdb-env.sh
 COPY ./install-playbook/key /root/key
 
 RUN chmod +x /root/pop-env.sh
+RUN chmod +x /root/influxdb-env.sh
 
-CMD . /root/pop-env.sh; echo $BOOTSTRAP; pop start -bootstrap=$BOOTSTRAP \
+CMD . /root/pop-env.sh; . /root/influxdb-env.sh; echo $BOOTSTRAP; pop start -bootstrap=$BOOTSTRAP \
     -privkey=/root/key -regions=Global -capacity=$CAPACITY -maxppb=$MAXPPB -temp-repo=false
