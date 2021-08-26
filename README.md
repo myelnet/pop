@@ -1,4 +1,4 @@
-<h1 align="center"> 
+<h1 align="center">
 	<br>
 	  	🍿
 	<br>
@@ -25,8 +25,7 @@
 
 To speed up data retrieval from Filecoin, a secondary market allows clients to publish their content ids to a network of providers
 in order to retrieve it faster and more often at a cheaper price. This does not guarantee data availability and so should be used
-in addition to a regular storage deal. You can think of this as the CDN layer of Filecoin. This library is still very experimental 
-and more at the prototype stage so feel free to open an issue if you have any suggestion or would like to contribute!
+in addition to a regular storage deal. You can think of this as the CDN layer of Filecoin. This library is still experimental so feel free to open an issue if you have any suggestion or would like to contribute!
 
 ## Install
 
@@ -82,6 +81,21 @@ SUBCOMMANDS
 
 FLAGS
   -log info  Set logging mode
+```
+
+### Metrics Collection
+
+pop nodes can push statistics measuring the performance of retrievals to an
+[InfluxDB v2](https://www.influxdata.com/) database if certain
+environment variables are set.
+Set these variables as follows:
+
+```bash
+# influxdb is the url given to the service withing the k8s cluster
+export INFLUXDB_URL="http://influxdb:8086"
+export INFLUXDB_TOKEN=<INSERT TOKEN>
+export INFLUXDB_ORG=<INSERT ORG>
+export INFLUXDB_BUCKET=<INSERT BUCKET>
 ```
 
 ## Library Usage
