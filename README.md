@@ -31,7 +31,7 @@ in addition to a regular storage deal. You can think of this as the CDN layer of
 
 As a CLI:
 
-####Install dependencies:
+#### Install dependencies:
 Since CGO is required, you will need GCC
 
 #### Mac
