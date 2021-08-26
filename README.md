@@ -91,7 +91,6 @@ environment variables are set.
 Set these variables as follows:
 
 ```bash
-# influxdb is the url given to the service withing the k8s cluster
 export INFLUXDB_URL=<INSERT InfluxDB ENDPOINT>
 export INFLUXDB_TOKEN=<INSERT TOKEN>
 export INFLUXDB_ORG=<INSERT ORG>
