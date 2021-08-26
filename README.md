@@ -9,23 +9,25 @@
 	<br>
 </h1>
 
-> An IPFS bytes exchange to improve speed and reliability of Filecoin retrievals without
-> heavy hardware requirements or compromising on decentralization
+> Run a lightweight point-of-presence within the [Myel](https://www.myel.network/) network, the community powered content delivery network.
 
-## Highlights
 
-- IPFS exchange interface like Bitswap
-- Use IPFS while providing content for retrievals on Filecoin (YES, that means you will earn FIL when we launch on mainnet!)
-- New content to cache is dispatched via Gossipsub and stored by available providers
-- Currently gossip based content routing though will be pluggable with other solutions
-- Simple API abstracting away Filecoin deal operations
-- Upload and retrieve directly from a Filecoin storage miner if no secondary providers cache the content (Coming Soon)
+## Technical Highlights
+
+- Uses an IPFS exchange interface like Bitswap.
+<!-- - Use IPFS while providing content for retrievals on Filecoin (YES, that means you will earn FIL when we launch on mainnet!) -->
+- New content to cache is dispatched via [Gossipsub](https://github.com/libp2p/specs/tree/master/pubsub/gossipsub) and stored by points-of-presence on the network.
+- Payments to retrieve content are made via [Filecoin payment channels](https://spec.filecoin.io/systems/filecoin_token/payment_channels/).  
+<!-- - Simple API abstracting away Filecoin deal operations -->
+<!-- - Upload and retrieve directly from a Filecoin storage miner if no secondary providers cache the content (Coming Soon) -->
 
 ## Background
 
-To speed up data retrieval from Filecoin, a secondary market allows clients to publish their content ids to a network of providers
-in order to retrieve it faster and more often at a cheaper price. This does not guarantee data availability and so should be used
-in addition to a regular storage deal. You can think of this as the CDN layer of Filecoin. This library is still experimental so feel free to open an issue if you have any suggestion or would like to contribute!
+Our mission is to build a community powered content delivery network that is resilient 🦾, scalable 🌏, peer-to-peer ↔️, to suit the long-term needs of Web3 applications.
+
+We're currently using [Filecoin](https://filecoin.io/) building blocks and are aspiring to make this library as interoperable as possible with existing Web3 backends such as IPFS.
+
+This library is still experimental so feel free to open an issue if you have any suggestion or would like to contribute!
 
 ## Install
 
@@ -85,7 +87,7 @@ FLAGS
 
 ### Metrics Collection
 
-pop nodes can push statistics measuring the performance of retrievals to an
+`pop` nodes can push statistics measuring the performance of retrievals to an
 [InfluxDB v2](https://www.influxdata.com/) database if certain
 environment variables are set.
 Set these variables as follows:
@@ -96,6 +98,10 @@ export INFLUXDB_TOKEN=<INSERT TOKEN>
 export INFLUXDB_ORG=<INSERT ORG>
 export INFLUXDB_BUCKET=<INSERT BUCKET>
 ```
+
+## Deployment
+
+You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `build/k8s`. 
 
 ## Library Usage
 
