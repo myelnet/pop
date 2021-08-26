@@ -1,4 +1,4 @@
-<h1 align="center"> 
+<h1 align="center">
 	<br>
 	  	🍿
 	<br>
@@ -9,38 +9,42 @@
 	<br>
 </h1>
 
-> An IPFS bytes exchange to improve speed and reliability of Filecoin retrievals without
-> heavy hardware requirements or compromising on decentralization
+> Run a point-of-presence within [Myel](https://www.myel.network/), the community powered content delivery network.
 
-## Highlights
 
-- IPFS exchange interface like Bitswap
-- Use IPFS while providing content for retrievals on Filecoin (YES, that means you will earn FIL when we launch on mainnet!)
-- New content to cache is dispatched via Gossipsub and stored by available providers
-- Currently gossip based content routing though will be pluggable with other solutions
-- Simple API abstracting away Filecoin deal operations
-- Upload and retrieve directly from a Filecoin storage miner if no secondary providers cache the content (Coming Soon)
+## Technical Highlights
+
+- Libp2p, IPFS and Filecoin protocols for data transfer.
+- Content is routed via [Gossipsub](https://github.com/libp2p/specs/tree/master/pubsub/gossipsub).
+- New content to cache is directly replicated by connected peers.
+- Payments to retrieve content are made via [Filecoin payment channels](https://spec.filecoin.io/systems/filecoin_token/payment_channels/).  
 
 ## Background
 
-To speed up data retrieval from Filecoin, a secondary market allows clients to publish their content ids to a network of providers
-in order to retrieve it faster and more often at a cheaper price. This does not guarantee data availability and so should be used
-in addition to a regular storage deal. You can think of this as the CDN layer of Filecoin. This library is still very experimental 
-and more at the prototype stage so feel free to open an issue if you have any suggestion or would like to contribute!
+Our mission is to build a community powered content delivery network that is resilient 🦾, scalable 🌏, and peer-to-peer ↔️ to suit the long-term needs of Web3 applications.
+
+We're currently using [Filecoin](https://filecoin.io/) building blocks and are aspiring to make this library as interoperable as possible with existing Web3 backends such as IPFS.
+
+This library is still experimental so feel free to open an issue if you have any suggestion or would like to contribute!
 
 ## Install
 
 As a CLI:
 
-Install dependencies:
+#### Install dependencies:
+Since CGO is required, you will need GCC
 
+#### Mac
 ```commandline
-brew install go bzr jq pkg-config rustup hwloc
+$ brew install gcc make
+```
+
+#### Linux
+```commandline
+$ sudo apt install gcc make
 ```
 
 Clone the repo.
-If you are running on arm64 architecture, you will need to build filecoin-ffi from source.
-Simply do that by adding the env variable: `FFI_BUILD_FROM_SOURCE=1` 
 
 run:
 ```commandline
@@ -50,7 +54,7 @@ $ make all
 As a library:
 
 ```commandline
-$ go get github.com/myelnet/pop
+$ go get github.com/myelnet/pop/exchange
 ```
 
 ## CLI Usage
@@ -62,17 +66,40 @@ USAGE
   pop subcommand [flags]
 
 This CLI is still under active development. Commands and flags will
-change until the first stable release.
+change until a first stable release. To get started run 'pop start'.
 
 SUBCOMMANDS
   start   Starts a POP daemon
+  off     Gracefully shuts down the Pop daemon
   ping    Ping the local daemon or a given peer
   put     Put a file into an exchange transaction for storage
   status  Print the state of any ongoing transaction
-  commit  Commit a DAG transaction to storage
+  commit  Commit a DAG transaction
   get     Retrieve content from the network
   list    List all content indexed in this pop
+  wallet  Manage your wallet
+
+FLAGS
+  -log info  Set logging mode
 ```
+
+### Metrics Collection
+
+`pop` nodes can push statistics measuring the performance of retrievals to an
+[InfluxDB v2](https://www.influxdata.com/) database if certain
+environment variables are set.
+Set these variables as follows:
+
+```bash
+export INFLUXDB_URL=<INSERT InfluxDB ENDPOINT>
+export INFLUXDB_TOKEN=<INSERT TOKEN>
+export INFLUXDB_ORG=<INSERT ORG>
+export INFLUXDB_BUCKET=<INSERT BUCKET>
+```
+
+## Deployment
+
+You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `build/k8s`.
 
 ## Library Usage
 
