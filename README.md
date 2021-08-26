@@ -14,7 +14,7 @@
 
 ## Technical Highlights
 
-- Uses an IPFS exchange interface like Bitswap.
+- Uses an IPFS exchange interface like [Bitswap](https://docs.ipfs.io/concepts/bitswap/).
 <!-- - Use IPFS while providing content for retrievals on Filecoin (YES, that means you will earn FIL when we launch on mainnet!) -->
 - New content to cache is dispatched via [Gossipsub](https://github.com/libp2p/specs/tree/master/pubsub/gossipsub) and stored by points-of-presence on the network.
 - Payments to retrieve content are made via [Filecoin payment channels](https://spec.filecoin.io/systems/filecoin_token/payment_channels/).  
@@ -23,7 +23,7 @@
 
 ## Background
 
-Our mission is to build a community powered content delivery network that is resilient 🦾, scalable 🌏, peer-to-peer ↔️, to suit the long-term needs of Web3 applications.
+Our mission is to build a community powered content delivery network that is resilient 🦾, scalable 🌏, and peer-to-peer ↔️ to suit the long-term needs of Web3 applications.
 
 We're currently using [Filecoin](https://filecoin.io/) building blocks and are aspiring to make this library as interoperable as possible with existing Web3 backends such as IPFS.
 
@@ -101,7 +101,7 @@ export INFLUXDB_BUCKET=<INSERT BUCKET>
 
 ## Deployment
 
-You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `build/k8s`. 
+You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `build/k8s`.
 
 ## Library Usage
 
