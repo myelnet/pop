@@ -9,17 +9,15 @@
 	<br>
 </h1>
 
-> Run a lightweight point-of-presence within the [Myel](https://www.myel.network/) network, the community powered content delivery network.
+> Run a point-of-presence within [Myel](https://www.myel.network/), the community powered content delivery network.
 
 
 ## Technical Highlights
 
-- Uses an IPFS exchange interface like [Bitswap](https://docs.ipfs.io/concepts/bitswap/).
-<!-- - Use IPFS while providing content for retrievals on Filecoin (YES, that means you will earn FIL when we launch on mainnet!) -->
-- New content to cache is dispatched via [Gossipsub](https://github.com/libp2p/specs/tree/master/pubsub/gossipsub) and stored by points-of-presence on the network.
+- Libp2p, IPFS and Filecoin protocols for data transfer.
+- Content is routed via [Gossipsub](https://github.com/libp2p/specs/tree/master/pubsub/gossipsub).
+- New content to cache is directly replicated by connected peers.
 - Payments to retrieve content are made via [Filecoin payment channels](https://spec.filecoin.io/systems/filecoin_token/payment_channels/).  
-<!-- - Simple API abstracting away Filecoin deal operations -->
-<!-- - Upload and retrieve directly from a Filecoin storage miner if no secondary providers cache the content (Coming Soon) -->
 
 ## Background
 
@@ -56,7 +54,7 @@ $ make all
 As a library:
 
 ```commandline
-$ go get github.com/myelnet/pop
+$ go get github.com/myelnet/pop/exchange
 ```
 
 ## CLI Usage
