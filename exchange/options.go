@@ -98,8 +98,7 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 	if opts.GraphSync == nil {
 		opts.GraphSync = gsimpl.New(ctx,
 			gsnet.NewFromLibp2pHost(h),
-			storeutil.LoaderForBlockstore(opts.Blockstore),
-			storeutil.StorerForBlockstore(opts.Blockstore),
+			storeutil.LinkSystemForBlockstore(opts.Blockstore),
 		)
 	}
 	if opts.DataTransfer == nil {

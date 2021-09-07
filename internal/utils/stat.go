@@ -59,11 +59,10 @@ func WalkDAG(
 	if err != nil {
 		return err
 	}
-	builder := nodeType.NewBuilder()
 
 	// We make a custom loader to intercept when each block is read during the traversal
 	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
-		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
+		return func(lnkCtx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
 			c, ok := lnk.(cidlink.Link)
 			if !ok {
 				return nil, fmt.Errorf("incorrect Link Type")
@@ -84,12 +83,15 @@ func WalkDAG(
 		}
 	}
 
+	lsys := cidlink.DefaultLinkSystem()
+
+	lsys.StorageReadOpener = makeLoader(bs)
+
 	// Load the root node
-	err = link.Load(ctx, ipld.LinkContext{}, builder, makeLoader(bs))
+	nd, err = lsys.Load(ipld.LinkContext{}, link, nodeType)
 	if err != nil {
 		return fmt.Errorf("unable to load link: %v", err)
 	}
-	nd := builder.Build()
 
 	s, err := selector.ParseSelector(sel)
 	if err != nil {
@@ -99,7 +101,7 @@ func WalkDAG(
 	// Traverse any links from the root node
 	err = traversal.Progress{
 		Cfg: &traversal.Config{
-			LinkLoader:                     makeLoader(bs),
+			LinkSystem:                     lsys,
 			LinkTargetNodePrototypeChooser: Chooser,
 		},
 	}.WalkMatching(nd, s, func(prog traversal.Progress, n ipld.Node) error {
