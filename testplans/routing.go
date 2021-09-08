@@ -235,8 +235,7 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 
 	gs := gsimpl.New(ctx,
 		gsnet.NewFromLibp2pHost(h),
-		storeutil.LoaderForBlockstore(bs),
-		storeutil.StorerForBlockstore(bs),
+		storeutil.LinkSystemForBlockstore(bs),
 	)
 
 	return ex.Options{
