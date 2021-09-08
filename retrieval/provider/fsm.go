@@ -6,12 +6,12 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-statemachine"
 	"github.com/filecoin-project/go-statemachine/fsm"
 	"github.com/hannahhoward/go-pubsub"
+	"github.com/myelnet/go-multistore"
 
 	"github.com/myelnet/pop/retrieval/deal"
 )

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
 	cid "github.com/ipfs/go-cid"
@@ -23,12 +22,13 @@ import (
 	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-unixfs"
 	unixfile "github.com/ipfs/go-unixfs/file"
+	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime"
-	dagpb "github.com/ipld/go-ipld-prime-proto"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/retrieval"
@@ -242,7 +242,7 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 		return nil, err
 	}
 	nb := proto.NewBuilder()
-	as, err := nb.BeginMap(len(tx.entries))
+	as, err := nb.BeginMap(int64(len(tx.entries)))
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 		return nil, err
 	}
 	// Create a list of entries
-	lm, err := lks.BeginList(len(tx.entries))
+	lm, err := lks.BeginList(int64(len(tx.entries)))
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (tx *Tx) assembleEntries() (ipld.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := sas.AssignInt(int(v.Size)); err != nil {
+		if err := sas.AssignInt(v.Size); err != nil {
 			return nil, err
 		}
 		if err := mas.Finish(); err != nil {
@@ -314,7 +314,8 @@ func (tx *Tx) buildRoot() error {
 		size += e.Size
 	}
 
-	lb := cidlink.LinkBuilder{
+	lsys := tx.store.LinkSystem
+	lp := cidlink.LinkPrototype{
 		Prefix: cid.Prefix{
 			Version:  1,
 			Codec:    tx.codec,
@@ -327,7 +328,7 @@ func (tx *Tx) buildRoot() error {
 	if err != nil {
 		return err
 	}
-	lnk, err := lb.Build(tx.ctx, ipld.LinkContext{}, nd, tx.store.Storer)
+	lnk, err := lsys.Store(ipld.LinkContext{}, lp, nd)
 	if err != nil {
 		return err
 	}
@@ -346,7 +347,7 @@ func (tx *Tx) Ref() *DataRef {
 			keys = append(keys, []byte(k))
 		}
 	} else {
-		kl, err := utils.MapLoadableKeys(context.TODO(), tx.root, tx.Store().Loader)
+		kl, err := utils.MapLoadableKeys(tx.root, tx.Store().LinkSystem)
 		if err != nil {
 			tx.Err = err
 		} else {
@@ -404,8 +405,8 @@ func (tx *Tx) GetFile(k string) (files.Node, error) {
 	// Check the index if we may already have it from a different transaction
 	if _, err := tx.index.GetRef(tx.root); err == nil {
 		return tx.loadFileEntry(k, &multistore.Store{
-			Loader: storeutil.LoaderForBlockstore(tx.bs),
-			DAG:    merkledag.NewDAGService(blockservice.New(tx.bs, offline.Exchange(tx.bs))),
+			LinkSystem: storeutil.LinkSystemForBlockstore(tx.bs),
+			DAG:        merkledag.NewDAGService(blockservice.New(tx.bs, offline.Exchange(tx.bs))),
 		})
 	}
 	return tx.loadFileEntry(k, tx.store)
@@ -431,7 +432,7 @@ func (tx *Tx) IsLocal(key string) bool {
 			return has
 		}
 		// If we don't have it, let's warm up the mutistore with the index so we don't pay for it twice
-		err := utils.MigrateSelectBlocks(tx.ctx, tx.bs, tx.store.Bstore, tx.root, selectors.Entries())
+		err := utils.MigrateSelectBlocks(tx.bs, tx.store.Bstore, tx.root, selectors.Entries())
 		if err != nil {
 			log.Error().Err(err).Msg("warming up index blocks")
 		}
@@ -455,16 +456,15 @@ func (tx *Tx) Keys() ([]string, error) {
 		return entries, nil
 	}
 
-	loader := storeutil.LoaderForBlockstore(tx.bs)
+	lsys := storeutil.LinkSystemForBlockstore(tx.bs)
 	if _, err := tx.index.GetRef(tx.root); err != nil {
 		// Keys might still be in multistore
-		loader = tx.store.Loader
+		lsys = tx.store.LinkSystem
 	}
 
 	keys, err := utils.MapLoadableKeys(
-		tx.ctx,
 		tx.root,
-		loader,
+		lsys,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get keys: %w", err)
@@ -472,19 +472,17 @@ func (tx *Tx) Keys() ([]string, error) {
 	return keys, nil
 }
 
-func (tx *Tx) getEntry(key string, loader ipld.Loader) (en Entry, err error) {
+func (tx *Tx) getEntry(key string, lsys ipld.LinkSystem) (en Entry, err error) {
 	lk := cidlink.Link{Cid: tx.root}
 	proto, err := tx.rootProto()
 	if err != nil {
 		return en, err
 	}
-	nb := proto.NewBuilder()
 
-	err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	nd, err := lsys.Load(ipld.LinkContext{}, lk, proto)
 	if err != nil {
 		return en, err
 	}
-	nd := nb.Build()
 	links, err := nd.LookupByString("Links")
 	if err != nil {
 		return en, err
@@ -538,12 +536,12 @@ func (tx *Tx) RootFor(key string) (cid.Cid, error) {
 	if key == "*" {
 		return tx.root, nil
 	}
-	loader := storeutil.LoaderForBlockstore(tx.bs)
+	lsys := storeutil.LinkSystemForBlockstore(tx.bs)
 	if _, err := tx.index.GetRef(tx.root); err != nil {
 		// Keys might still be in multistore
-		loader = tx.store.Loader
+		lsys = tx.store.LinkSystem
 	}
-	entry, err := tx.getEntry(key, loader)
+	entry, err := tx.getEntry(key, lsys)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -565,10 +563,10 @@ func (tx *Tx) Entries() ([]Entry, error) {
 		return entries, nil
 	}
 
-	loader := storeutil.LoaderForBlockstore(tx.bs)
+	lsys := storeutil.LinkSystemForBlockstore(tx.bs)
 	if _, err := tx.index.GetRef(tx.root); err != nil {
 		// Keys might still be in multistore
-		loader = tx.store.Loader
+		lsys = tx.store.LinkSystem
 	}
 
 	lk := cidlink.Link{Cid: tx.root}
@@ -576,15 +574,11 @@ func (tx *Tx) Entries() ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Create an instance of map builder as we're looking to extract all the keys from an IPLD map
-	nb := proto.NewBuilder()
 	// Use a loader from the link to read all the children blocks from the global store
-	err = lk.Load(tx.ctx, ipld.LinkContext{}, nb, loader)
+	nd, err := lsys.Load(ipld.LinkContext{}, lk, proto)
 	if err != nil {
 		return nil, err
 	}
-	// load the IPLD tree
-	nd := nb.Build()
 
 	links, err := nd.LookupByString("Links")
 	if err != nil {
@@ -645,7 +639,7 @@ func (tx *Tx) Entries() ([]Entry, error) {
 }
 
 func (tx *Tx) loadFileEntry(k string, store *multistore.Store) (files.Node, error) {
-	entry, err := tx.getEntry(k, store.Loader)
+	entry, err := tx.getEntry(k, store.LinkSystem)
 	if err != nil {
 		return nil, err
 	}

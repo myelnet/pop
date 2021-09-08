@@ -374,7 +374,7 @@ func TestIndexSelector(t *testing.T) {
 	idx, err := NewIndex(ds, bs)
 	require.NoError(t, err)
 
-	lb := cidlink.LinkBuilder{
+	lp := cidlink.LinkPrototype{
 		Prefix: cid.Prefix{
 			Version:  1,
 			Codec:    0x71, // dag-cbor as per multicodec
@@ -382,17 +382,17 @@ func TestIndexSelector(t *testing.T) {
 			MhLength: -1,
 		},
 	}
+	lsys := storeutil.LinkSystemForBlockstore(idx.Bstore())
 
 	for i := 0; i < 10; i++ {
-		nd := basicnode.NewInt(i)
-		lnk, err := lb.Build(
-			context.TODO(),
+		nd := basicnode.NewInt(int64(i))
+		lnk, err := lsys.Store(
 			ipld.LinkContext{},
+			lp,
 			nd,
-			storeutil.StorerForBlockstore(idx.Bstore()),
 		)
 		var buffer bytes.Buffer
-		require.NoError(t, dagcbor.Encoder(nd, &buffer))
+		require.NoError(t, dagcbor.Encode(nd, &buffer))
 		require.NoError(t, err)
 		blk, err := blocks.NewBlockWithCid(buffer.Bytes(), lnk.(cidlink.Link).Cid)
 		require.NoError(t, err)

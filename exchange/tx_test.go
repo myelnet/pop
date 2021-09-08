@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
 	ipldformat "github.com/ipfs/go-ipld-format"
@@ -20,6 +19,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
@@ -106,7 +106,7 @@ loop:
 
 	require.NoError(t, tx.Close())
 	// Check the global blockstore now has the blocks
-	_, err = utils.Stat(ctx, &multistore.Store{Bstore: client.opts.Blockstore}, root, sel.All())
+	_, err = utils.Stat(&multistore.Store{Bstore: client.opts.Blockstore}, root, sel.All())
 	require.NoError(t, err)
 
 	// Get will by default create a new store if it's been deleted

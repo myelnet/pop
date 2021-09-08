@@ -7,12 +7,12 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/payments"
@@ -120,7 +120,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 		sel = selectors.All()
 	}
 	// DAGStat is both a way of checking if we have the blocks and returning its size
-	stats, err := utils.Stat(ctx, &multistore.Store{Bstore: e.opts.Blockstore}, q.PayloadCID, sel)
+	stats, err := utils.Stat(&multistore.Store{Bstore: e.opts.Blockstore}, q.PayloadCID, sel)
 	// We don't have the block we don't even reply to avoid taking bandwidth
 	// On the client side we assume no response means they don't have it
 	if err != nil || stats.Size == 0 {
@@ -195,7 +195,7 @@ func (e *Exchange) FindAndRetrieve(ctx context.Context, root cid.Cid) error {
 			return res.Err
 		}
 
-		keys, err := utils.MapLoadableKeys(ctx, root, tx.Store().Loader)
+		keys, err := utils.MapLoadableKeys(root, tx.Store().LinkSystem)
 		if err != nil {
 			return err
 		}

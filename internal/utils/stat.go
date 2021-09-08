@@ -8,16 +8,17 @@ import (
 	"io"
 	"sort"
 
-	"github.com/filecoin-project/go-multistore"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime"
-	dagpb "github.com/ipld/go-ipld-prime-proto"
+	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
+	"github.com/myelnet/go-multistore"
 )
 
 // DAGStat describes a DAG
@@ -26,17 +27,32 @@ type DAGStat struct {
 	NumBlocks int
 }
 
+func AddDagPBSupportToChooser(existing traversal.LinkTargetNodePrototypeChooser) traversal.LinkTargetNodePrototypeChooser {
+	return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+		c, ok := lnk.(cidlink.Link)
+		if !ok {
+			return existing(lnk, lnkCtx)
+		}
+		switch c.Cid.Prefix().Codec {
+		case 0x70:
+			return dagpb.Type.PBNode, nil
+		default:
+			return existing(lnk, lnkCtx)
+		}
+	}
+}
+
 // Chooser decides which node type to use when decoding IPLD nodes
-var Chooser = dagpb.AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
+var Chooser = AddDagPBSupportToChooser(func(ipld.Link, ipld.LinkContext) (ipld.NodePrototype, error) {
 	return basicnode.Prototype.Any, nil
 })
 
 // Stat returns stats about a selected part of DAG given a cid
 // The cid must be registered in the index
-func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.Node) (DAGStat, error) {
+func Stat(store *multistore.Store, root cid.Cid, sel ipld.Node) (DAGStat, error) {
 	res := DAGStat{}
 
-	err := WalkDAG(ctx, root, store.Bstore, sel, func(block blocks.Block) error {
+	err := WalkDAG(root, store.Bstore, sel, func(block blocks.Block) error {
 		res.Size += len(block.RawData())
 		res.NumBlocks++
 
@@ -48,7 +64,6 @@ func Stat(ctx context.Context, store *multistore.Store, root cid.Cid, sel ipld.N
 
 // WalkDAG executes a DAG traversal for a given root and selector and calls a callback function for every block loaded during the traversal
 func WalkDAG(
-	ctx context.Context,
 	root cid.Cid,
 	bs blockstore.Blockstore,
 	sel ipld.Node,
@@ -61,7 +76,7 @@ func WalkDAG(
 	}
 
 	// We make a custom loader to intercept when each block is read during the traversal
-	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
+	makeLoader := func(bs blockstore.Blockstore) linking.BlockReadOpener {
 		return func(lnkCtx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
 			c, ok := lnk.(cidlink.Link)
 			if !ok {
@@ -88,7 +103,7 @@ func WalkDAG(
 	lsys.StorageReadOpener = makeLoader(bs)
 
 	// Load the root node
-	nd, err = lsys.Load(ipld.LinkContext{}, link, nodeType)
+	nd, err := lsys.Load(ipld.LinkContext{}, link, nodeType)
 	if err != nil {
 		return fmt.Errorf("unable to load link: %v", err)
 	}
@@ -135,7 +150,7 @@ func (kl KeyList) Sorted() KeyList {
 // MapLoadableKeys returns all the keys of a Tx, given its cid and a loader
 // this only returns the keys for entries where the blocks are available in the blockstore
 // it supports both dagpb and dagcbor nodes
-func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) {
+func MapLoadableKeys(root cid.Cid, lsys ipld.LinkSystem) (KeyList, error) {
 	// Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
 
@@ -143,14 +158,11 @@ func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (Key
 	if err != nil {
 		return nil, err
 	}
-	nb := nodeType.NewBuilder()
 
-	err = lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+	nd, err := lsys.Load(ipld.LinkContext{}, lk, nodeType)
 	if err != nil {
 		return nil, err
 	}
-	// load the IPLD tree
-	nd := nb.Build()
 
 	// Gather the keys in an array
 	var entries []string
@@ -179,8 +191,7 @@ func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (Key
 		if err != nil {
 			return nil, err
 		}
-		builder := nt.NewBuilder()
-		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
+		_, err = lsys.Load(ipld.LinkContext{}, l, nt)
 		if err != nil {
 			continue
 		}
@@ -198,21 +209,18 @@ func MapLoadableKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (Key
 }
 
 // MapMissingKeys returns keys for values for which the links are not loadable
-func MapMissingKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyList, error) { // Turn the CID into an ipld Link interface, this will link to all the children
+func MapMissingKeys(root cid.Cid, lsys ipld.LinkSystem) (KeyList, error) { // Turn the CID into an ipld Link interface, this will link to all the children
 	lk := cidlink.Link{Cid: root}
 	nodeType, err := Chooser(lk, ipld.LinkContext{})
 	if err != nil {
 		return nil, err
 	}
-	nb := nodeType.NewBuilder()
 
-	err = lk.Load(ctx, ipld.LinkContext{}, nb, loader)
+	nd, err := lsys.Load(ipld.LinkContext{}, lk, nodeType)
 	if err != nil {
 		return nil, err
 	}
 
-	// load the IPLD tree
-	nd := nb.Build()
 	// Gather the keys in an array
 	var entries []string
 
@@ -241,8 +249,7 @@ func MapMissingKeys(ctx context.Context, root cid.Cid, loader ipld.Loader) (KeyL
 		if err != nil {
 			return nil, err
 		}
-		builder := nodeType.NewBuilder()
-		err = l.Load(ctx, ipld.LinkContext{}, builder, loader)
+		_, err = lsys.Load(ipld.LinkContext{}, l, nodeType)
 		if err != nil {
 			kn, err := v.LookupByString("Name")
 			if err != nil {
@@ -280,8 +287,8 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 }
 
 // MigrateSelectBlocks transfers blocks from a blockstore to another for a given block selection
-func MigrateSelectBlocks(ctx context.Context, from blockstore.Blockstore, to blockstore.Blockstore, root cid.Cid, sel ipld.Node) error {
-	return WalkDAG(ctx, root, from, sel, func(block blocks.Block) error {
+func MigrateSelectBlocks(from blockstore.Blockstore, to blockstore.Blockstore, root cid.Cid, sel ipld.Node) error {
+	return WalkDAG(root, from, sel, func(block blocks.Block) error {
 		return to.Put(block)
 	})
 }

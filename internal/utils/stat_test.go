@@ -12,7 +12,6 @@ import (
 	"time"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-datastore"
 	dss "github.com/ipfs/go-datastore/sync"
 	chunk "github.com/ipfs/go-ipfs-chunker"
@@ -24,6 +23,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/internal/testutil"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
@@ -106,7 +106,7 @@ func TestStat(t *testing.T) {
 			err = bufferedDS.Commit()
 			require.NoError(t, err)
 
-			stats, err := Stat(ctx, store, nd.Cid(), sel.All())
+			stats, err := Stat(store, nd.Cid(), sel.All())
 			require.NoError(t, err)
 
 			require.Equal(t, testCase.numBlocks, stats.NumBlocks)
@@ -117,7 +117,7 @@ func TestStat(t *testing.T) {
 }
 
 type StoreConfigurableTransport interface {
-	UseStore(datatransfer.ChannelID, ipld.Loader, ipld.Storer) error
+	UseStore(datatransfer.ChannelID, ipld.LinkSystem) error
 }
 
 func TestCompareStatWithGraphSync(t *testing.T) {
@@ -145,7 +145,7 @@ func TestCompareStatWithGraphSync(t *testing.T) {
 			store, _ := n1.Ms.Get(sID)
 
 			n1.Dt.RegisterTransportConfigurer(&testutil.FakeDTType{}, func(chID datatransfer.ChannelID, voucher datatransfer.Voucher, tp datatransfer.Transport) {
-				tp.(StoreConfigurableTransport).UseStore(chID, store.Loader, store.Storer)
+				tp.(StoreConfigurableTransport).UseStore(chID, store.LinkSystem)
 			})
 
 			done := make(chan uint64, 1)
@@ -160,7 +160,7 @@ func TestCompareStatWithGraphSync(t *testing.T) {
 
 			select {
 			case size := <-done:
-				stats, err := Stat(ctx, store, root, sel.All())
+				stats, err := Stat(store, root, sel.All())
 				require.NoError(t, err)
 				require.Equal(t, size, uint64(stats.Size))
 			case <-ctx.Done():
@@ -198,7 +198,7 @@ func TestMapLoadableKeys(t *testing.T) {
 	})
 	store.Bstore.Put(dir)
 
-	keys, err := MapLoadableKeys(context.TODO(), dir.Cid(), store.Loader)
+	keys, err := MapLoadableKeys(dir.Cid(), store.LinkSystem)
 	require.NoError(t, err)
 	require.Equal(t, KeyList([]string{key1, key2}).Sorted(), keys.Sorted())
 }

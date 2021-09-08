@@ -14,7 +14,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -44,6 +43,7 @@ import (
 	tcp "github.com/libp2p/go-tcp-transport"
 	websocket "github.com/libp2p/go-ws-transport"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
@@ -860,7 +860,7 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 					if err != nil {
 						log.Error().Err(err).Msg("closing tx")
 					}
-					mk, err := utils.MapMissingKeys(ctx, root, storeutil.LoaderForBlockstore(nd.bs))
+					mk, err := utils.MapMissingKeys(root, storeutil.LinkSystemForBlockstore(nd.bs))
 					if err != nil {
 						log.Error().Err(err).Msg("getting missing keys")
 					}
