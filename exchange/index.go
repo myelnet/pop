@@ -474,7 +474,7 @@ func (idx *Index) tagForGC(ref *DataRef) error {
 	idx.emu.Lock()
 	defer idx.emu.Unlock()
 
-	return utils.WalkDAG(context.TODO(), ref.PayloadCID, idx.bstore, sel.All(), func(block blocks.Block) error {
+	return utils.WalkDAG(ref.PayloadCID, idx.bstore, sel.All(), func(block blocks.Block) error {
 		idx.gcSet.Add(block.Cid())
 		return nil
 	})
@@ -533,7 +533,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 
 	cidSet := cid.NewSet()
 
-	err := utils.WalkDAG(ctx, idx.rootCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
+	err := utils.WalkDAG(idx.rootCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
 		key := cid.NewCidV1(cid.Raw, blk.Cid().Hash())
 		cidSet.Add(key)
 		return nil

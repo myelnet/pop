@@ -3,10 +3,9 @@ module github.com/myelnet/pop/testplans
 go 1.16
 
 require (
-	github.com/filecoin-project/go-multistore v0.0.3
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-datastore v0.4.5
-	github.com/ipfs/go-graphsync v0.6.4
+	github.com/ipfs/go-graphsync v0.9.1
 	github.com/ipfs/go-ipfs-blockstore v1.0.3
 	github.com/ipfs/go-ipfs-chunker v0.0.5
 	github.com/ipfs/go-ipfs-files v0.0.8
@@ -18,6 +17,7 @@ require (
 	github.com/libp2p/go-libp2p-core v0.8.5
 	github.com/libp2p/go-libp2p-kad-dht v0.11.1
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
+	github.com/myelnet/go-multistore v0.0.5
 	github.com/myelnet/pop v0.0.0-20210615103345-179d81ac672a
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/rs/zerolog v1.20.0

@@ -265,7 +265,7 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to add file", http.StatusInternalServerError)
 				return
 			}
-			stats, err := utils.Stat(r.Context(), tx.Store(), c, sel.All())
+			stats, err := utils.Stat(tx.Store(), c, sel.All())
 			if err != nil {
 				http.Error(w, "failed to get file stat", http.StatusInternalServerError)
 				return
@@ -348,13 +348,12 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	nd.metrics.Record("check-in",
-				map[string]string{"peer": nd.host.ID().String()},
-				map[string]interface{}{"msg": "logging-on"})
+		map[string]string{"peer": nd.host.ID().String()},
+		map[string]interface{}{"msg": "logging-on"})
 
 	if nd.metrics.URL() != "" {
 		fmt.Printf("==> Checked-in with InfluxDB at %s\n", nd.metrics.URL())
 	}
-
 
 	server := &server{
 		node: nd,

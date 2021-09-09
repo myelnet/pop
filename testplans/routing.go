@@ -10,7 +10,6 @@ import (
 	goruntime "runtime"
 	"time"
 
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -29,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-multistore"
 	ex "github.com/myelnet/pop/exchange"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/testground/sdk-go/run"
@@ -235,8 +235,7 @@ func defaultSettings(ctx context.Context, rpath string, ip net.IP, low, hiw int)
 
 	gs := gsimpl.New(ctx,
 		gsnet.NewFromLibp2pHost(h),
-		storeutil.LoaderForBlockstore(bs),
-		storeutil.StorerForBlockstore(bs),
+		storeutil.LinkSystemForBlockstore(bs),
 	)
 
 	return ex.Options{

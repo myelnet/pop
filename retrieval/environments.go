@@ -7,12 +7,12 @@ import (
 	"fmt"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/myelnet/go-multistore"
 	cbg "github.com/whyrusleeping/cbor-gen"
 
 	"github.com/myelnet/pop/payments"
@@ -65,7 +65,7 @@ func (cde *clientDealEnvironment) Payments() payments.Manager {
 func DecodeNode(defnode *cbg.Deferred) (ipld.Node, error) {
 	reader := bytes.NewReader(defnode.Raw)
 	nb := basicnode.Prototype.Any.NewBuilder()
-	err := dagcbor.Decoder(nb, reader)
+	err := dagcbor.Decode(nb, reader)
 	if err != nil {
 		return nil, err
 	}

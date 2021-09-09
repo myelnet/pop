@@ -9,7 +9,6 @@ import (
 
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync/storeutil"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
@@ -23,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
@@ -323,8 +323,8 @@ func (r *Replication) GetStore(k cid.Cid) *multistore.Store {
 	if !ok {
 		// If no store can be found we return the global store as a last resort
 		return &multistore.Store{
-			Loader: storeutil.LoaderForBlockstore(r.bs),
-			Bstore: r.bs,
+			LinkSystem: storeutil.LinkSystemForBlockstore(r.bs),
+			Bstore:     r.bs,
 		}
 	}
 	return s
@@ -406,7 +406,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 			case datatransfer.Completed:
 				store := r.GetStore(req.PayloadCID)
 
-				keys, err := utils.MapLoadableKeys(ctx, req.PayloadCID, store.Loader)
+				keys, err := utils.MapLoadableKeys(req.PayloadCID, store.LinkSystem)
 				if err != nil {
 					log.Debug().Err(err).Msg("error when loading keys")
 				}
@@ -623,7 +623,7 @@ func (r *Replication) ValidatePull(
 // StoreConfigurableTransport defines the methods needed to
 // configure a data transfer transport use a unique store for a given request
 type StoreConfigurableTransport interface {
-	UseStore(datatransfer.ChannelID, ipld.Loader, ipld.Storer) error
+	UseStore(datatransfer.ChannelID, ipld.LinkSystem) error
 }
 
 // IdxStoreGetter returns the store used for retrieving a given index root
@@ -650,7 +650,7 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		if (request.Method == FetchIndex && channelID.Initiator == pid) || request.Method == Dispatch {
 			// When we're fetching a new index we store it in a new store
 			store := isg.GetStore(request.PayloadCID)
-			err := gsTransport.UseStore(channelID, store.Loader, store.Storer)
+			err := gsTransport.UseStore(channelID, store.LinkSystem)
 			if err != nil {
 				warn(err)
 			}
@@ -658,9 +658,7 @@ func TransportConfigurer(idx *Index, isg IdxStoreGetter, pid peer.ID) datatransf
 		}
 		// Someone is retrieving our index, it should be loaded from the index's blockstore
 		if request.Method == FetchIndex {
-			loader := storeutil.LoaderForBlockstore(idx.Bstore())
-			storer := storeutil.StorerForBlockstore(idx.Bstore())
-			err := gsTransport.UseStore(channelID, loader, storer)
+			err := gsTransport.UseStore(channelID, storeutil.LinkSystemForBlockstore(idx.Bstore()))
 			if err != nil {
 				warn(err)
 			}

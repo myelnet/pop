@@ -3,9 +3,9 @@ package deal
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
@@ -13,6 +13,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/internal/utils"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
@@ -36,7 +37,7 @@ func NewQueryParams(sel ipld.Node) (QueryParams, error) {
 	if sel == nil {
 		return QueryParams{}, fmt.Errorf("selector required")
 	}
-	err := dagcbor.Encoder(sel, &buffer)
+	err := dagcbor.Encode(sel, &buffer)
 	if err != nil {
 		return QueryParams{}, fmt.Errorf("error encoding selector: %w", err)
 	}
@@ -211,7 +212,7 @@ func NewParams(pricePerByte abi.TokenAmount, paymentInterval uint64, paymentInte
 		return Params{}, fmt.Errorf("selector required")
 	}
 
-	err := dagcbor.Encoder(sel, &buffer)
+	err := dagcbor.Encode(sel, &buffer)
 	if err != nil {
 		return Params{}, fmt.Errorf("error encoding selector: %w", err)
 	}

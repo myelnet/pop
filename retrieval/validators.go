@@ -7,13 +7,13 @@ import (
 	"sync"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/payments"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/retrieval/provider"
@@ -25,7 +25,7 @@ var allSelectorBytes []byte
 
 func init() {
 	buf := new(bytes.Buffer)
-	_ = dagcbor.Encoder(selectors.All(), buf)
+	_ = dagcbor.Encode(selectors.All(), buf)
 	allSelectorBytes = buf.Bytes()
 }
 
@@ -68,7 +68,7 @@ func (rv *ProviderRequestValidator) ValidatePull(isRestart bool, chid datatransf
 	}
 
 	buf := new(bytes.Buffer)
-	err := dagcbor.Encoder(selector, buf)
+	err := dagcbor.Encode(selector, buf)
 	if err != nil {
 		return nil, err
 	}

@@ -3,7 +3,6 @@ package testutil
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"math/rand"
 	"os"
@@ -19,7 +18,6 @@ import (
 	dtimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
-	"github.com/filecoin-project/go-multistore"
 	init2 "github.com/filecoin-project/specs-actors/v5/actors/builtin/init"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
@@ -50,6 +48,7 @@ import (
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/stretchr/testify/require"
 )
@@ -71,8 +70,7 @@ type TestNode struct {
 	Bs        blockstore.Blockstore
 	DAG       ipldformat.DAGService
 	Host      host.Host
-	Loader    ipld.Loader
-	Storer    ipld.Storer
+	LinkSys   ipld.LinkSystem
 	Gs        graphsync.GraphExchange
 	DTNet     dtnet.DataTransferNetwork
 	DTStore   datastore.Batching
@@ -86,38 +84,6 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 	var err error
 	testNode := &TestNode{}
 
-	makeLoader := func(bs blockstore.Blockstore) ipld.Loader {
-		return func(lnk ipld.Link, lnkCtx ipld.LinkContext) (io.Reader, error) {
-			c, ok := lnk.(cidlink.Link)
-			if !ok {
-				return nil, fmt.Errorf("incorrect Link Type")
-			}
-			block, err := bs.Get(c.Cid)
-			if err != nil {
-				return nil, err
-			}
-			return bytes.NewReader(block.RawData()), nil
-		}
-	}
-
-	makeStorer := func(bs blockstore.Blockstore) ipld.Storer {
-		return func(lnkCtx ipld.LinkContext) (io.Writer, ipld.StoreCommitter, error) {
-			var buf bytes.Buffer
-			var committer ipld.StoreCommitter = func(lnk ipld.Link) error {
-				c, ok := lnk.(cidlink.Link)
-				if !ok {
-					return fmt.Errorf("incorrect Link Type")
-				}
-				block, err := blocks.NewBlockWithCid(buf.Bytes(), c.Cid)
-				if err != nil {
-					return err
-				}
-				return bs.Put(block)
-			}
-			return &buf, committer, nil
-		}
-	}
-
 	testNode.DTTmpDir = t.TempDir()
 	testNode.Ds = dss.MutexWrap(datastore.NewMapDatastore())
 	testNode.Bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(testNode.Ds), blockstore.NewGCLocker())
@@ -125,9 +91,7 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
 	require.NoError(t, err)
 
-	testNode.Loader = makeLoader(testNode.Bs)
-	testNode.Storer = makeStorer(testNode.Bs)
-
+	testNode.LinkSys = storeutil.LinkSystemForBlockstore(testNode.Bs)
 	// We generate our own peer to avoid the default bogus private key
 	peer, err := tnet.RandPeerNetParams()
 	require.NoError(t, err)
@@ -143,14 +107,14 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 }
 
 func (tn *TestNode) SetupGraphSync(ctx context.Context) {
-	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
+	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.LinkSys)
 }
 
 func (tn *TestNode) SetupDataTransfer(ctx context.Context, t testing.TB) {
 	var err error
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
 	tn.DTStore = namespace.Wrap(tn.Ds, datastore.NewKey("DataTransfer"))
-	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.Loader, tn.Storer)
+	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.LinkSys)
 	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs)
 	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTTmpDir, tn.DTNet, dtTransport)
 	require.NoError(t, err)
@@ -185,7 +149,9 @@ func (tn *TestNode) CreateRandomFile(t testing.TB, size int) string {
 }
 
 func CreateRandomBlock(t testing.TB, bs blockstore.Blockstore) *blocks.BasicBlock {
-	lb := cidlink.LinkBuilder{
+	lsys := storeutil.LinkSystemForBlockstore(bs)
+
+	lp := cidlink.LinkPrototype{
 		Prefix: cid.Prefix{
 			Version:  1,
 			Codec:    0x71, // dag-cbor as per multicodec
@@ -198,14 +164,13 @@ func CreateRandomBlock(t testing.TB, bs blockstore.Blockstore) *blocks.BasicBloc
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
 
 	b1 := basicnode.NewBytes(data)
-	lnk, err := lb.Build(
-		context.TODO(),
+	lnk, err := lsys.Store(
 		ipld.LinkContext{},
+		lp,
 		b1,
-		storeutil.StorerForBlockstore(bs),
 	)
 	var buffer bytes.Buffer
-	require.NoError(t, dagcbor.Encoder(b1, &buffer))
+	require.NoError(t, dagcbor.Encode(b1, &buffer))
 	require.NoError(t, err)
 
 	blk, err := blocks.NewBlockWithCid(buffer.Bytes(), lnk.(cidlink.Link).Cid)

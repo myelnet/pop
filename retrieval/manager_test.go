@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
@@ -17,6 +16,7 @@ import (
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/go-multistore"
 	"github.com/stretchr/testify/require"
 
 	"github.com/myelnet/pop/filecoin"
@@ -314,7 +314,7 @@ totalFunds: %s
 				}
 			})
 
-			stat, err := utils.Stat(ctx, &multistore.Store{Bstore: n2.Bs}, rootCid, selectors.All())
+			stat, err := utils.Stat(&multistore.Store{Bstore: n2.Bs}, rootCid, selectors.All())
 			require.NoError(t, err)
 			clientStoreID := n1.Ms.Next()
 			pricePerByte := abi.NewTokenAmount(100)

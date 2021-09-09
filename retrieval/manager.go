@@ -5,7 +5,6 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-statemachine/fsm"
@@ -14,6 +13,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/myelnet/go-multistore"
 	"github.com/rs/zerolog/log"
 
 	"github.com/myelnet/pop/payments"

@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-statemachine/fsm"
 	fsmtest "github.com/filecoin-project/go-statemachine/fsm/testutil"
+	"github.com/myelnet/go-multistore"
 	"github.com/stretchr/testify/require"
 
 	"github.com/myelnet/pop/retrieval/deal"

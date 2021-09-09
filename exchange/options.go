@@ -11,7 +11,6 @@ import (
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
-	"github.com/filecoin-project/go-multistore"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-graphsync"
@@ -22,6 +21,7 @@ import (
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/myelnet/pop/wallet"
@@ -98,8 +98,7 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 	if opts.GraphSync == nil {
 		opts.GraphSync = gsimpl.New(ctx,
 			gsnet.NewFromLibp2pHost(h),
-			storeutil.LoaderForBlockstore(opts.Blockstore),
-			storeutil.StorerForBlockstore(opts.Blockstore),
+			storeutil.LinkSystemForBlockstore(opts.Blockstore),
 		)
 	}
 	if opts.DataTransfer == nil {
