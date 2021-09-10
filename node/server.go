@@ -12,8 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os/user"
 	gopath "path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -377,27 +377,26 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	// this is not used by cmux since it's listening for browsers on port 443
-	go serveHTTPS(opts.ProviderDomainName, opts.ProviderSubdomain)
+	// proxy any domains with tls
+	go serveProxy(nd.domains())
 
 	<-ctx.Done()
 
 	return ctx.Err()
 }
 
-func serveHTTPS(domainName, subdomain string) {
-	if domainName == "" || subdomain == "" {
+func serveProxy(domains []string) {
+	if len(domains) == 0 {
 		return
 	}
 
-	domains := []string{subdomain + "." + domainName}
-
-	proxyUrl, err := url.Parse("ws://localhost:41505")
+	proxyURL, err := url.Parse("ws://localhost:41505")
 	if err != nil {
-		log.Panic().Err(err).Msg("error when parsing url")
+		log.Err(err).Msg("error when parsing proxy url")
+		return
 	}
 
-	wsProxy := websocketproxy.NewProxy(proxyUrl)
+	wsProxy := websocketproxy.NewProxy(proxyURL)
 	wsProxy.Upgrader = &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -407,17 +406,17 @@ func serveHTTPS(domainName, subdomain string) {
 		EnableCompression: true,
 	}
 
-	usr, err := user.Current()
+	repoPath, err := utils.FullPath(utils.RepoPath())
 	if err != nil {
-		log.Panic().Err(err).Msg("error when getting home dir")
+		log.Err(err).Msg("error when getting repo path")
+		return
 	}
-	dir := usr.HomeDir
 
-	certmagic.Default.Storage = &certmagic.FileStorage{Path: dir + "/.pop/certmagic"}
+	certmagic.Default.Storage = &certmagic.FileStorage{Path: filepath.Join(repoPath, "certmagic")}
 
 	err = certmagic.HTTPS(domains, wsProxy)
 	if err != nil {
-		log.Panic().Err(err).Msg("error when serving https")
+		log.Err(err).Msg("error when serving https")
 	}
 }
 

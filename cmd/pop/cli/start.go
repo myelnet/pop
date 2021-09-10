@@ -29,14 +29,13 @@ type PopConfig struct {
 	regions      string
 	replInterval time.Duration
 	// Exported fields can be set by survey.Ask
-	Bootstrap          string `json:"bootstrap"`
-	Capacity           string `json:"capacity"`
-	MaxPPB             int    `json:"maxppb"`
-	FilEndpoint        string `json:"fil-endpoint"`
-	FilToken           string `json:"fil-token"`
-	FilTokenType       string `json:"fil-token-type"`
-	ProviderDomainName string `json:"provider-domain-name"`
-	ProviderSubdomain  string `json:"provider-subdomain"`
+	Bootstrap    string `json:"bootstrap"`
+	Capacity     string `json:"capacity"`
+	MaxPPB       int    `json:"maxppb"`
+	FilEndpoint  string `json:"fil-endpoint"`
+	FilToken     string `json:"fil-token"`
+	FilTokenType string `json:"fil-token-type"`
+	DNSRoot      string `json:"dns-root"`
 }
 
 var startArgs PopConfig
@@ -61,8 +60,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.Capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
-		fs.StringVar(&startArgs.ProviderDomainName, "provider-domain-name", "", "domain name to use when the node is a Provider")
-		fs.StringVar(&startArgs.ProviderSubdomain, "provider-subdomain", "", "subdomain to use when the node is a Provider")
+		fs.StringVar(&startArgs.DNSRoot, "dns-root", "", "root domain name for TLS certificates")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
 		return fs
@@ -182,6 +180,7 @@ Manage your Myel point of presence from the command line.
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
+		DNSRoot:        startArgs.DNSRoot,
 		CancelFunc:     cancel,
 	}
 

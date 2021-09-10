@@ -122,10 +122,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
-	// ProviderDomainName defines the domain name to use when the node is a provider
-	ProviderDomainName string
-	// ProviderSubdomain defines the subdomain to use when the node is a provider
-	ProviderSubdomain string
+	// DNSRoot
+	DNSRoot string
 	// CancelFunc is used for gracefully shutting down the node
 	CancelFunc context.CancelFunc
 }
@@ -1110,4 +1108,12 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
+}
+
+// domains returns this node's full domain name and any other in the future
+func (nd *node) domains() []string {
+	if nd.opts.DNSRoot == "" {
+		return []string{}
+	}
+	return []string{nd.host.ID().String() + "." + nd.opts.DNSRoot}
 }
