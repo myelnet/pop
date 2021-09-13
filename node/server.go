@@ -378,7 +378,7 @@ func Run(ctx context.Context, opts Options) error {
 	}()
 
 	// proxy any domains with tls
-	go serveProxy(nd.domains())
+	go serveProxy(nd.opts.Domains)
 
 	<-ctx.Done()
 
@@ -417,6 +417,11 @@ func serveProxy(domains []string) {
 	err = certmagic.HTTPS(domains, wsProxy)
 	if err != nil {
 		log.Err(err).Msg("error when serving https")
+		return
+	}
+	fmt.Println("==> Started tls proxy for domains:")
+	for _, d := range domains {
+		fmt.Println("- ", d)
 	}
 }
 

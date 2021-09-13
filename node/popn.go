@@ -122,8 +122,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
-	// DNSRoot
-	DNSRoot string
+	// Domains is a list of DNS names we can establish TLS handshakes with
+	Domains []string
 	// CancelFunc is used for gracefully shutting down the node
 	CancelFunc context.CancelFunc
 }
@@ -1108,12 +1108,4 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
-}
-
-// domains returns this node's full domain name and any other in the future
-func (nd *node) domains() []string {
-	if nd.opts.DNSRoot == "" {
-		return []string{}
-	}
-	return []string{nd.host.ID().String() + "." + nd.opts.DNSRoot}
 }

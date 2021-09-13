@@ -35,7 +35,7 @@ type PopConfig struct {
 	FilEndpoint  string `json:"fil-endpoint"`
 	FilToken     string `json:"fil-token"`
 	FilTokenType string `json:"fil-token-type"`
-	DNSRoot      string `json:"dns-root"`
+	Domains      string `json:"domains"`
 }
 
 var startArgs PopConfig
@@ -60,7 +60,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.Capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
-		fs.StringVar(&startArgs.DNSRoot, "dns-root", "", "root domain name for TLS certificates")
+		fs.StringVar(&startArgs.Domains, "domains", "", "comma separated list of domain names for TLS certificates")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
 		return fs
@@ -169,6 +169,11 @@ Manage your Myel point of presence from the command line.
 		fmt.Println("failed to parse capacity")
 	}
 
+	var domains []string
+	if startArgs.Domains != "" {
+		domains = strings.Split(startArgs.Domains, ",")
+	}
+
 	opts := node.Options{
 		RepoPath:       path,
 		Metrics:        metrics.GetInfluxParams(),
@@ -180,7 +185,7 @@ Manage your Myel point of presence from the command line.
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
-		DNSRoot:        startArgs.DNSRoot,
+		Domains:        domains,
 		CancelFunc:     cancel,
 	}
 
