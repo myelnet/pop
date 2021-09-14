@@ -390,13 +390,31 @@ func serveProxy(domains []string) {
 		return
 	}
 
-	proxyURL, err := url.Parse("ws://localhost:41505")
+	wsURL, err := url.Parse("ws://localhost:41505")
 	if err != nil {
-		log.Err(err).Msg("error when parsing proxy url")
+		log.Err(err).Msg("error when parsing ws url")
+		return
+	}
+	httpURL, err := url.Parse("http://localhost:2001")
+	if err != nil {
+		log.Err(err).Msg("error parsing http url")
 		return
 	}
 
-	wsProxy := websocketproxy.NewProxy(proxyURL)
+	wsProxy := &websocketproxy.WebsocketProxy{Backend: func(r *http.Request) *url.URL {
+		// Shallow copy
+		var u url.URL
+		if r.URL.Scheme == "wss" {
+			u = *wsURL
+		} else {
+			u = *httpURL
+		}
+		u.Fragment = r.URL.Fragment
+		u.Path = r.URL.Path
+		u.RawQuery = r.URL.RawQuery
+		return &u
+	},
+	}
 	wsProxy.Upgrader = &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
