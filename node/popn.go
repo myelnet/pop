@@ -122,6 +122,8 @@ type Options struct {
 	Capacity uint64
 	// ReplInterval defines how often the node attempts to find new content from connected peers
 	ReplInterval time.Duration
+	// Domains is a list of DNS names we can establish TLS handshakes with
+	Domains []string
 	// CancelFunc is used for gracefully shutting down the node
 	CancelFunc context.CancelFunc
 }

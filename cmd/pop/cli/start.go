@@ -15,8 +15,8 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
-	"github.com/myelnet/pop/node"
 	"github.com/myelnet/pop/metrics"
+	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog/log"
@@ -35,6 +35,7 @@ type PopConfig struct {
 	FilEndpoint  string `json:"fil-endpoint"`
 	FilToken     string `json:"fil-token"`
 	FilTokenType string `json:"fil-token-type"`
+	Domains      string `json:"domains"`
 }
 
 var startArgs PopConfig
@@ -59,6 +60,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.Capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
+		fs.StringVar(&startArgs.Domains, "domains", "", "comma separated list of domain names for TLS certificates")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 
 		return fs
@@ -167,9 +169,14 @@ Manage your Myel point of presence from the command line.
 		fmt.Println("failed to parse capacity")
 	}
 
+	var domains []string
+	if startArgs.Domains != "" {
+		domains = strings.Split(startArgs.Domains, ",")
+	}
+
 	opts := node.Options{
 		RepoPath:       path,
-		Metrics: 				metrics.GetInfluxParams(),
+		Metrics:        metrics.GetInfluxParams(),
 		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.FilEndpoint,
 		FilToken:       filToken,
@@ -178,6 +185,7 @@ Manage your Myel point of presence from the command line.
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
+		Domains:        domains,
 		CancelFunc:     cancel,
 	}
 
