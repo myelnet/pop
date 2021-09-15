@@ -389,7 +389,7 @@ func Run(ctx context.Context, opts Options) error {
 // If we receive a wss request on port 80/443 we either forward to the libp2p websocket transport or directly call the http handler
 func (s *server) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
-	if ok, _ := gopath.Match("p2p", req.URL.Path); !ok {
+	if ok, _ := gopath.Match("/p2p/*", req.URL.Path); !ok {
 		s.handler(rw, req)
 		return
 	}
