@@ -330,7 +330,7 @@ func parseContentReplication(contentReplication string) (int, error) {
 
 // Run runs a pop IPFS node
 func Run(ctx context.Context, opts Options) error {
-	l, err := net.Listen("tcp", "127.0.0.1:2001")
+	l, err := net.Listen("tcp", "0.0.0.0:2001")
 	if err != nil {
 		return fmt.Errorf("SocketListen: %v", err)
 	}
@@ -369,7 +369,8 @@ func Run(ctx context.Context, opts Options) error {
 
 	nd.notify = server.cs.send
 
-	go serveHTTP(server, httpl)
+	serveHTTP(server, httpl, nd.opts.Domains)
+
 	go serveTCP(ctx, server, tcpl)
 	go func() {
 		err := m.Serve()
@@ -378,185 +379,155 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	// proxy any domains with tls
-	go serveProxy(server, nd.opts.Domains)
-
 	<-ctx.Done()
 
 	return ctx.Err()
 }
 
 // If we receive a wss request on port 80/443 we either forward to the libp2p websocket transport or directly call the http handler
-func (s *server) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+func (s *server) proxyHandler() http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 
-	if ok, _ := gopath.Match("/p2p/*", req.URL.Path); !ok {
-		s.handler(rw, req)
-		return
-	}
-
-	u, err := url.Parse("ws://localhost:41505")
-	if err != nil {
-		log.Err(err).Msg("error when parsing ws url")
-		return
-	}
-	u.Fragment = req.URL.Fragment
-	u.Path = req.URL.Path
-	u.RawQuery = req.URL.RawQuery
-
-	dialer := websocket.DefaultDialer
-	// Pass headers from the incoming request to the dialer to forward them to
-	// the final destinations.
-	requestHeader := http.Header{}
-	if origin := req.Header.Get("Origin"); origin != "" {
-		requestHeader.Add("Origin", origin)
-	}
-	for _, prot := range req.Header[http.CanonicalHeaderKey("Sec-WebSocket-Protocol")] {
-		requestHeader.Add("Sec-WebSocket-Protocol", prot)
-	}
-	for _, cookie := range req.Header[http.CanonicalHeaderKey("Cookie")] {
-		requestHeader.Add("Cookie", cookie)
-	}
-	if req.Host != "" {
-		requestHeader.Set("Host", req.Host)
-	}
-
-	// Pass X-Forwarded-For headers too, code below is a part of
-	// httputil.ReverseProxy. See http://en.wikipedia.org/wiki/X-Forwarded-For
-	// for more information
-	// TODO: use RFC7239 http://tools.ietf.org/html/rfc7239
-	if clientIP, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
-		// If we aren't the first proxy retain prior
-		// X-Forwarded-For information as a comma+space
-		// separated list and fold multiple headers into one.
-		if prior, ok := req.Header["X-Forwarded-For"]; ok {
-			clientIP = strings.Join(prior, ", ") + ", " + clientIP
+		u, err := url.Parse("ws://localhost:41505")
+		if err != nil {
+			log.Err(err).Msg("error when parsing ws url")
+			return
 		}
-		requestHeader.Set("X-Forwarded-For", clientIP)
-	}
+		u.Fragment = req.URL.Fragment
+		u.Path = req.URL.Path
+		u.RawQuery = req.URL.RawQuery
 
-	// Set the originating protocol of the incoming HTTP request. The SSL might
-	// be terminated on our site and because we doing proxy adding this would
-	// be helpful for applications on the backend.
-	requestHeader.Set("X-Forwarded-Proto", "http")
-	if req.TLS != nil {
-		requestHeader.Set("X-Forwarded-Proto", "https")
-	}
+		dialer := websocket.DefaultDialer
+		// Pass headers from the incoming request to the dialer to forward them to
+		// the final destinations.
+		requestHeader := http.Header{}
+		if origin := req.Header.Get("Origin"); origin != "" {
+			requestHeader.Add("Origin", origin)
+		}
+		for _, prot := range req.Header[http.CanonicalHeaderKey("Sec-WebSocket-Protocol")] {
+			requestHeader.Add("Sec-WebSocket-Protocol", prot)
+		}
+		for _, cookie := range req.Header[http.CanonicalHeaderKey("Cookie")] {
+			requestHeader.Add("Cookie", cookie)
+		}
+		if req.Host != "" {
+			requestHeader.Set("Host", req.Host)
+		}
 
-	// Connect to the backend URL, also pass the headers we get from the requst
-	// together with the Forwarded headers we prepared above.
-	// TODO: support multiplexing on the same backend connection instead of
-	// opening a new TCP connection time for each request. This should be
-	// optional:
-	// http://tools.ietf.org/html/draft-ietf-hybi-websocket-multiplexing-01
-	connBackend, resp, err := dialer.Dial(u.String(), requestHeader)
-	if err != nil {
-		log.Printf("websocketproxy: couldn't dial to remote backend url %s", err)
-		if resp != nil {
-			// If the WebSocket handshake fails, ErrBadHandshake is returned
-			// along with a non-nil *http.Response so that callers can handle
-			// redirects, authentication, etcetera.
-			if err := copyResponse(rw, resp); err != nil {
-				log.Error().Err(err).Msg("websocketproxy: couldn't write response after failed remote backend handshake")
+		// Pass X-Forwarded-For headers too, code below is a part of
+		// httputil.ReverseProxy. See http://en.wikipedia.org/wiki/X-Forwarded-For
+		// for more information
+		// TODO: use RFC7239 http://tools.ietf.org/html/rfc7239
+		if clientIP, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+			// If we aren't the first proxy retain prior
+			// X-Forwarded-For information as a comma+space
+			// separated list and fold multiple headers into one.
+			if prior, ok := req.Header["X-Forwarded-For"]; ok {
+				clientIP = strings.Join(prior, ", ") + ", " + clientIP
 			}
-		} else {
-			http.Error(rw, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			requestHeader.Set("X-Forwarded-For", clientIP)
 		}
-		return
-	}
-	defer connBackend.Close()
 
-	upgrader := &websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			return true
-		},
-		EnableCompression: true,
-	}
+		// Set the originating protocol of the incoming HTTP request. The SSL might
+		// be terminated on our site and because we doing proxy adding this would
+		// be helpful for applications on the backend.
+		requestHeader.Set("X-Forwarded-Proto", "http")
+		if req.TLS != nil {
+			requestHeader.Set("X-Forwarded-Proto", "https")
+		}
 
-	// Only pass those headers to the upgrader.
-	upgradeHeader := http.Header{}
-	if hdr := resp.Header.Get("Sec-Websocket-Protocol"); hdr != "" {
-		upgradeHeader.Set("Sec-Websocket-Protocol", hdr)
-	}
-	if hdr := resp.Header.Get("Set-Cookie"); hdr != "" {
-		upgradeHeader.Set("Set-Cookie", hdr)
-	}
-
-	// Now upgrade the existing incoming request to a WebSocket connection.
-	// Also pass the header that we gathered from the Dial handshake.
-	connPub, err := upgrader.Upgrade(rw, req, upgradeHeader)
-	if err != nil {
-		log.Error().Err(err).Msg("websocketproxy: couldn't upgrade")
-		return
-	}
-	defer connPub.Close()
-
-	errClient := make(chan error, 1)
-	errBackend := make(chan error, 1)
-	replicateWebsocketConn := func(dst, src *websocket.Conn, errc chan error) {
-		for {
-			msgType, msg, err := src.ReadMessage()
-			if err != nil {
-				m := websocket.FormatCloseMessage(websocket.CloseNormalClosure, fmt.Sprintf("%v", err))
-				if e, ok := err.(*websocket.CloseError); ok {
-					if e.Code != websocket.CloseNoStatusReceived {
-						m = websocket.FormatCloseMessage(e.Code, e.Text)
-					}
+		// Connect to the backend URL, also pass the headers we get from the requst
+		// together with the Forwarded headers we prepared above.
+		// TODO: support multiplexing on the same backend connection instead of
+		// opening a new TCP connection time for each request. This should be
+		// optional:
+		// http://tools.ietf.org/html/draft-ietf-hybi-websocket-multiplexing-01
+		connBackend, resp, err := dialer.Dial(u.String(), requestHeader)
+		if err != nil {
+			log.Printf("websocketproxy: couldn't dial to remote backend url %s", err)
+			if resp != nil {
+				// If the WebSocket handshake fails, ErrBadHandshake is returned
+				// along with a non-nil *http.Response so that callers can handle
+				// redirects, authentication, etcetera.
+				if err := copyResponse(rw, resp); err != nil {
+					log.Error().Err(err).Msg("websocketproxy: couldn't write response after failed remote backend handshake")
 				}
-				errc <- err
-				dst.WriteMessage(websocket.CloseMessage, m)
-				break
+			} else {
+				http.Error(rw, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			}
-			err = dst.WriteMessage(msgType, msg)
-			if err != nil {
-				errc <- err
-				break
+			return
+		}
+		defer connBackend.Close()
+
+		upgrader := &websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+			EnableCompression: true,
+		}
+
+		// Only pass those headers to the upgrader.
+		upgradeHeader := http.Header{}
+		if hdr := resp.Header.Get("Sec-Websocket-Protocol"); hdr != "" {
+			upgradeHeader.Set("Sec-Websocket-Protocol", hdr)
+		}
+		if hdr := resp.Header.Get("Set-Cookie"); hdr != "" {
+			upgradeHeader.Set("Set-Cookie", hdr)
+		}
+
+		// Now upgrade the existing incoming request to a WebSocket connection.
+		// Also pass the header that we gathered from the Dial handshake.
+		connPub, err := upgrader.Upgrade(rw, req, upgradeHeader)
+		if err != nil {
+			log.Error().Err(err).Msg("websocketproxy: couldn't upgrade")
+			return
+		}
+		defer connPub.Close()
+
+		errClient := make(chan error, 1)
+		errBackend := make(chan error, 1)
+		replicateWebsocketConn := func(dst, src *websocket.Conn, errc chan error) {
+			for {
+				msgType, msg, err := src.ReadMessage()
+				if err != nil {
+					m := websocket.FormatCloseMessage(websocket.CloseNormalClosure, fmt.Sprintf("%v", err))
+					if e, ok := err.(*websocket.CloseError); ok {
+						if e.Code != websocket.CloseNoStatusReceived {
+							m = websocket.FormatCloseMessage(e.Code, e.Text)
+						}
+					}
+					errc <- err
+					dst.WriteMessage(websocket.CloseMessage, m)
+					break
+				}
+				err = dst.WriteMessage(msgType, msg)
+				if err != nil {
+					errc <- err
+					break
+				}
 			}
 		}
-	}
 
-	go replicateWebsocketConn(connPub, connBackend, errClient)
-	go replicateWebsocketConn(connBackend, connPub, errBackend)
+		go replicateWebsocketConn(connPub, connBackend, errClient)
+		go replicateWebsocketConn(connBackend, connPub, errBackend)
 
-	var message string
-	select {
-	case err = <-errClient:
-		message = "websocketproxy: Error when copying from backend to client"
-	case err = <-errBackend:
-		message = "websocketproxy: Error when copying from client to backend"
+		var message string
+		select {
+		case err = <-errClient:
+			message = "websocketproxy: Error when copying from backend to client"
+		case err = <-errBackend:
+			message = "websocketproxy: Error when copying from client to backend"
 
-	}
-	if e, ok := err.(*websocket.CloseError); !ok || e.Code == websocket.CloseAbnormalClosure {
-		log.Error().Err(err).Msg(message)
-	}
+		}
+		if e, ok := err.(*websocket.CloseError); !ok || e.Code == websocket.CloseAbnormalClosure {
+			log.Error().Err(err).Msg(message)
+		}
+	})
 }
 
-func serveProxy(srv *server, domains []string) {
-	if len(domains) == 0 {
-		return
-	}
-
-	repoPath, err := utils.FullPath(utils.RepoPath())
-	if err != nil {
-		log.Err(err).Msg("error when getting repo path")
-		return
-	}
-
-	certmagic.Default.Storage = &certmagic.FileStorage{Path: filepath.Join(repoPath, "certmagic")}
-
-	err = certmagic.HTTPS(domains, srv)
-	if err != nil {
-		log.Err(err).Msg("error when serving https")
-		return
-	}
-	fmt.Println("==> Started tls proxy for domains:")
-	for _, d := range domains {
-		fmt.Println("- ", d)
-	}
-}
-
-func serveHTTP(server *server, l net.Listener) {
+func serveHTTP(server *server, l net.Listener, domains []string) {
 	mx := http.NewServeMux()
 
 	// register RPC
@@ -565,14 +536,41 @@ func serveHTTP(server *server, l net.Listener) {
 
 	mx.Handle("/rpc", rpcServer)
 	mx.Handle("/", server.localhostHandler())
+	mx.Handle("/p2p/", server.proxyHandler())
 
-	s := &http.Server{
-		Handler: mx,
+	go func() {
+		s := &http.Server{
+			Handler: mx,
+		}
+		err := s.Serve(l)
+		if err != nil && err != cmux.ErrServerClosed {
+			log.Error().Err(err).Msg("serveHTTP")
+		}
+	}()
+
+	if len(domains) == 0 {
+		return
 	}
-	err := s.Serve(l)
-	if err != nil && err != cmux.ErrServerClosed {
-		log.Error().Err(err).Msg("serveHTTP")
-	}
+
+	go func() {
+		repoPath, err := utils.FullPath(utils.RepoPath())
+		if err != nil {
+			log.Err(err).Msg("error when getting repo path")
+			return
+		}
+
+		certmagic.Default.Storage = &certmagic.FileStorage{Path: filepath.Join(repoPath, "certmagic")}
+
+		err = certmagic.HTTPS(domains, mx)
+		if err != nil {
+			log.Err(err).Msg("error when serving https")
+			return
+		}
+		fmt.Println("==> Started tls proxy for domains:")
+		for _, d := range domains {
+			fmt.Println("- ", d)
+		}
+	}()
 }
 
 func serveTCP(ctx context.Context, server *server, l net.Listener) {
