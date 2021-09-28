@@ -292,9 +292,15 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
 			return
 		}
-		err = s.node.exch.Index().SetRef(tx.Ref())
+		ref := tx.Ref()
+		err = s.node.exch.Index().SetRef(ref)
 		if err != nil {
 			http.Error(w, "failed to set new ref", http.StatusInternalServerError)
+			return
+		}
+		err = s.node.remind.Publish(ref.PayloadCID, ref.PayloadSize)
+		if err != nil {
+			http.Error(w, "failed to publish to remote index", http.StatusInternalServerError)
 			return
 		}
 		root = tx.Root()
