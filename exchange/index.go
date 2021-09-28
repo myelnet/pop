@@ -46,9 +46,8 @@ type Index struct {
 	// Lower bound is the size we target when evicting to make room for new content
 	// the interval between ub and lb is to try not evicting after every write once we reach ub
 	lb uint64
-	// updateFunc, if not nil, is called after every read transactions. The hook can be used
-	// to trigger request for new content and refreshing the index with new popular content
-	updateFunc func()
+	// deleteFunc, if not nil, is called after a ref is evicted. Make sure not to block there.
+	deleteFunc func(cid.Cid)
 
 	emu sync.Mutex
 	// gcSet is a cid Set where we put all the cid that will be evicted when calling the Garbage Collector GC()
@@ -105,10 +104,10 @@ func WithBounds(up, lo uint64) IndexOption {
 	}
 }
 
-// WithUpdateFunc sets an UpdateFunc callback and a read interval after which to call it
-func WithUpdateFunc(fn func()) IndexOption {
+// WithDeleteFunc sets a deleteFunc callback
+func WithDeleteFunc(fn func(cid.Cid)) IndexOption {
 	return func(idx *Index) {
-		idx.updateFunc = fn
+		idx.deleteFunc = fn
 	}
 }
 
@@ -461,6 +460,9 @@ func (idx *Index) evict(size uint64) uint64 {
 			idx.remBlistEntry(place, entry)
 			evicted += uint64(entry.PayloadSize)
 			idx.size -= uint64(entry.PayloadSize)
+			if idx.deleteFunc != nil {
+				idx.deleteFunc(entry.PayloadCID)
+			}
 			if evicted >= size {
 				return evicted
 			}

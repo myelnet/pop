@@ -124,6 +124,8 @@ type Options struct {
 	ReplInterval time.Duration
 	// Domains is a list of DNS names we can establish TLS handshakes with
 	Domains []string
+	// RemoteIndexURL is a url to send index records to
+	RemoteIndexURL string
 	// CancelFunc is used for gracefully shutting down the node
 	CancelFunc context.CancelFunc
 }
@@ -137,6 +139,7 @@ type node struct {
 	dag     ipldformat.DAGService
 	exch    *exchange.Exchange
 	metrics metrics.MetricsRecorder
+	remind  *RemoteIndex
 
 	// opts keeps all the node params set when starting the node
 	opts Options
@@ -233,6 +236,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Regions:             regions,
 		Capacity:            opts.Capacity,
 		ReplInterval:        opts.ReplInterval,
+		WatchEvictionFunc:   nd.onDeleteRef,
 	}
 	if opts.FilToken != "" {
 		eopts.FilecoinRPCHeader = http.Header{
@@ -297,6 +301,11 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
+
+	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.host, nd.exch.Wallet())
+	if err != nil {
+		return nil, err
+	}
 
 	// remove unwanted blocks that might be in the blockstore but are removed from the index
 	err = nd.exch.Index().CleanBlockStore(ctx)
@@ -586,6 +595,12 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 
 	// Run the garbage collector to remove tagged Refs
 	err = nd.exch.Index().GC()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	err = nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
 	if err != nil {
 		sendErr(err)
 		return
@@ -1108,4 +1123,15 @@ func (nd *node) connPeers() []peer.ID {
 		out = append(out, pid)
 	}
 	return out
+}
+
+// onDeleteRef calls any remote index to delete the related record
+// we spin up routines not to block eviction execution.
+func (nd *node) onDeleteRef(key cid.Cid) {
+	go func() {
+		err := nd.remind.Delete(key)
+		if err != nil {
+			log.Error().Err(err).Msg("deleting remote record")
+		}
+	}()
 }
