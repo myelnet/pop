@@ -26,6 +26,7 @@ import (
 // ErrRefNotFound is returned when a given ref is not in the store
 var ErrRefNotFound = errors.New("ref not found")
 
+// ErrRefAlreadyExists is used when trying to set a ref when one is already stored
 var ErrRefAlreadyExists = errors.New("ref already exists")
 
 // KIndex is the datastore key for persisting the index of a workdag

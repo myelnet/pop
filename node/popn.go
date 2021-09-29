@@ -571,6 +571,7 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	nd.tx.SetCacheRF(args.CacheRF)
 	err := nd.tx.Commit()
 	if err != nil {
+		nd.txmu.Unlock()
 		sendErr(err)
 		return
 	}
@@ -585,6 +586,7 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		})
 	})
 	if err := nd.exch.Index().SetRef(ref); err != nil {
+		nd.txmu.Unlock()
 		sendErr(err)
 		return
 	}
