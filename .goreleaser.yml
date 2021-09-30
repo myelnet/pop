@@ -1,7 +1,7 @@
 # This is an example .goreleaser.yml file with some sane defaults.
 # Make sure to check the documentation at http://goreleaser.com
 builds:
-  - id: "pop-linux"
+  - id: "pop-linux-amd64"
     main: "./cmd/pop"
     env:
       - CGO_ENABLED=1
@@ -9,6 +9,16 @@ builds:
       - linux
     goarch:
       - amd64
+  - id: "pop-linux-arm64"
+    main: "./cmd/pop"
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - arm64
   - id: "pop-darwin-amd64"
     main: "./cmd/pop"
     env:
