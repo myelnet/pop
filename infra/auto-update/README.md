@@ -21,9 +21,9 @@
 
 Make sure `start-cmd.sh` matches the command you want to run when starting your pop.
 
-Make sure the environment variables `GITHUB_WEBHOOK_SECRET` matches the [Github webhook secret](https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks) set for your server.
+Make sure the environment variable `GITHUB_WEBHOOK_SECRET` matches the [Github webhook secret](https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks) set for your server.
 
-Run `go hook.go` with `-h` flag for more usage details.
+Run `go run hook.go` with `-h` flag for more usage details.
 
 ```
 Usage of hook.go:
