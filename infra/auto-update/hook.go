@@ -14,6 +14,7 @@ import (
     "os"
     "os/exec"
     "strings"
+    "syscall"
     "time"
 )
 
@@ -78,7 +79,6 @@ func updatePOP(w http.ResponseWriter, r *http.Request){
 
     verification := VerifySignature(string(reqBody), r.Header.Get("X-Hub-Signature-256"))
     if verification {
-      fmt.Println(string(reqBody))
       // return the string response containing the request body
       json.Unmarshal(reqBody, &f)
 
@@ -111,6 +111,9 @@ func updatePOP(w http.ResponseWriter, r *http.Request){
               fmt.Println("==> (", time.Now().UTC(),") ⬇️  Downloaded new asset.")
 
               startPop := exec.Command(*startCmd)
+              startPop.SysProcAttr = &syscall.SysProcAttr{
+                  Setpgid: true,
+              }
               err = startPop.Run()
               if err != nil {
                   log.Fatal(err)
