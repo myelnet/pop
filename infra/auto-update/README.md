@@ -27,12 +27,8 @@ Run `go run hook.go` with `-h` flag for more usage details.
 
 ```
 Usage of hook.go:
-  -arch string
-        architecture used (default "amd64")
   -cmd string
         cmd to run when starting pop (default "./start-cmd.sh")
-  -os string
-        OS used (default "linux")
   -pop-path string
         path to pop install (default "/usr/local/bin/pop")
 ```

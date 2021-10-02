@@ -13,13 +13,12 @@ import (
     "net/http"
     "os"
     "os/exec"
+    "runtime"
     "strings"
     "syscall"
     "time"
 )
 
-var oss = flag.String("os", "linux", "OS used")
-var arch = flag.String("arch", "amd64", "architecture used")
 var popPath = flag.String("pop-path", "/usr/local/bin/pop", "path to pop install")
 var startCmd = flag.String("cmd", "./start-cmd.sh", "cmd to run when starting pop")
 
@@ -94,7 +93,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request){
 
         // fetch the asset that matches the system's OS and architecture
         for _, a := range assets {
-          if strings.Contains(a.URL, "pop-" + *arch + "-" + *oss){
+          if strings.Contains(a.URL, "pop-" + runtime.GOARCH + "-" + runtime.GOOS){
               fmt.Println("==> (", time.Now().UTC(),") 🔎 Found a relevant asset.")
 
               stopPop := exec.Command(*popPath, "off")
@@ -164,8 +163,8 @@ Auto-update your pop using github webhooks.
 
     flag.Parse()
 
-    fmt.Println("\n==> 🍏 OS: " + *oss)
-    fmt.Println("==> 🖥️  Architecture: "+ *arch)
+    fmt.Println("\n==> 🍏 OS: " + runtime.GOOS)
+    fmt.Println("==> 🖥️  Architecture: "+ runtime.GOARCH)
     fmt.Println("==> 🌎 Path: " + *popPath)
     fmt.Println("==> 💡 CMD: " + *startCmd)
 
