@@ -1,52 +1,53 @@
 package main
 
 import (
-    "crypto/hmac"
-    "crypto/sha256"
-    "encoding/hex"
-    "io"
-    "io/ioutil"
-    "encoding/json"
-    "flag"
-    "fmt"
-    "log"
-    "net/http"
-    "os"
-    "os/exec"
-    "runtime"
-    "strings"
-    "syscall"
-    "time"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"syscall"
+	"time"
 )
 
 var popPath = flag.String("pop-path", "/usr/local/bin/pop", "path to pop install")
 var startCmd = flag.String("cmd", "./start-cmd.sh", "cmd to run when starting pop")
 
 type ReleaseDetails struct {
-  AssetsURL string `json:"assets_url"`
+	AssetsURL string `json:"assets_url"`
 }
 
 type ReleaseUpdate struct {
-  Action string
-  Release ReleaseDetails
+	Action  string
+	Release ReleaseDetails
 }
 
 type Asset struct {
-  URL string `json:"browser_download_url"`
+	URL string `json:"browser_download_url"`
 }
 
 func VerifySignature(payload string, requestSignature string) bool {
-  // make sure GITHUB_WEBHOOK_SECRET matches that of your github webhook
-  h := hmac.New(sha256.New, []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")))
-  h.Write([]byte(payload))
-  // Get result and encode as hexadecimal string
-  signature := "sha256=" + hex.EncodeToString(h.Sum(nil))
-  // Replace with constant time compare
-  return (signature == requestSignature)
+	// make sure GITHUB_WEBHOOK_SECRET matches that of your github webhook
+	h := hmac.New(sha256.New, []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")))
+	h.Write([]byte(payload))
+
+	// Get result and encode as hexadecimal string
+	signature := "sha256=" + hex.EncodeToString(h.Sum(nil))
+
+	// Replace with constant time compare
+	return (signature == requestSignature)
 }
 
 func DownloadFile(filepath string, url string) error {
-
 	// Get the data
 	resp, err := http.Get(url)
 	if err != nil {
@@ -66,77 +67,74 @@ func DownloadFile(filepath string, url string) error {
 	return err
 }
 
+func updatePOP(w http.ResponseWriter, r *http.Request) {
+	// return the string response containing the request body
+	var f ReleaseUpdate
 
-func updatePOP(w http.ResponseWriter, r *http.Request){
+	fmt.Println("==> (", time.Now().UTC(), ") ❔ Release event.")
 
-    // return the string response containing the request body
-    var f ReleaseUpdate
+	reqBody, _ := ioutil.ReadAll(r.Body)
 
-    fmt.Println("==> (", time.Now().UTC(),") ❔ Release event.")
+	verification := VerifySignature(string(reqBody), r.Header.Get("X-Hub-Signature-256"))
+	if verification {
+		// return the string response containing the request body
+		json.Unmarshal(reqBody, &f)
 
-    reqBody, _ := ioutil.ReadAll(r.Body)
+		// verify that a new release created
+		if (f.Action == "published") || (f.Action == "created") {
+			fmt.Println("==> (", time.Now().UTC(), ") 🚀 New release was created.")
+			var assets []Asset
+			// get the URL to download the new release assets
 
-    verification := VerifySignature(string(reqBody), r.Header.Get("X-Hub-Signature-256"))
-    if verification {
-      // return the string response containing the request body
-      json.Unmarshal(reqBody, &f)
+			r, _ := http.Get(f.Release.AssetsURL)
+			respBody, _ := ioutil.ReadAll(r.Body)
+			json.Unmarshal(respBody, &assets)
 
-      // verify that a new release created
-      if (f.Action == "published") || (f.Action == "created"){
-        fmt.Println("==> (", time.Now().UTC(),") 🚀 New release was created.")
-        var assets []Asset
-        // get the URL to download the new release assets
+			// fetch the asset that matches the system's OS and architecture
+			for _, a := range assets {
+				if strings.Contains(a.URL, "pop-"+runtime.GOARCH+"-"+runtime.GOOS) {
+					fmt.Println("==> (", time.Now().UTC(), ") 🔎 Found a relevant asset.")
 
-        r, _ := http.Get(f.Release.AssetsURL)
-        respBody, _ := ioutil.ReadAll(r.Body)
-        json.Unmarshal(respBody, &assets)
+					stopPop := exec.Command(*popPath, "off")
+					err := stopPop.Run()
+					if err != nil {
+						fmt.Println("==> (", time.Now().UTC(), ") 💤 Pop was not running.")
+					}
 
-        // fetch the asset that matches the system's OS and architecture
-        for _, a := range assets {
-          if strings.Contains(a.URL, "pop-" + runtime.GOARCH + "-" + runtime.GOOS){
-              fmt.Println("==> (", time.Now().UTC(),") 🔎 Found a relevant asset.")
+					// Launch a goroutine to download file
+					err = DownloadFile(*popPath, a.URL)
+					if err != nil {
+						panic(err)
+					}
+					fmt.Println("==> (", time.Now().UTC(), ") ⬇️  Downloaded new asset.")
 
-              stopPop := exec.Command(*popPath, "off")
-              err := stopPop.Run()
-              if err != nil {
-                  fmt.Println("==> (", time.Now().UTC(),") 💤 Pop was not running.")
-              }
+					startPop := exec.Command(*startCmd)
+					startPop.SysProcAttr = &syscall.SysProcAttr{
+						Setpgid: true,
+					}
+					err = startPop.Run()
+					if err != nil {
+						log.Fatal(err)
+					}
+					fmt.Println("==> (", time.Now().UTC(), ") 🎉 Started pop.")
 
-              // Launch a goroutine to download file
-              err = DownloadFile(*popPath, a.URL)
-              if err != nil {
-            		panic(err)
-            	}
-              fmt.Println("==> (", time.Now().UTC(),") ⬇️  Downloaded new asset.")
-
-              startPop := exec.Command(*startCmd)
-              startPop.SysProcAttr = &syscall.SysProcAttr{
-                  Setpgid: true,
-              }
-              err = startPop.Run()
-              if err != nil {
-                  log.Fatal(err)
-              }
-              fmt.Println("==> (", time.Now().UTC(),") 🎉 Started pop.")
-
-            }
-        }
-      } else {
-        fmt.Println("==> (", time.Now().UTC(),") ❌ Not a new release.")
-      }
-    } else {
-      fmt.Println("==> (", time.Now().UTC(),") 🗝  Signatures did not match ! ")
-    }
+				}
+			}
+		} else {
+			fmt.Println("==> (", time.Now().UTC(), ") ❌ Not a new release.")
+		}
+	} else {
+		fmt.Println("==> (", time.Now().UTC(), ") 🗝  Signatures did not match ! ")
+	}
 }
 
 func handleRequests() {
-    http.HandleFunc("/", updatePOP)
-    log.Fatal(http.ListenAndServe(":4567", nil))
+	http.HandleFunc("/", updatePOP)
+	log.Fatal(http.ListenAndServe(":4567", nil))
 }
 
 func main() {
-  fmt.Printf(`
-
+	fmt.Printf(`
 
 PPPPPPPPPPPPPPPPP        OOOOOOOOO     PPPPPPPPPPPPPPPPP                    HHHHHHHHH     HHHHHHHHH                                  kkkkkkkk
 P::::::::::::::::P     OO:::::::::OO   P::::::::::::::::P                   H:::::::H     H:::::::H                                  k::::::k
@@ -161,12 +159,12 @@ Auto-update your pop using github webhooks.
 -------------------------------------------
       `)
 
-    flag.Parse()
+	flag.Parse()
 
-    fmt.Println("\n==> 🍏 OS: " + runtime.GOOS)
-    fmt.Println("==> 🖥️  Architecture: "+ runtime.GOARCH)
-    fmt.Println("==> 🌎 Path: " + *popPath)
-    fmt.Println("==> 💡 CMD: " + *startCmd)
+	fmt.Println("\n==> 🍏 OS: " + runtime.GOOS)
+	fmt.Println("==> 🖥️  Architecture: " + runtime.GOARCH)
+	fmt.Println("==> 🌎 Path: " + *popPath)
+	fmt.Println("==> 💡 CMD: " + *startCmd)
 
-    handleRequests()
+	handleRequests()
 }
