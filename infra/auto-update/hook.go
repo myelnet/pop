@@ -109,13 +109,14 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(a.URL, "pop-"+runtime.GOARCH+"-"+runtime.GOOS) {
 					fmt.Println("==> (", time.Now().UTC(), ") 🔎 Found a relevant asset.")
 
+          // stop pop if it is already running
 					stopPop := exec.Command(*popPath, "off")
 					err = stopPop.Run()
 					if err != nil {
 						fmt.Println("==> (", time.Now().UTC(), ") 💤 Pop was not running.")
 					}
 
-					// Launch a goroutine to download file
+					// launch a goroutine to download revelevant release file
 					err = DownloadFile(*popPath, a.URL)
 					if err != nil {
             log.Fatal(err)
@@ -123,6 +124,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") ⬇️  Downloaded new asset.")
 
+          // ensures failures of main go program don't terminate pop node
 					startPop := exec.Command(*startCmd)
 					startPop.SysProcAttr = &syscall.SysProcAttr{
 						Setpgid: true,
