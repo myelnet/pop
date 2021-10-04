@@ -99,7 +99,7 @@ export INFLUXDB_BUCKET=<INSERT BUCKET>
 
 ## Deployment
 
-You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `build/k8s`.
+You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `infra/k8s`.
 
 ## Library Usage
 
