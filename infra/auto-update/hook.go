@@ -74,10 +74,10 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("==> (", time.Now().UTC(), ") ❔ Release event.")
 
 	reqBody, err := ioutil.ReadAll(r.Body)
-  if err != nil {
-    log.Fatal(err)
-    return
-  }
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 
 	verification := VerifySignature(string(reqBody), r.Header.Get("X-Hub-Signature-256"))
 	if verification {
@@ -91,17 +91,17 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 
 			// get the URL to download the new release assets
 			r, err := http.Get(f.Release.AssetsURL)
-      if err != nil {
-        log.Fatal(err)
-        return
-      }
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
 
-      // parse response
+			// parse response
 			respBody, err := ioutil.ReadAll(r.Body)
-      if err != nil {
-        log.Fatal(err)
-        return
-      }
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
 			json.Unmarshal(respBody, &assets)
 
 			// fetch the asset that matches the system's OS and architecture
@@ -109,7 +109,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(a.URL, "pop-"+runtime.GOARCH+"-"+runtime.GOOS) {
 					fmt.Println("==> (", time.Now().UTC(), ") 🔎 Found a relevant asset.")
 
-          // stop pop if it is already running
+					// stop pop if it is already running
 					stopPop := exec.Command(*popPath, "off")
 					err = stopPop.Run()
 					if err != nil {
@@ -119,12 +119,12 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					// launch a goroutine to download revelevant release file
 					err = DownloadFile(*popPath, a.URL)
 					if err != nil {
-            log.Fatal(err)
-            return
+						log.Fatal(err)
+						return
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") ⬇️  Downloaded new asset.")
 
-          // ensures failures of main go program don't terminate pop node
+					// ensures failures of main go program don't terminate pop node
 					startPop := exec.Command(*startCmd)
 					startPop.SysProcAttr = &syscall.SysProcAttr{
 						Setpgid: true,
@@ -132,7 +132,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					err = startPop.Run()
 					if err != nil {
 						log.Fatal(err)
-            return
+						return
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") 🎉 Started pop.")
 				}
