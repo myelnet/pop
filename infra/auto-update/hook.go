@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 var popPath = flag.String("pop-path", "/usr/local/bin/pop", "path to pop install")
@@ -75,7 +76,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.Error().Err(err).Msg("could not read request body")
 		return
 	}
 
@@ -92,14 +93,14 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 			// get the URL to download the new release assets
 			r, err := http.Get(f.Release.AssetsURL)
 			if err != nil {
-				log.Fatal(err)
+				log.Error().Err(err).Msg("could not get release URL")
 				return
 			}
 
 			// parse response
 			respBody, err := ioutil.ReadAll(r.Body)
 			if err != nil {
-				log.Fatal(err)
+				log.Error().Err(err).Msg("could not read response body")
 				return
 			}
 			json.Unmarshal(respBody, &assets)
@@ -119,7 +120,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					// launch a goroutine to download revelevant release file
 					err = DownloadFile(*popPath, a.URL)
 					if err != nil {
-						log.Fatal(err)
+						log.Error().Err(err).Msg("could not download release")
 						return
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") ⬇️  Downloaded new asset.")
@@ -131,7 +132,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					}
 					err = startPop.Run()
 					if err != nil {
-						log.Fatal(err)
+						log.Error().Err(err).Msg("could not start pop")
 						return
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") 🎉 Started pop.")
@@ -147,7 +148,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 
 func handleRequests() {
 	http.HandleFunc("/", updatePOP)
-	log.Fatal(http.ListenAndServe(":4567", nil))
+	log.Fatal().Err(http.ListenAndServe(":4567", nil))
 }
 
 func main() {
