@@ -73,7 +73,11 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("==> (", time.Now().UTC(), ") ❔ Release event.")
 
-	reqBody, _ := ioutil.ReadAll(r.Body)
+	reqBody, err := ioutil.ReadAll(r.Body)
+  if err != nil {
+    log.Fatal(err)
+    return
+  }
 
 	verification := VerifySignature(string(reqBody), r.Header.Get("X-Hub-Signature-256"))
 	if verification {
@@ -84,10 +88,20 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 		if (f.Action == "published") || (f.Action == "created") {
 			fmt.Println("==> (", time.Now().UTC(), ") 🚀 New release was created.")
 			var assets []Asset
-			// get the URL to download the new release assets
 
-			r, _ := http.Get(f.Release.AssetsURL)
-			respBody, _ := ioutil.ReadAll(r.Body)
+			// get the URL to download the new release assets
+			r, err := http.Get(f.Release.AssetsURL)
+      if err != nil {
+        log.Fatal(err)
+        return
+      }
+
+      // parse response
+			respBody, err := ioutil.ReadAll(r.Body)
+      if err != nil {
+        log.Fatal(err)
+        return
+      }
 			json.Unmarshal(respBody, &assets)
 
 			// fetch the asset that matches the system's OS and architecture
@@ -96,7 +110,7 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					fmt.Println("==> (", time.Now().UTC(), ") 🔎 Found a relevant asset.")
 
 					stopPop := exec.Command(*popPath, "off")
-					err := stopPop.Run()
+					err = stopPop.Run()
 					if err != nil {
 						fmt.Println("==> (", time.Now().UTC(), ") 💤 Pop was not running.")
 					}
@@ -104,7 +118,8 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					// Launch a goroutine to download file
 					err = DownloadFile(*popPath, a.URL)
 					if err != nil {
-						panic(err)
+            log.Fatal(err)
+            return
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") ⬇️  Downloaded new asset.")
 
@@ -115,9 +130,9 @@ func updatePOP(w http.ResponseWriter, r *http.Request) {
 					err = startPop.Run()
 					if err != nil {
 						log.Fatal(err)
+            return
 					}
 					fmt.Println("==> (", time.Now().UTC(), ") 🎉 Started pop.")
-
 				}
 			}
 		} else {
