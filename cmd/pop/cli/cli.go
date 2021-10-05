@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/myelnet/pop/build"
+	"github.com/myelnet/pop/infra/build"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"

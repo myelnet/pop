@@ -2,7 +2,7 @@ all: install
 
 GO_BUILDER_VERSION=v1.16.3
 
-ldflags=-X=github.com/myelnet/pop/build.Version=$(shell cat ./build/VERSION.txt)-$(shell git describe --always --match=NeVeRmAtCh --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
+ldflags=-X=github.com/myelnet/pop/infra/build.Version=$(shell cat ./infra/VERSION.txt)-$(shell git describe --always --match=NeVeRmAtCh --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
 
 install:
 	rm -f pop
@@ -10,7 +10,7 @@ install:
 	install -C ./pop /usr/local/bin/pop
 
 snapshot:
-	docker build -f build/releaser/Dockerfile -t pop/golang-cross .
+	docker build -f infra/releaser/Dockerfile -t pop/golang-cross .
 	docker run --rm --privileged \
 		-v $(CURDIR):/pop \
 		-v /var/run/docker.sock:/var/run/docker.sock \
