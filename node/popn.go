@@ -44,9 +44,9 @@ import (
 	websocket "github.com/libp2p/go-ws-transport"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/go-multistore"
-	"github.com/myelnet/pop/build"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/infra/build"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/retrieval/client"
@@ -571,6 +571,7 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	nd.tx.SetCacheRF(args.CacheRF)
 	err := nd.tx.Commit()
 	if err != nil {
+		nd.txmu.Unlock()
 		sendErr(err)
 		return
 	}
@@ -585,6 +586,7 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		})
 	})
 	if err := nd.exch.Index().SetRef(ref); err != nil {
+		nd.txmu.Unlock()
 		sendErr(err)
 		return
 	}

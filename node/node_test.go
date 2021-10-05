@@ -65,6 +65,9 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, exchangeOpts)
 	require.NoError(t, err)
 
+	nd.remind, err = NewRemoteIndex("", nd.host, nd.exch.Wallet())
+	require.NoError(t, err)
+
 	return nd
 }
 

@@ -294,6 +294,10 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ref := tx.Ref()
 		err = s.node.exch.Index().SetRef(ref)
+		if errors.Is(exchange.ErrRefAlreadyExists, err) {
+			http.Error(w, "ref already exists", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "failed to set new ref", http.StatusInternalServerError)
 			return
