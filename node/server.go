@@ -547,7 +547,10 @@ func serveHTTP(server *server, l net.Listener, domains []string) {
 	mx.Handle("/rpc", rpcServer)
 	mx.Handle("/", server.localhostHandler())
 	mx.Handle("/p2p/", server.proxyHandler())
-	mx.Handle("/upgrade", http.HandlerFunc(upgradeHandler))
+
+	if server.node.opts.UpgradeSecret != "" {
+		mx.Handle("/upgrade", upgradeHandler(server.node.opts.UpgradeSecret))
+	}
 
 	go func() {
 		s := &http.Server{
