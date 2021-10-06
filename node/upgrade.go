@@ -5,19 +5,30 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
-const PopExecutablePath = "/usr/local/bin/pop"
+var (
+	popArgs []string
+	popEnvs []string
+	popPath string
+)
+
+func init() {
+	popArgs = os.Args
+	popEnvs = os.Environ()
+	popPath, _ = os.Executable()
+}
 
 type ReleaseDetails struct {
 	AssetsURL string `json:"assets_url"`
@@ -64,12 +75,28 @@ func DownloadFile(filepath string, url string) error {
 	return err
 }
 
+// RestartByExec calls `syscall.Exec()` to restart app
+func RestartByExec() {
+	// look for pop binary
+	binary, err := exec.LookPath(popPath)
+	if err != nil {
+		log.Error().Err(err).Msg("could not find binary")
+		return
+	}
+	time.Sleep(1 * time.Second)
+	// restart with current args and env variables
+	execErr := syscall.Exec(binary, popArgs, popEnvs)
+	if execErr != nil {
+		log.Error().Err(err).Msg("could not restart pop")
+	}
+}
+
 func upgradeHandler(secret string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// return the string response containing the request body
 		var f ReleaseUpdate
 
-		fmt.Println("==> (", time.Now().UTC(), ") ❔ Release event.")
+		log.Info().Msg("❔ Release event.")
 
 		reqBody, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -79,7 +106,7 @@ func upgradeHandler(secret string) http.Handler {
 
 		ok := VerifySignature(string(reqBody), r.Header.Get("X-Hub-Signature-256"), secret)
 		if !ok {
-			fmt.Println("==> (", time.Now().UTC(), ") 🗝  Signatures did not match ! ")
+			log.Info().Msg("🗝  Signatures did not match !")
 			return
 		}
 		// return the string response containing the request body
@@ -87,12 +114,13 @@ func upgradeHandler(secret string) http.Handler {
 
 		// verify that a new release created
 		if f.Action != "published" && f.Action != "created" {
-			fmt.Println("==> (", time.Now().UTC(), ") ❌ Not a new release.")
+			log.Info().Msg("❌ Not a new release.")
 			return
 		}
-		fmt.Println("==> (", time.Now().UTC(), ") 🚀 New release was created.")
-		var assets []Asset
 
+		log.Info().Msg("🚀 New release was created.")
+
+		var assets []Asset
 		// get the URL to download the new release assets
 		res, err := http.Get(f.Release.AssetsURL)
 		if err != nil {
@@ -111,17 +139,32 @@ func upgradeHandler(secret string) http.Handler {
 		// fetch the asset that matches the system's OS and architecture
 		for _, a := range assets {
 			if strings.Contains(a.URL, "pop-"+runtime.GOARCH+"-"+runtime.GOOS) {
-				fmt.Println("==> (", time.Now().UTC(), ") 🔎 Found a relevant asset.")
+				log.Info().Msg("🔎 Found a relevant asset.")
+				// remove any old temp files
+				cmd := exec.Command("rm", "-f", popPath+"_temp")
+				err = cmd.Run()
+				if err != nil {
+					log.Error().Err(err).Msg("could not remove old temp file")
+				}
 
-				// launch a goroutine to download revelevant release file
-				err = DownloadFile(PopExecutablePath, a.URL)
+					// launch a goroutine to download release file to temp file
+				err = DownloadFile(popPath+"_temp", a.URL)
 				if err != nil {
 					log.Error().Err(err).Msg("could not download release")
 					return
 				}
-				fmt.Println("==> (", time.Now().UTC(), ") ⬇️  Downloaded new asset.")
+				log.Info().Msg("⬇️  Downloaded new asset.")
 
-				// TODO: restart POP
+				// swap out temp file for current executable
+				installCmd := exec.Command("install", "-C", popPath+"_temp", popPath)
+				err = installCmd.Run()
+				if err != nil {
+					log.Error().Err(err).Msg("could not install new release")
+				}
+				log.Info().Msg("⬇️  Installed new asset.")
+
+				RestartByExec()
+
 			}
 		}
 	})
