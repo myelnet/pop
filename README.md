@@ -97,6 +97,15 @@ export INFLUXDB_ORG=<INSERT ORG>
 export INFLUXDB_BUCKET=<INSERT BUCKET>
 ```
 
+### Auto-updating
+
+`pop` supports auto-updating via Github webhooks.
+
+To activate it pass the flag `-upgrade-secret` to `pop start` such that it matches the [Github webhook secret](https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks) set for your server. Make sure you run as sudo, or that your current user has authorization to modify your `pop` binary.
+
+Your `pop` will then automatically download and install new releases.
+
+
 ## Deployment
 
 You can deploy a cluster of nodes on AWS using kubernetes, as detailed in `infra/k8s`.

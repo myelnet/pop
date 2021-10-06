@@ -126,6 +126,8 @@ type Options struct {
 	Domains []string
 	// RemoteIndexURL is a url to send index records to
 	RemoteIndexURL string
+	// UpgradeSecret is used to verify automatic updates from a github webhook
+	UpgradeSecret string
 	// CancelFunc is used for gracefully shutting down the node
 	CancelFunc context.CancelFunc
 }

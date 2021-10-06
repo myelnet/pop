@@ -24,10 +24,11 @@ import (
 
 // PopConfig is the json config object we generate with the init command
 type PopConfig struct {
-	temp         bool
-	privKeyPath  string
-	regions      string
-	replInterval time.Duration
+	temp          bool
+	privKeyPath   string
+	regions       string
+	replInterval  time.Duration
+	upgradeSecret string
 	// Exported fields can be set by survey.Ask
 	Bootstrap     string `json:"bootstrap"`
 	Capacity      string `json:"capacity"`
@@ -64,6 +65,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.Domains, "domains", "", "comma separated list of domain names for TLS certificates")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 		fs.StringVar(&startArgs.IndexEndpoint, "index-endpoint", "", "endpoint of a hosted index service")
+		fs.StringVar(&startArgs.upgradeSecret, "upgrade-secret", "", "secret used to verify upgrade message signatures, if provided the server will listen for github webhook request and automatically upgrade the pop")
 
 		return fs
 	})(),
@@ -189,6 +191,7 @@ Manage your Myel point of presence from the command line.
 		ReplInterval:   startArgs.replInterval,
 		Domains:        domains,
 		RemoteIndexURL: startArgs.IndexEndpoint,
+		UpgradeSecret:  startArgs.upgradeSecret,
 		CancelFunc:     cancel,
 	}
 
