@@ -40,7 +40,7 @@ RUN \
 
 ENV CGO_CFLAGS="-D__BLST_PORTABLE__"
 
-COPY build/releaser/entrypoint.sh /
+COPY infra/releaser/entrypoint.sh /
 RUN chmod +x /entrypoint.sh
 RUN chmod +x /tmp
 
