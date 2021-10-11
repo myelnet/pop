@@ -1,7 +1,8 @@
 # This is an example .goreleaser.yml file with some sane defaults.
 # Make sure to check the documentation at http://goreleaser.com
 builds:
-  - id: "pop-linux-amd64"
+  - id: "pop1"
+    binary: pop-amd64-linux
     main: "./cmd/pop"
     env:
       - CGO_ENABLED=1
@@ -9,7 +10,8 @@ builds:
       - linux
     goarch:
       - amd64
-  - id: "pop-linux-arm64"
+  - id: "pop2"
+    binary: pop-arm64-linux
     main: "./cmd/pop"
     env:
       - CC=aarch64-linux-gnu-gcc
@@ -19,7 +21,8 @@ builds:
       - linux
     goarch:
       - arm64
-  - id: "pop-darwin-amd64"
+  - id: "pop3"
+    binary: pop-amd64-darwin
     main: "./cmd/pop"
     env:
       - CGO_ENABLED=1
@@ -29,13 +32,25 @@ builds:
       - darwin
     goarch:
       - amd64
+  - id: "pop4"
+    binary: pop-arm64-darwin
+    main: "./cmd/pop"
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-apple-darwin20.2-clang
+      - CXX=aarch64-apple-darwin20.2-clang++
+    goos:
+      - darwin
+    goarch:
+      - arm64
 archives:
-  - replacements:
-      darwin: Darwin
-      linux: Linux
-      windows: Windows
-      386: i386
-      amd64: x86_64
+  - format: binary
+  # - replacements:
+  #     darwin: Darwin
+  #     linux: Linux
+  #     windows: Windows
+  #     386: i386
+  #     amd64: x86_64
 checksum:
   name_template: 'checksums.txt'
 snapshot:

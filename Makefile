@@ -12,7 +12,7 @@ install:
 snapshot:
 	docker build -f infra/releaser/Dockerfile -t pop/golang-cross .
 	docker run --rm --privileged \
-		-v $(CURDIR):/pop \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-w /pop \
-		pop/golang-cross --snapshot --rm-dist
+                -v $(CURDIR):/pop \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -w /pop \
+                pop/golang-cross --snapshot --rm-dist
