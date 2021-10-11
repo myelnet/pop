@@ -29,6 +29,16 @@ builds:
       - darwin
     goarch:
       - amd64
+  - id: "pop-darwin-arm64"
+    main: "./cmd/pop"
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-apple-darwin20.2-clang
+      - CXX=aarch64-apple-darwin20.2-clang++
+    goos:
+      - darwin
+    goarch:
+      - arm64
 archives:
   - replacements:
       darwin: Darwin
