@@ -16,7 +16,3 @@ snapshot:
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -w /pop \
                 pop/golang-cross --snapshot --rm-dist
-	mv dist/pop-linux-arm64_linux_arm64/pop ./pop-arm64-linux
-	mv dist/pop-darwin-arm64_darwin_arm64/pop ./pop-arm64-darwin
-	mv dist/pop-linux-amd64_linux_amd64/pop ./pop-amd64-linux
-	mv dist/pop-darwin-amd64_darwin_amd64/pop ./pop-amd64-darwin
