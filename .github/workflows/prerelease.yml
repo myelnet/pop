@@ -19,7 +19,7 @@ jobs:
         run: make snapshot
       - uses: "marvinpinto/action-automatic-releases@latest"
         with:
-          automatic_release_tag: $RELEASE_VERSION
+          automatic_release_tag: "{{ $RELEASE_VERSION }}"
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: true
           files: |
