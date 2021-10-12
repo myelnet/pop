@@ -18,9 +18,8 @@ jobs:
         id: vars
         run: |
           echo ::set-output name=tag::${GITHUB_REF#refs/*/}
-      - name: "Build Binaries"
-        run: make snapshot
       - name: "Release"
+        if: "! contains(steps.vars.outputs.tag, 'rc')"
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
           automatic_release_tag: "${{ steps.vars.outputs.tag }}"
@@ -28,3 +27,14 @@ jobs:
           prerelease: "${{ contains(steps.vars.outputs.tag, 'rc') }}"
           files: |
             ./dist/pop*/pop*
+      - name: "Prerelease"
+        if: "contains(steps.vars.outputs.tag, 'rc')"
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          automatic_release_tag: "${{ steps.vars.outputs.tag }}"
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: "${{ contains(steps.vars.outputs.tag, 'rc') }}"
+          files: |
+            ./dist/pop*/pop*
+      - name: "Build Binaries"
+        run: make snapshot

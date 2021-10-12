@@ -18,9 +18,7 @@ import (
 )
 
 const (
-	ReleaseURL      = "https://api.github.com/repos/myelnet/pop/releases"
-	ReleaseWorkflow = "tagged-release"
-	ReleaseFile     = "./latestrelease.json"
+	ReleaseURL = "https://api.github.com/repos/myelnet/pop/releases"
 )
 
 var (
@@ -34,14 +32,21 @@ type ReleaseDetails struct {
 	ID        int    `json:"id"`
 }
 
+type Step struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
 type WorkflowDetails struct {
-	Name string `json:"name"`
-	ID   int    `json:"id"`
+	Name  string `json:"name"`
+	ID    int    `json:"id"`
+	Steps []Step `json:"steps"`
 }
 
 type ReleaseUpdate struct {
-	Action   string `json:"action"`
-	Workflow WorkflowDetails
+	Action   string          `json:"action"`
+	Workflow WorkflowDetails `json:"workflow_job"`
 }
 
 type Asset struct {
@@ -54,30 +59,15 @@ func init() {
 	popPath, _ = os.Executable()
 }
 
-func GetLatestRelease() (ReleaseDetails, error) {
-	var release ReleaseDetails
-	content, err := ioutil.ReadFile(ReleaseFile)
-	if err != nil {
-		return release, err
+// contains checks if a string is present in a slice
+func ReleaseCompleted(steps []Step) bool {
+	// fetch the asset that matches the system's OS and architecture
+	for _, s := range steps {
+		if s.Name == "Release" && s.Status == "completed" && s.Conclusion == "success" {
+			return true
+		}
 	}
-	// get the release details
-	json.Unmarshal(content, &release)
-
-	return release, nil
-}
-
-func SaveLatestRelease(release ReleaseDetails) error {
-	// convert release to JSON
-	releaseJson, err := json.Marshal(release)
-	if err != nil {
-		return err
-	}
-	// write to file
-	err = ioutil.WriteFile(ReleaseFile, releaseJson, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
+	return false
 }
 
 func VerifySignature(payload string, requestSignature string, secret string) bool {
@@ -148,12 +138,12 @@ func upgradeHandler(secret string) http.Handler {
 		// return the string response containing the request body
 		json.Unmarshal(reqBody, &f)
 		// verify that a new release created
-		if f.Workflow.Name != ReleaseWorkflow || f.Action != "completed" {
+		if f.Action != "completed" || !ReleaseCompleted(f.Workflow.Steps) {
 			log.Info().Msg("❌ Not a new release.")
 			return
 		}
 
-		log.Info().Msg("🚀 New workflow was created.")
+		log.Info().Msg("🚀 New release was created.")
 
 		var release ReleaseDetails
 		// get the latest release assets
@@ -171,16 +161,6 @@ func upgradeHandler(secret string) http.Handler {
 		}
 		// get the releases asset URLs
 		json.Unmarshal(respBody, &release)
-
-		latestRelease, err := GetLatestRelease()
-		if err != nil {
-			log.Info().Msg("💾 Could not load latest release record, using defaults.")
-		}
-
-		if latestRelease.ID == release.ID {
-			log.Info().Msg("👾 Workflow didn't update main release.")
-			return
-		}
 
 		var assets []Asset
 		// get the URL to download the new release assets
@@ -224,8 +204,6 @@ func upgradeHandler(secret string) http.Handler {
 					log.Error().Err(err).Msg("could not install new release")
 				}
 				log.Info().Msg("⬇️  Installed new asset.")
-
-				SaveLatestRelease(release)
 
 				RestartByExec()
 
