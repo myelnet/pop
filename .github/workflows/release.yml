@@ -24,7 +24,7 @@ jobs:
         with:
           automatic_release_tag: "${{ steps.vars.outputs.tag }}"
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          prerelease: "${{ contains(steps.vars.outputs.tag, 'rc') }}"
+          prerelease: false
           files: |
             ./dist/pop*/pop*
       - name: "Prerelease"
@@ -33,7 +33,7 @@ jobs:
         with:
           automatic_release_tag: "${{ steps.vars.outputs.tag }}"
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          prerelease: "${{ contains(steps.vars.outputs.tag, 'rc') }}"
+          prerelease: true
           files: |
             ./dist/pop*/pop*
       - name: "Build Binaries"
