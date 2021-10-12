@@ -13,9 +13,12 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/rs/zerolog/log"
+)
+
+const (
+	ReleaseURL = "https://api.github.com/repos/myelnet/pop/releases"
 )
 
 var (
@@ -24,23 +27,47 @@ var (
 	popPath string
 )
 
+type ReleaseDetails struct {
+	AssetsURL string `json:"assets_url"`
+	ID        int    `json:"id"`
+}
+
+type Step struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+type WorkflowDetails struct {
+	Name  string `json:"name"`
+	ID    int    `json:"id"`
+	Steps []Step `json:"steps"`
+}
+
+type ReleaseUpdate struct {
+	Action   string          `json:"action"`
+	Workflow WorkflowDetails `json:"workflow_job"`
+}
+
+type Asset struct {
+	URL string `json:"browser_download_url"`
+}
+
 func init() {
 	popArgs = os.Args
 	popEnvs = os.Environ()
 	popPath, _ = os.Executable()
 }
 
-type ReleaseDetails struct {
-	AssetsURL string `json:"assets_url"`
-}
-
-type ReleaseUpdate struct {
-	Action  string
-	Release ReleaseDetails
-}
-
-type Asset struct {
-	URL string `json:"browser_download_url"`
+// contains checks if a string is present in a slice
+func ReleaseCompleted(steps []Step) bool {
+	// fetch the asset that matches the system's OS and architecture
+	for _, s := range steps {
+		if s.Name == "Release" && s.Status == "completed" && s.Conclusion == "success" {
+			return true
+		}
+	}
+	return false
 }
 
 func VerifySignature(payload string, requestSignature string, secret string) bool {
@@ -83,7 +110,6 @@ func RestartByExec() {
 		log.Error().Err(err).Msg("could not find binary")
 		return
 	}
-	time.Sleep(1 * time.Second)
 	// restart with current args and env variables
 	execErr := syscall.Exec(binary, popArgs, popEnvs)
 	if execErr != nil {
@@ -111,18 +137,17 @@ func upgradeHandler(secret string) http.Handler {
 		}
 		// return the string response containing the request body
 		json.Unmarshal(reqBody, &f)
-
 		// verify that a new release created
-		if f.Action != "published" && f.Action != "created" {
+		if f.Action != "completed" || !ReleaseCompleted(f.Workflow.Steps) {
 			log.Info().Msg("❌ Not a new release.")
 			return
 		}
 
 		log.Info().Msg("🚀 New release was created.")
 
-		var assets []Asset
-		// get the URL to download the new release assets
-		res, err := http.Get(f.Release.AssetsURL)
+		var release ReleaseDetails
+		// get the latest release assets
+		res, err := http.Get(ReleaseURL + "/latest")
 		if err != nil {
 			log.Error().Err(err).Msg("could not get release URL")
 			return
@@ -130,6 +155,23 @@ func upgradeHandler(secret string) http.Handler {
 
 		// parse response
 		respBody, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			log.Error().Err(err).Msg("could not read response body")
+			return
+		}
+		// get the releases asset URLs
+		json.Unmarshal(respBody, &release)
+
+		var assets []Asset
+		// get the URL to download the new release assets
+		res, err = http.Get(release.AssetsURL)
+		if err != nil {
+			log.Error().Err(err).Msg("could not get release URL")
+			return
+		}
+
+		// parse response
+		respBody, err = ioutil.ReadAll(res.Body)
 		if err != nil {
 			log.Error().Err(err).Msg("could not read response body")
 			return
@@ -147,7 +189,7 @@ func upgradeHandler(secret string) http.Handler {
 					log.Error().Err(err).Msg("could not remove old temp file")
 				}
 
-					// launch a goroutine to download release file to temp file
+				// launch a goroutine to download release file to temp file
 				err = DownloadFile(popPath+"_temp", a.URL)
 				if err != nil {
 					log.Error().Err(err).Msg("could not download release")

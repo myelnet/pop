@@ -1,0 +1,40 @@
+---
+name: "tagged-release"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  tagged-release:
+    name: "Tagged Release"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set tag
+        id: vars
+        run: |
+          echo ::set-output name=tag::${GITHUB_REF#refs/*/}
+      - name: "Release"
+        if: "! contains(steps.vars.outputs.tag, 'rc')"
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          automatic_release_tag: "${{ steps.vars.outputs.tag }}"
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            ./dist/pop*/pop*
+      - name: "Prerelease"
+        if: "contains(steps.vars.outputs.tag, 'rc')"
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          automatic_release_tag: "${{ steps.vars.outputs.tag }}"
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: true
+          files: |
+            ./dist/pop*/pop*
+      - name: "Build Binaries"
+        run: make snapshot
