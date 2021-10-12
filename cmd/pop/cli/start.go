@@ -29,6 +29,7 @@ type PopConfig struct {
 	regions       string
 	replInterval  time.Duration
 	upgradeSecret string
+	certmagic     bool
 	// Exported fields can be set by survey.Ask
 	Bootstrap     string `json:"bootstrap"`
 	Capacity      string `json:"capacity"`
@@ -62,10 +63,11 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
 		fs.StringVar(&startArgs.Capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
-		fs.StringVar(&startArgs.Domains, "domains", "", "comma separated list of domain names for TLS certificates")
+		fs.StringVar(&startArgs.Domains, "domains", "", "comma separated list of domain names this pop can support")
 		fs.IntVar(&startArgs.MaxPPB, "maxppb", 5, "max price per byte")
 		fs.StringVar(&startArgs.IndexEndpoint, "index-endpoint", "", "endpoint of a hosted index service")
 		fs.StringVar(&startArgs.upgradeSecret, "upgrade-secret", "", "secret used to verify upgrade message signatures, if provided the server will listen for github webhook request and automatically upgrade the pop")
+		fs.BoolVar(&startArgs.certmagic, "certmagic", false, "run certmagic to get TLS certificates")
 
 		return fs
 	})(),
@@ -190,6 +192,7 @@ Manage your Myel point of presence from the command line.
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
 		Domains:        domains,
+		Certmagic:      startArgs.certmagic,
 		RemoteIndexURL: startArgs.IndexEndpoint,
 		UpgradeSecret:  startArgs.upgradeSecret,
 		CancelFunc:     cancel,

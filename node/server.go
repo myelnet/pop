@@ -562,7 +562,7 @@ func serveHTTP(server *server, l net.Listener, domains []string) {
 		}
 	}()
 
-	if len(domains) == 0 {
+	if !server.node.opts.Certmagic {
 		return
 	}
 

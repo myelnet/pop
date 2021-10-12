@@ -10,6 +10,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/myelnet/pop/wallet"
 )
 
@@ -46,18 +47,29 @@ type RemoteIndex struct {
 }
 
 // NewRemoteIndex creates a new index instance for the given wallet and host
-func NewRemoteIndex(url string, h host.Host, w wallet.Driver) (*RemoteIndex, error) {
+func NewRemoteIndex(url string, h host.Host, w wallet.Driver, domains []string) (*RemoteIndex, error) {
 	info := host.InfoFromHost(h)
 	addrs, err := peer.AddrInfoToP2pAddrs(info)
 	if err != nil {
 		return nil, err
+	}
+	addr := addrs[0]
+	// replace ip4 with dns4
+	if len(domains) > 0 {
+		comps := multiaddr.Split(addr)
+		addr = multiaddr.Join(comps[1:]...)
+		dns, err := multiaddr.NewComponent("dns4", domains[0])
+		if err != nil {
+			return nil, err
+		}
+		addr = dns.Encapsulate(addr)
 	}
 	return &RemoteIndex{
 		url:     url,
 		peerID:  info.ID,
 		client:  &http.Client{},
 		wallet:  w,
-		address: addrs[0].Bytes(),
+		address: addr.Bytes(),
 	}, nil
 }
 
