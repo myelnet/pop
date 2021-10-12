@@ -124,6 +124,8 @@ type Options struct {
 	ReplInterval time.Duration
 	// Domains is a list of DNS names we can establish TLS handshakes with
 	Domains []string
+	// Certmagic flag activates certificate generation
+	Certmagic bool
 	// RemoteIndexURL is a url to send index records to
 	RemoteIndexURL string
 	// UpgradeSecret is used to verify automatic updates from a github webhook
@@ -304,7 +306,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// start connecting with peers
 	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
 
-	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.host, nd.exch.Wallet())
+	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.host, nd.exch.Wallet(), opts.Domains)
 	if err != nil {
 		return nil, err
 	}
