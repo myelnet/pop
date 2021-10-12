@@ -80,12 +80,6 @@ func SaveLatestRelease(release ReleaseDetails) error {
 	return nil
 }
 
-func init() {
-	popArgs = os.Args
-	popEnvs = os.Environ()
-	popPath, _ = os.Executable()
-}
-
 func VerifySignature(payload string, requestSignature string, secret string) bool {
 	// make sure GITHUB_WEBHOOK_SECRET matches that of your github webhook
 	h := hmac.New(sha256.New, []byte(secret))
