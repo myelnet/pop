@@ -38,6 +38,6 @@ jobs:
           prerelease: true
           files: |
             ./dist/pop*/pop*
-      - name: Sleep for 30 seconds
-        run: sleep 30s
+      - name: Sleep for 5 seconds
+        run: sleep 5s
         shell: bash
