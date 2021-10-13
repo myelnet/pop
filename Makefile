@@ -9,10 +9,19 @@ install:
 	go build -ldflags=$(ldflags) -o pop ./cmd/pop
 	install -C ./pop /usr/local/bin/pop
 
+# builds image locally
 snapshot:
-	docker build -f infra/releaser/Dockerfile -t pop/golang-cross .
+	docker build -f infra/releaser/Dockerfile -t myel/pop-golang-cross .
 	docker run --rm --privileged \
                 -v $(CURDIR):/pop \
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -w /pop \
-                pop/golang-cross --snapshot --rm-dist
+                myel/pop-golang-cross --snapshot --rm-dist
+
+# uses latest docker-hub image
+snapshot-light:
+	docker run --rm --privileged \
+                -v $(CURDIR):/pop \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -w /pop \
+                docker.io/myel/pop-golang-cross:latest --snapshot --rm-dist
