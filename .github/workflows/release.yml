@@ -19,7 +19,7 @@ jobs:
         run: |
           echo ::set-output name=tag::${GITHUB_REF#refs/*/}
       - name: "Build Binaries"
-        run: make snapshot
+        run: make snapshot-light
       - name: "Release"
         if: "! contains(steps.vars.outputs.tag, 'rc')"
         uses: "marvinpinto/action-automatic-releases@latest"
@@ -38,3 +38,6 @@ jobs:
           prerelease: true
           files: |
             ./dist/pop*/pop*
+      - name: Sleep for 60 seconds
+        run: sleep 60s
+        shell: bash
