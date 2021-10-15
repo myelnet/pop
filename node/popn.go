@@ -232,6 +232,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	// Convert region names to region structs
 	regions := exchange.ParseRegions(opts.Regions)
 
+	for _, reg := range regions {
+		nd.opts.BootstrapPeers = append(nd.opts.BootstrapPeers, reg.Bootstrap...)
+	}
+
 	eopts := exchange.Options{
 		Blockstore:          nd.bs,
 		MultiStore:          nd.ms,
@@ -303,8 +307,21 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.cancelFunc = opts.CancelFunc
 
+	peering := NewPeeringService(nd.host)
+
+	for _, addrStr := range nd.opts.BootstrapPeers {
+		addrInfo, err := utils.AddrStringToAddrInfo(addrStr)
+		if err != nil {
+			log.Error().Str("peer", addrStr).Msg("failed to parse peer address")
+			continue
+		}
+		peering.AddPeer(*addrInfo)
+	}
+
 	// start connecting with peers
-	go utils.Bootstrap(ctx, nd.host, opts.BootstrapPeers)
+	if err := peering.Start(); err != nil {
+		return nil, err
+	}
 
 	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.host, nd.exch.Wallet(), opts.Domains)
 	if err != nil {

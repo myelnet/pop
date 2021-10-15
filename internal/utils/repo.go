@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -11,16 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/filecoin-project/go-hamt-ipld/v3"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
-	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/rs/zerolog/log"
 )
 
 // Dumping a bunch of shared stuff here. We can reorganize once we have a clearer idea
@@ -75,45 +70,6 @@ func Libp2pKey(ks keystore.Keystore) (ci.PrivKey, error) {
 		return nil, err
 	}
 	return pk, nil
-}
-
-// Bootstrap connects to a list of provided peer addresses, libp2p then uses dht discovery
-// to connect with all the peers the node is aware of
-func Bootstrap(ctx context.Context, h host.Host, bpeers []string) error {
-	var peers []peer.AddrInfo
-	for _, addrStr := range bpeers {
-		addrInfo, err := AddrStringToAddrInfo(addrStr)
-		if err != nil {
-			continue
-		}
-		peers = append(peers, *addrInfo)
-	}
-
-	var wg sync.WaitGroup
-	peerInfos := make(map[peer.ID]*peerstore.PeerInfo, len(peers))
-	for _, pii := range peers {
-		pi, ok := peerInfos[pii.ID]
-		if !ok {
-			pi = &peerstore.PeerInfo{ID: pii.ID}
-			peerInfos[pi.ID] = pi
-		}
-		pi.Addrs = append(pi.Addrs, pii.Addrs...)
-	}
-
-	wg.Add(len(peerInfos))
-	for _, peerInfo := range peerInfos {
-		go func(peerInfo *peerstore.PeerInfo) {
-			defer wg.Done()
-			err := h.Connect(ctx, *peerInfo)
-			if err != nil {
-				log.Error().Err(err).Str("peerId", peerInfo.ID.String()).Msg("failed to connect to peer")
-			} else {
-				log.Trace().Str("peerId", peerInfo.ID.String()).Msg("successfully connected to peer")
-			}
-		}(peerInfo)
-	}
-	wg.Wait()
-	return nil
 }
 
 // FormatToken takes a token type and a token value and creates a string ready to
