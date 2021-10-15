@@ -315,6 +315,10 @@ func New(ctx context.Context, opts Options) (*node, error) {
 			log.Error().Str("peer", addrStr).Msg("failed to parse peer address")
 			continue
 		}
+		// prevent node from adding itself if it's one of the bootstraps
+		if addrInfo.ID.String() == nd.host.ID().String() {
+			continue
+		}
 		peering.AddPeer(*addrInfo)
 	}
 

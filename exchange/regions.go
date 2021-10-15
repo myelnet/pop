@@ -78,7 +78,7 @@ var (
 		Code: EuropeRegion,
 		PPB:  abi.NewTokenAmount(1),
 		Bootstrap: []string{
-			"/dns4/frankfurt.myel.zone/tcp/41504/p2p/12D3KooWLaJQ7L6Q3VWxNNxqE8Tcj2wAq1QAvdBieSteAxg9KTCr",
+			"/dns4/frankfurt.myel.zone/tcp/41504/p2p/12D3KooWCdyxtPXQnNH4qB25SHhRiDkUpDY8ZYw1tKHPteSJjV4U",
 		},
 	}
 	oceania = Region{
