@@ -97,7 +97,7 @@ func (ph *peerHandler) reconnect() {
 
 	err := ph.host.Connect(ph.ctx, peer.AddrInfo{ID: ph.peer, Addrs: addrs})
 	if err != nil {
-		log.Debug().Str("peer", ph.peer.String()).Msg("failed to reconnect")
+		log.Error().Err(err).Str("peer", ph.peer.String()).Msg("failed to connect")
 		// Ok, we failed. Extend the timeout.
 		ph.mu.Lock()
 		if ph.reconnectTimer != nil {
