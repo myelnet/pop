@@ -75,6 +75,7 @@ type ListArgs struct {
 // PayArgs provides params for controlling a payment channel
 type PayArgs struct {
 	ChAddr string
+	Lane   uint64
 }
 
 // Command is a message sent from a client to the daemon

@@ -31,6 +31,7 @@ type Manager interface {
 	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
 	ChannelAvailableFunds(address.Address) (*AvailableFunds, error)
 	SubmitAllVouchers(context.Context, address.Address) error
+	SubmitVoucherForLane(context.Context, address.Address, uint64) error
 	Settle(context.Context, address.Address) error
 	StartAutoCollect(context.Context) error
 }
@@ -210,6 +211,42 @@ func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *
 		return cid.Undef, err
 	}
 	return ch.submitVoucher(ctx, addr, sv, secret)
+}
+
+// SubmitVoucherForLane picks the best voucher for a given lane and submits it. It blocks until done.
+func (p *Payments) SubmitVoucherForLane(ctx context.Context, addr address.Address, lane uint64) error {
+	// Get the channel, creating it from state if necessary
+	ch, err := p.inboundChannel(ctx, addr)
+	if err != nil {
+		return err
+	}
+
+	best, err := p.bestSpendableByLane(ctx, addr)
+	if err != nil {
+		return err
+	}
+	if len(best) == 0 {
+		// If we have no vouchers to redeem it's probably not worth settling
+		return errors.New("no vouchers to redeem")
+	}
+
+	voucher, ok := best[lane]
+	if !ok {
+		return errors.New("lane not found")
+	}
+
+	mcid, err := ch.submitVoucher(ctx, addr, voucher, nil)
+	if err != nil {
+		return err
+	}
+	lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
+	if err != nil {
+		return err
+	}
+	if lookup.Receipt.ExitCode != 0 {
+		return fmt.Errorf("voucher update execution failed with code %d", lookup.Receipt.ExitCode)
+	}
+	return nil
 }
 
 // SubmitAllVouchers picks the best vouchers and submits them (should be submitted as one)

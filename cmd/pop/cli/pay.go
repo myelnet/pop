@@ -5,11 +5,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
+
+var payArgs struct {
+	lane uint64
+}
 
 var submit = &ffcli.Command{
 	Name:       "submit",
@@ -30,7 +35,11 @@ for inbound payment management.
 	Exec: func(context.Context, []string) error {
 		return flag.ErrHelp
 	},
-	FlagSet:     flag.NewFlagSet("pay", flag.ExitOnError),
+	FlagSet: (func() *flag.FlagSet {
+		fs := flag.NewFlagSet("pay", flag.ExitOnError)
+		fs.Uint64Var(&payArgs.lane, "lane", math.MaxUint64, "specific channel lane. Default will apply to all lanes")
+		return fs
+	})(),
 	Subcommands: []*ffcli.Command{submit},
 }
 
@@ -48,7 +57,7 @@ func runSubmit(ctx context.Context, args []string) error {
 
 	chAddr := args[0]
 
-	cc.PaySubmit(&node.PayArgs{ChAddr: chAddr})
+	cc.PaySubmit(&node.PayArgs{ChAddr: chAddr, Lane: payArgs.lane})
 
 	select {
 	case sr := <-submitResults:
