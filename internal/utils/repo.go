@@ -25,20 +25,13 @@ import (
 const KLibp2pHost = "libp2p-host"
 
 // RepoPath is akin to IPFS: ~/.pop by default or changed via $POP_PATH
-func RepoPath() string {
-	if path, ok := os.LookupEnv("POP_PATH"); ok {
-		return path
-	}
-	return ".pop"
-}
-
-// FullPath constructs full path and check if a repo was initialized with a datastore
-func FullPath(path string) (string, error) {
+func RepoPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, path), nil
+
+	return filepath.Join(home, ".pop"), nil
 }
 
 // RepoExists checks if we have a datastore directory already created
