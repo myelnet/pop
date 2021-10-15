@@ -211,7 +211,7 @@ Manage your Myel point of presence from the command line.
 // it will create a temporary repo if the flag is passed or a new repo if none exist yet.
 func setupRepo() (string, error) {
 	var err error
-	path, err := utils.FullPath(utils.RepoPath())
+	path, err := utils.RepoPath()
 	if err != nil {
 		return path, err
 	}
