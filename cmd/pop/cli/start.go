@@ -55,7 +55,7 @@ The 'pop start' command starts a pop daemon service.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("start", flag.ExitOnError)
 		fs.BoolVar(&startArgs.temp, "temp-repo", false, "create a temporary repo for debugging")
-		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "/dns4/myel.cloud/tcp/41504/p2p/12D3KooWMETXkWySAajFMqjiq8Q9xwMR8ceBrEAQFh6k8KHLAPNy", "bootstrap peer to discover others (add multiple addresses separated by commas)")
+		fs.StringVar(&startArgs.Bootstrap, "bootstrap", "", "bootstrap peer to discover others (add multiple addresses separated by commas)")
 		fs.StringVar(&startArgs.FilEndpoint, "fil-endpoint", "https://infura.myel.cloud", "endpoint to reach a filecoin api")
 		fs.StringVar(&startArgs.FilToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.FilTokenType, "fil-token-type", "Bearer", "auth token type")
