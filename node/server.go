@@ -567,7 +567,7 @@ func serveHTTP(server *server, l net.Listener, domains []string) {
 	}
 
 	go func() {
-		repoPath, err := utils.FullPath(utils.RepoPath())
+		repoPath, err := utils.RepoPath()
 		if err != nil {
 			log.Err(err).Msg("error when getting repo path")
 			return

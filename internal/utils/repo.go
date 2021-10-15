@@ -26,10 +26,6 @@ const KLibp2pHost = "libp2p-host"
 
 // RepoPath is akin to IPFS: ~/.pop by default or changed via $POP_PATH
 func RepoPath() (string, error) {
-	if path, ok := os.LookupEnv("POP_PATH"); ok {
-		return path, nil
-	}
-
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
