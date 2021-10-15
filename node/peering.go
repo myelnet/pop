@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -171,7 +172,6 @@ func (ps *PeeringService) Start() error {
 
 	switch ps.state {
 	case stateInit:
-		log.Info().Msg("starting peering service")
 	case stateRunning:
 		return nil
 	case stateStopped:
@@ -217,7 +217,7 @@ func (ps *PeeringService) AddPeer(info peer.AddrInfo) {
 		log.Info().Str("peer", info.ID.String()).Msg("updating addresses")
 		handler.setAddrs(info.Addrs)
 	} else {
-		log.Info().Str("peer", info.ID.String()).Msg("peer added to peering service")
+		fmt.Println("==> added to peering service", info.ID)
 		ps.host.ConnManager().Protect(info.ID, connmgrTag)
 
 		handler = &peerHandler{
