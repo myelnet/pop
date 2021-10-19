@@ -102,6 +102,7 @@ func (s *server) localhostHandler() http.Handler {
 }
 
 func (s *server) handler(w http.ResponseWriter, r *http.Request) {
+	log.Info().Msg("entering handler")
 	if r.URL.Path == "/" && r.Method == http.MethodGet {
 		io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is your Myel pop.")
 		return
@@ -236,6 +237,8 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Info().Msg("postHandler")
+
 	var root cid.Cid
 	if mediatype == "multipart/form-data" {
 		codec := uint64(0x71)
@@ -262,6 +265,8 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		tx.SetCacheRF(cacheRF)
 
+		log.Info().Msg("decoding multipart")
+
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			fileReader := files.NewReaderFile(part)
 			dagOptions := selectDAGParams(part.FileName(), fileReader)
@@ -287,6 +292,8 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
+		log.Info().Msg("committing")
 		err = tx.Commit()
 		if err != nil {
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
@@ -319,6 +326,8 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		root = c
 	}
+
+	log.Info().Msg("finishing up")
 
 	s.addUserHeaders(w)
 	w.Header().Set("IPFS-Hash", root.String())
