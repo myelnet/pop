@@ -102,7 +102,7 @@ func (s *server) localhostHandler() http.Handler {
 }
 
 func (s *server) handler(w http.ResponseWriter, r *http.Request) {
-	log.Info().Msg("entering handler")
+	s.addUserHeaders(w)
 	if r.URL.Path == "/" && r.Method == http.MethodGet {
 		io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is your Myel pop.")
 		return
@@ -130,7 +130,6 @@ func (s *server) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) optionsHandler(w http.ResponseWriter, r *http.Request) {
-	s.addUserHeaders(w)
 }
 
 func (s *server) addUserHeaders(w http.ResponseWriter) {
@@ -157,8 +156,6 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if len(segs) > 0 {
 		key = segs[0]
 	}
-
-	s.addUserHeaders(w)
 
 	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
 
@@ -237,8 +234,6 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info().Msg("postHandler")
-
 	var root cid.Cid
 	if mediatype == "multipart/form-data" {
 		codec := uint64(0x71)
@@ -264,8 +259,6 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 			cacheRF = 12
 		}
 		tx.SetCacheRF(cacheRF)
-
-		log.Info().Msg("decoding multipart")
 
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			fileReader := files.NewReaderFile(part)
@@ -293,28 +286,23 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		log.Info().Msg("committing")
 		err = tx.Commit()
 		if err != nil {
-			log.Error().Err(err).Msg("when committing")
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
 			return
 		}
 		ref := tx.Ref()
 		err = s.node.exch.Index().SetRef(ref)
 		if errors.Is(exchange.ErrRefAlreadyExists, err) {
-			log.Error().Err(err).Msg("when committing existing ref")
 			http.Error(w, "ref already exists", http.StatusBadRequest)
 			return
 		}
 		if err != nil {
-			log.Error().Err(err).Msg("when committing new ref")
 			http.Error(w, "failed to set new ref", http.StatusInternalServerError)
 			return
 		}
 		err = s.node.remind.Publish(ref.PayloadCID, ref.PayloadSize)
 		if err != nil {
-			log.Error().Err(err).Msg("when publishing to remote index")
 			http.Error(w, "failed to publish to remote index", http.StatusInternalServerError)
 			return
 		}
@@ -331,9 +319,6 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		root = c
 	}
 
-	log.Info().Msg("finishing up")
-
-	s.addUserHeaders(w)
 	w.Header().Set("IPFS-Hash", root.String())
 	http.Redirect(w, r, root.String(), http.StatusCreated)
 }
