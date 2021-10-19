@@ -102,6 +102,7 @@ func (s *server) localhostHandler() http.Handler {
 }
 
 func (s *server) handler(w http.ResponseWriter, r *http.Request) {
+	s.addUserHeaders(w)
 	if r.URL.Path == "/" && r.Method == http.MethodGet {
 		io.WriteString(w, "<html><title>pop</title><body><h1>Hello</h1>This is your Myel pop.")
 		return
@@ -129,7 +130,6 @@ func (s *server) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) optionsHandler(w http.ResponseWriter, r *http.Request) {
-	s.addUserHeaders(w)
 }
 
 func (s *server) addUserHeaders(w http.ResponseWriter) {
@@ -156,8 +156,6 @@ func (s *server) getHandler(w http.ResponseWriter, r *http.Request) {
 	if len(segs) > 0 {
 		key = segs[0]
 	}
-
-	s.addUserHeaders(w)
 
 	tx := s.node.exch.Tx(r.Context(), exchange.WithRoot(root))
 
@@ -287,6 +285,7 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
 		err = tx.Commit()
 		if err != nil {
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
@@ -320,7 +319,6 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		root = c
 	}
 
-	s.addUserHeaders(w)
 	w.Header().Set("IPFS-Hash", root.String())
 	http.Redirect(w, r, root.String(), http.StatusCreated)
 }
