@@ -296,21 +296,25 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		log.Info().Msg("committing")
 		err = tx.Commit()
 		if err != nil {
+			log.Error().Err(err).Msg("when committing")
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
 			return
 		}
 		ref := tx.Ref()
 		err = s.node.exch.Index().SetRef(ref)
 		if errors.Is(exchange.ErrRefAlreadyExists, err) {
+			log.Error().Err(err).Msg("when committing existing ref")
 			http.Error(w, "ref already exists", http.StatusBadRequest)
 			return
 		}
 		if err != nil {
+			log.Error().Err(err).Msg("when committing new ref")
 			http.Error(w, "failed to set new ref", http.StatusInternalServerError)
 			return
 		}
 		err = s.node.remind.Publish(ref.PayloadCID, ref.PayloadSize)
 		if err != nil {
+			log.Error().Err(err).Msg("when publishing to remote index")
 			http.Error(w, "failed to publish to remote index", http.StatusInternalServerError)
 			return
 		}
