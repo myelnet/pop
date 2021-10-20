@@ -54,15 +54,13 @@ func NewRemoteIndex(url string, h host.Host, w wallet.Driver, domains []string) 
 		return nil, err
 	}
 	addr := addrs[0]
-	// replace ip4 with dns4
 	if len(domains) > 0 {
-		comps := multiaddr.Split(addr)
-		addr = multiaddr.Join(comps[1:]...)
-		dns, err := multiaddr.NewComponent("dns4", domains[0])
+		// clients can choose what protocol they want to try connecting with
+		// so we don't need to send much beyond dns and peer ID
+		addr, err = multiaddr.NewMultiaddr("/dns4/" + domains[0] + "/p2p/" + h.ID().String())
 		if err != nil {
 			return nil, err
 		}
-		addr = dns.Encapsulate(addr)
 	}
 	return &RemoteIndex{
 		url:     url,

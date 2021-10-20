@@ -21,5 +21,5 @@ func TestRemoteIndex(t *testing.T) {
 	ma, err := multiaddr.NewMultiaddrBytes(ri.address)
 	require.NoError(t, err)
 
-	require.Equal(t, "/dns4/ohio.myel.zone/tcp/0/p2p/"+tn.Host.ID().String(), ma.String())
+	require.Equal(t, "/dns4/ohio.myel.zone/p2p/"+tn.Host.ID().String(), ma.String())
 }
