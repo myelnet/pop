@@ -16,6 +16,7 @@ import (
 	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -36,6 +37,8 @@ type PopConfig struct {
 	filTokenType  string
 	domains       string
 	indexEndpoint string
+	logLevel string
+	logDir string
 }
 
 var startArgs PopConfig
@@ -66,6 +69,8 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.indexEndpoint, "index-endpoint", "", "endpoint of a hosted index service")
 		fs.StringVar(&startArgs.upgradeSecret, "upgrade-secret", "", "secret used to verify upgrade message signatures, if provided the server will listen for github webhook request and automatically upgrade the pop")
 		fs.BoolVar(&startArgs.certmagic, "certmagic", false, "run certmagic to get TLS certificates")
+		fs.StringVar(&startArgs.logLevel, "log-level", zerolog.InfoLevel.String(), "logging mode")
+		fs.StringVar(&startArgs.logDir, "log-dir", "", "directory to save log to")
 
 		return fs
 	})(),
@@ -103,6 +108,11 @@ ppppppppp                            ppppppppp
 Manage your Myel point of presence from the command line.
 -----------------------------------------------------------
 `)
+
+	err := setupLogger(startArgs.logDir, startArgs.logLevel)
+	if err != nil {
+		return err
+	}
 
 	path, err := setupRepo()
 	if err != nil {

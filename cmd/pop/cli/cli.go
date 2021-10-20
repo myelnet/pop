@@ -7,34 +7,16 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path"
-	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/myelnet/pop/infra/build"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
-var loggingLevels = map[string]zerolog.Level{
-	zerolog.TraceLevel.String(): zerolog.TraceLevel, // trace
-	zerolog.DebugLevel.String(): zerolog.DebugLevel, // debug
-	zerolog.InfoLevel.String():  zerolog.InfoLevel,  // info (default)
-}
-
-// LoggerHook displays the file & line the log comes from
-type LoggerHook struct{}
-
-func (h LoggerHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
-	if _, file, line, ok := runtime.Caller(3); ok {
-		e.Str("file", path.Base(file)).Int("line", line)
-	}
-}
 
 // Run runs the CLI. The args do not include the binary name.
 func Run(args []string) error {
@@ -44,42 +26,11 @@ func Run(args []string) error {
 	}
 
 	rootfs := flag.NewFlagSet("pop", flag.ExitOnError)
-	logLevel := rootfs.String("log", zerolog.InfoLevel.String(), "Set logging mode")
 
 	// env vars can be used as program args, i.e : ENV LOG=debug go run . start
 	err := ff.Parse(rootfs, args, ff.WithEnvVarNoPrefix())
 	if err != nil {
 		return err
-	}
-
-	loggingLevel, ok := loggingLevels[*logLevel]
-	if !ok {
-		return fmt.Errorf("logging level [%s] does not exist", *logLevel)
-	}
-
-	zerolog.SetGlobalLevel(loggingLevel)
-
-	if loggingLevel < zerolog.InfoLevel {
-		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-		output.FormatLevel = func(i interface{}) string {
-			return strings.ToUpper(fmt.Sprintf("| %-6s|", i))
-		}
-		output.FormatMessage = func(i interface{}) string {
-			return fmt.Sprintf("%s |", i)
-		}
-		output.FormatFieldName = func(i interface{}) string {
-			return fmt.Sprintf("%s:", i)
-		}
-		output.FormatFieldValue = func(i interface{}) string {
-			return strings.ToUpper(fmt.Sprintf("%s", i))
-		}
-
-		log.Logger = log.Hook(LoggerHook{}).Output(output)
-		log.Info().Msg(fmt.Sprintf("Running in %s mode", *logLevel))
-
-	} else {
-		output := zerolog.ConsoleWriter{Out: os.Stderr}
-		log.Logger = log.Output(output)
 	}
 
 	// Uncomment to debug data transfers
