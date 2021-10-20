@@ -58,6 +58,7 @@ change until a first stable release. To get started run 'pop start'.
 			getCmd,
 			listCmd,
 			walletCmd,
+			payCmd,
 		},
 		FlagSet: rootfs,
 		Exec:    func(context.Context, []string) error { return flag.ErrHelp },

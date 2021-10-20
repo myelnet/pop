@@ -72,6 +72,11 @@ type ListArgs struct {
 	Page int // potential pagination as the amount may be very large
 }
 
+// PayArgs provides params for controlling a payment channel
+type PayArgs struct {
+	ChAddr string
+}
+
 // Command is a message sent from a client to the daemon
 type Command struct {
 	Off          *OffArgs
@@ -84,9 +89,10 @@ type Command struct {
 	Commit       *CommArgs
 	Get          *GetArgs
 	List         *ListArgs
+	PaySubmit    *PayArgs
 }
 
-// OffResult
+// OffResult doesn't return any value at this time
 type OffResult struct{}
 
 // PingResult is sent in the notify message to give us the info we requested
@@ -157,6 +163,11 @@ type ListResult struct {
 	Err  string
 }
 
+// PayResult returns the result of submitted vouchers
+type PayResult struct {
+	Err string
+}
+
 // Notify is a message sent from the daemon to the client
 type Notify struct {
 	OffResult    *OffResult
@@ -167,6 +178,7 @@ type Notify struct {
 	CommResult   *CommResult
 	GetResult    *GetResult
 	ListResult   *ListResult
+	PayResult    *PayResult
 }
 
 // CommandServer receives commands on the daemon side and executes them
@@ -235,6 +247,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.List; c != nil {
 		go cs.n.List(ctx, c)
+		return nil
+	}
+	if c := cmd.PaySubmit; c != nil {
+		cs.n.PaySubmit(ctx, c)
 		return nil
 	}
 	return fmt.Errorf("CommandServer: no command specified")
@@ -329,6 +345,10 @@ func (cc *CommandClient) Get(args *GetArgs) {
 
 func (cc *CommandClient) List(args *ListArgs) {
 	cc.send(Command{List: args})
+}
+
+func (cc *CommandClient) PaySubmit(args *PayArgs) {
+	cc.send(Command{PaySubmit: args})
 }
 
 func (cc *CommandClient) SetNotifyCallback(fn func(Notify)) {

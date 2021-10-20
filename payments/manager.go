@@ -204,7 +204,8 @@ func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *
 	if len(proof) > 0 {
 		return cid.Undef, fmt.Errorf("err proof not supported")
 	}
-	ch, err := p.channelByAddress(addr)
+
+	ch, err := p.inboundChannel(ctx, addr)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -214,10 +215,12 @@ func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *
 // SubmitAllVouchers picks the best vouchers and submits them (should be submitted as one)
 // it blocks until done
 func (p *Payments) SubmitAllVouchers(ctx context.Context, addr address.Address) error {
-	ch, err := p.channelByAddress(addr)
+	// Get the channel, creating it from state if necessary
+	ch, err := p.inboundChannel(ctx, addr)
 	if err != nil {
 		return err
 	}
+
 	best, err := p.bestSpendableByLane(ctx, addr)
 	if err != nil {
 		return err
@@ -233,6 +236,7 @@ func (p *Payments) SubmitAllVouchers(ctx context.Context, addr address.Address) 
 	// I think all lanes should be merged so we might only get a single message but just in case
 	// we iterate over all the vouchers
 	for _, voucher := range best {
+		log.Info().Str("amount", voucher.Amount.String()).Uint64("lane", voucher.Lane).Msg("submitting voucher")
 		mcid, err := ch.submitVoucher(ctx, addr, voucher, nil)
 		if err != nil {
 			log.Error().Err(err).Msg("unable to submit voucher")
@@ -391,7 +395,9 @@ func (p *Payments) CheckVoucherSpendable(ctx context.Context, addr address.Addre
 	if len(proof) > 0 {
 		return false, fmt.Errorf("proof not supported yet")
 	}
-	ch, err := p.channelByAddress(addr)
+
+	// Get the channel, creating it from state if necessary
+	ch, err := p.inboundChannel(ctx, addr)
 	if err != nil {
 		return false, err
 	}
@@ -462,11 +468,11 @@ func (p *Payments) trackInboundChannel(ctx context.Context, chAddr address.Addre
 
 	// Check that channel To address is in wallet
 	// to := stateCi.Control // Inbound channel so To addr is Control (this node)
-	// toKey, err := pm.api.StateAccountKey(ctx, to, filecoin.EmptyTSK)
+	// toKey, err := p.api.StateAccountKey(ctx, to, filecoin.EmptyTSK)
 	// if err != nil {
 	// 	return nil, err
 	// }
-	// has, err := pm.wallet.WalletHas(ctx, toKey)
+	// has, err := p.wal.Has(ctx, toKey)
 	// if err != nil {
 	// 	return nil, err
 	// }

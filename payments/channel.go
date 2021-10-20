@@ -792,18 +792,18 @@ func (ch *channel) checkVoucherValidUnlocked(ctx context.Context, chAddr address
 			return nil, ei, err
 		}
 
-		if sv.Nonce <= n {
-			return nil, ei, fmt.Errorf("nonce too low")
-		}
-
 		// If the voucher amount is less than the highest known voucher amount
 		r, err := ls.Redeemed()
 		if err != nil {
 			return nil, ei, err
 		}
+		if sv.Nonce <= n {
+			return nil, ei, fmt.Errorf("nonce %d too low for lane %d with current nonce %d", sv.Nonce, sv.Lane, n)
+		}
 		if sv.Amount.LessThanEqual(r) {
 			return nil, ei, fmt.Errorf("voucher amount is lower than amount for voucher with lower nonce")
 		}
+
 	}
 
 	// Total redeemed is the total redeemed amount for all lanes, including
