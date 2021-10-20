@@ -22,8 +22,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const logDir = "/var/log/pop"
-
 var loggingLevels = map[string]zerolog.Level{
 	zerolog.TraceLevel.String(): zerolog.TraceLevel, // trace
 	zerolog.DebugLevel.String(): zerolog.DebugLevel, // debug
@@ -39,7 +37,7 @@ func (h LoggerHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
 	}
 }
 
-func SetLogger(logFile *bool, loggingLevel zerolog.Level) {
+func SetLogger(logDir *string, loggingLevel zerolog.Level) {
 
 	output := zerolog.ConsoleWriter{Out: os.Stderr}
 
@@ -47,16 +45,16 @@ func SetLogger(logFile *bool, loggingLevel zerolog.Level) {
 		output.TimeFormat = time.RFC3339
 	}
 
-	if *logFile {
+	if *logDir != "" {
 		// create log-dir, make sure you have correct permissions to do so
-		err := os.MkdirAll(logDir, os.ModePerm)
+		err := os.MkdirAll(*logDir, os.ModePerm)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to create log repo")
 		}
 
 		// timestamped log
 		t := time.Now().UTC()
-		tempFile, err := ioutil.TempFile(logDir, t.Format("2006-01-02T150405")+".*.log")
+		tempFile, err := ioutil.TempFile(*logDir, t.Format("2006-01-02T150405")+".*.log")
 		if err != nil {
 			log.Error().Err(err).Msg("failed to create a temporary log file")
 		}
@@ -89,7 +87,7 @@ func Run(args []string) error {
 
 	rootfs := flag.NewFlagSet("pop", flag.ExitOnError)
 	logLevel := rootfs.String("log", zerolog.InfoLevel.String(), "Set logging mode")
-	logFile := rootfs.Bool("log-file", false, "Output logs to a file")
+	logDir := rootfs.String("log-dir", "", "Output logs to a directory, if empty don't output")
 
 	// env vars can be used as program args, i.e : ENV LOG=debug go run . start
 	err := ff.Parse(rootfs, args, ff.WithEnvVarNoPrefix())
@@ -104,7 +102,7 @@ func Run(args []string) error {
 
 	zerolog.SetGlobalLevel(loggingLevel)
 
-	SetLogger(logFile, loggingLevel)
+	SetLogger(logDir, loggingLevel)
 
 	log.Info().Msg(fmt.Sprintf("Running in %s mode", *logLevel))
 
