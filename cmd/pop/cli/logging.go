@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 	"io/ioutil"
-  "os"
+	"os"
 	"path"
 	"runtime"
 	"time"
@@ -18,7 +18,6 @@ var loggingLevels = map[string]zerolog.Level{
 	zerolog.InfoLevel.String():  zerolog.InfoLevel,  // info (default)
 }
 
-
 // LoggerHook displays the file & line the log comes from
 type LoggerHook struct{}
 
@@ -28,14 +27,14 @@ func (h LoggerHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
 	}
 }
 
-func SetLogger(logDir *string, logLevel *string) error {
+func setupLogger(logDir string, logLevel string) error {
 
-  loggingLevel, ok := loggingLevels[*logLevel]
+	loggingLevel, ok := loggingLevels[logLevel]
 	if !ok {
-		return fmt.Errorf("logging level [%s] does not exist", *logLevel)
+		return fmt.Errorf("logging level [%s] does not exist", logLevel)
 	}
 
-  zerolog.SetGlobalLevel(loggingLevel)
+	zerolog.SetGlobalLevel(loggingLevel)
 
 	output := zerolog.ConsoleWriter{Out: os.Stderr}
 
@@ -43,18 +42,18 @@ func SetLogger(logDir *string, logLevel *string) error {
 		output.TimeFormat = time.RFC3339
 	}
 
-	if *logDir != "" {
+	if logDir != "" {
 		// create log-dir, make sure you have correct permissions to do so
-		err := os.MkdirAll(*logDir, os.ModePerm)
+		err := os.MkdirAll(logDir, os.ModePerm)
 		if err != nil {
-      return err
+			return err
 		}
 
 		// timestamped log
 		t := time.Now().UTC()
-		tempFile, err := ioutil.TempFile(*logDir, t.Format("2006-01-02T150405")+".*.log")
+		tempFile, err := ioutil.TempFile(logDir, t.Format("2006-01-02T150405")+".*.log")
 		if err != nil {
-      return err
+			return err
 		}
 
 		// log to file as well as console in the same format
@@ -74,6 +73,6 @@ func SetLogger(logDir *string, logLevel *string) error {
 		log.Logger = log.Hook(LoggerHook{})
 	}
 
-  return nil
+	return nil
 
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
-	"github.com/myelnet/pop/logging"
 	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -69,6 +68,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.IntVar(&startArgs.maxPPB, "maxppb", 5, "max price per byte")
 		fs.StringVar(&startArgs.indexEndpoint, "index-endpoint", "", "endpoint of a hosted index service")
 		fs.StringVar(&startArgs.upgradeSecret, "upgrade-secret", "", "secret used to verify upgrade message signatures, if provided the server will listen for github webhook request and automatically upgrade the pop")
+		fs.BoolVar(&startArgs.certmagic, "certmagic", false, "run certmagic to get TLS certificates")
 		fs.StringVar(&startArgs.logLevel, "log-level", zerolog.InfoLevel.String(), "logging mode")
 		fs.StringVar(&startArgs.logDir, "log-dir", "", "directory to save log to")
 
@@ -108,6 +108,11 @@ ppppppppp                            ppppppppp
 Manage your Myel point of presence from the command line.
 -----------------------------------------------------------
 `)
+
+	err := setupLogger(startArgs.logDir, startArgs.logLevel)
+	if err != nil {
+		return err
+	}
 
 	path, err := setupRepo()
 	if err != nil {
