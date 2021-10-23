@@ -520,7 +520,8 @@ func TestCollectChannel(t *testing.T) {
 	}()
 
 	go func() {
-		require.NoError(t, mgr.Settle(ctx, chAddr))
+		_, err := mgr.Settle(ctx, chAddr)
+		require.NoError(t, err)
 	}()
 
 	ep := abi.ChainEpoch(10)
