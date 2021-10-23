@@ -100,8 +100,16 @@ func (p *mockPayments) SetChannelAvailableFunds(funds payments.AvailableFunds) {
 	p.chFunds = &chFunds
 }
 
-func (p *mockPayments) Settle(ctx context.Context, addr address.Address) error {
+func (p *mockPayments) Settle(ctx context.Context, addr address.Address) (abi.ChainEpoch, error) {
+	return 0, nil
+}
+
+func (p *mockPayments) Collect(ctx context.Context, addr address.Address) error {
 	return nil
+}
+
+func (p *mockPayments) ListVouchers(context.Context, address.Address) ([]*payments.VoucherInfo, error) {
+	return nil, nil
 }
 
 func (p *mockPayments) StartAutoCollect(ctx context.Context) error {
@@ -110,6 +118,14 @@ func (p *mockPayments) StartAutoCollect(ctx context.Context) error {
 
 func (p *mockPayments) SubmitAllVouchers(context.Context, address.Address) error {
 	return nil
+}
+
+func (p *mockPayments) SubmitVoucherForLane(context.Context, address.Address, uint64) error {
+	return nil
+}
+
+func (p *mockPayments) TrackChannel(context.Context, address.Address) (*payments.ChannelInfo, error) {
+	return nil, nil
 }
 
 type mockStoreIDGetter struct {

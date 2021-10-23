@@ -14,7 +14,7 @@ import (
 	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	cbor "github.com/ipfs/go-ipld-cbor"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
@@ -23,15 +23,19 @@ import (
 // Manager is the interface required to handle payments for the pop exchange
 type Manager interface {
 	GetChannel(ctx context.Context, from, to address.Address, amt filecoin.BigInt) (*ChannelResponse, error)
+	TrackChannel(ctx context.Context, chAddr address.Address) (*ChannelInfo, error)
 	WaitForChannel(context.Context, cid.Cid) (address.Address, error)
 	ListChannels() ([]address.Address, error)
+	ListVouchers(context.Context, address.Address) ([]*VoucherInfo, error)
 	GetChannelInfo(address.Address) (*ChannelInfo, error)
 	CreateVoucher(context.Context, address.Address, filecoin.BigInt, uint64) (*VoucherCreateResult, error)
 	AllocateLane(context.Context, address.Address) (uint64, error)
 	AddVoucherInbound(context.Context, address.Address, *paych.SignedVoucher, []byte, filecoin.BigInt) (filecoin.BigInt, error)
 	ChannelAvailableFunds(address.Address) (*AvailableFunds, error)
 	SubmitAllVouchers(context.Context, address.Address) error
-	Settle(context.Context, address.Address) error
+	SubmitVoucherForLane(context.Context, address.Address, uint64) error
+	Settle(context.Context, address.Address) (abi.ChainEpoch, error)
+	Collect(context.Context, address.Address) error
 	StartAutoCollect(context.Context) error
 }
 
@@ -42,7 +46,7 @@ type Payments struct {
 	api      filecoin.API
 	wal      wallet.Driver
 	store    *Store
-	actStore *cbor.BasicIpldStore
+	actStore *FilObjectStore
 
 	lk       sync.RWMutex
 	channels map[string]*channel
@@ -52,14 +56,14 @@ type Payments struct {
 }
 
 // New creates a new instance of payments manager
-func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, bs cbor.IpldBlockstore) *Payments {
+func New(ctx context.Context, api filecoin.API, w wallet.Driver, ds datastore.Batching, bs blockstore.Blockstore) *Payments {
 	store := NewStore(ds)
 	return &Payments{
 		ctx:      ctx,
 		api:      api,
 		wal:      w,
 		store:    store,
-		actStore: cbor.NewCborStore(bs),
+		actStore: NewFilObjectStore(api, bs),
 		channels: make(map[string]*channel),
 	}
 }
@@ -96,6 +100,11 @@ func (p *Payments) GetChannel(ctx context.Context, from, to address.Address, amt
 		Channel:      addr,
 		WaitSentinel: pcid,
 	}, nil
+}
+
+// TrackChannel adds a channel to the store loading its state from the chain. TODO: outbound
+func (p *Payments) TrackChannel(ctx context.Context, addr address.Address) (*ChannelInfo, error) {
+	return p.trackInboundChannel(ctx, addr)
 }
 
 // WaitForChannel to be ready and return the address on chain
@@ -212,6 +221,42 @@ func (p *Payments) SubmitVoucher(ctx context.Context, addr address.Address, sv *
 	return ch.submitVoucher(ctx, addr, sv, secret)
 }
 
+// SubmitVoucherForLane picks the best voucher for a given lane and submits it. It blocks until done.
+func (p *Payments) SubmitVoucherForLane(ctx context.Context, addr address.Address, lane uint64) error {
+	// Get the channel, creating it from state if necessary
+	ch, err := p.inboundChannel(ctx, addr)
+	if err != nil {
+		return err
+	}
+
+	best, err := p.bestSpendableByLane(ctx, addr)
+	if err != nil {
+		return err
+	}
+	if len(best) == 0 {
+		// If we have no vouchers to redeem it's probably not worth settling
+		return errors.New("no vouchers to redeem")
+	}
+
+	voucher, ok := best[lane]
+	if !ok {
+		return errors.New("lane not found")
+	}
+
+	mcid, err := ch.submitVoucher(ctx, addr, voucher, nil)
+	if err != nil {
+		return err
+	}
+	lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
+	if err != nil {
+		return err
+	}
+	if lookup.Receipt.ExitCode != 0 {
+		return fmt.Errorf("voucher update execution failed with code %d", lookup.Receipt.ExitCode)
+	}
+	return nil
+}
+
 // SubmitAllVouchers picks the best vouchers and submits them (should be submitted as one)
 // it blocks until done
 func (p *Payments) SubmitAllVouchers(ctx context.Context, addr address.Address) error {
@@ -264,20 +309,78 @@ func (p *Payments) SubmitAllVouchers(ctx context.Context, addr address.Address) 
 	return nil
 }
 
-// Settle a given channel and submits relevant vouchers then save the time when it can be collected
-func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
+// Settle a given channel then save and return the time when it can be collected
+func (p *Payments) Settle(ctx context.Context, addr address.Address) (abi.ChainEpoch, error) {
 	ch, err := p.channelByAddress(addr)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// We send our settle message at the same time as our voucher update messages
 	// hopefully they get on chain at the same time
 	mcid, err := ch.settle(ctx, addr)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// cancelling the context will timeout the wait function and all our goroutines will return
+	lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
+	if err != nil {
+		return 0, err
+	}
+	if lookup.Receipt.ExitCode != 0 {
+		log.Error().Err(err).
+			Str("channel", addr.String()).
+			Str("code", lookup.Receipt.ExitCode.String()).
+			Msg("payment execution failed")
+		return 0, fmt.Errorf("payment execution failed")
+	}
+
+	state, err := ch.loadActorState(addr)
+	if err != nil {
+		return 0, err
+	}
+	ci, err := p.store.ByAddress(addr)
+	if err != nil {
+		return 0, err
+	}
+	ep, err := state.SettlingAt()
+	if err != nil {
+		return 0, err
+	}
+	return ep, p.store.SetChannelSettlingAt(ci, ep)
+}
+
+// Collect a given channel
+func (p *Payments) Collect(ctx context.Context, addr address.Address) error {
+	ch, err := p.channelByAddress(addr)
+	if err != nil {
+		return err
+	}
+
+	// validate a few things so we don't spend gas collecting a channel that cannot be collected
+	state, err := ch.loadActorState(addr)
+	if err != nil {
+		return err
+	}
+	ep, err := state.SettlingAt()
+	if err != nil {
+		return err
+	}
+	if ep == 0 {
+		return errors.New("cannot collect a channel that is not settled")
+	}
+	head, err := p.api.ChainHead(ctx)
+	if err != nil {
+		return err
+	}
+	if head.Height() < ep {
+		return errors.New("too early to collect channel")
+	}
+
+	mcid, err := ch.collect(ctx, addr)
+	if err != nil {
+		return err
+	}
 	lookup, err := p.api.StateWaitMsg(ctx, mcid, 3)
 	if err != nil {
 		return err
@@ -289,20 +392,7 @@ func (p *Payments) Settle(ctx context.Context, addr address.Address) error {
 			Msg("payment execution failed")
 		return fmt.Errorf("payment execution failed")
 	}
-
-	state, err := ch.loadActorState(addr)
-	if err != nil {
-		return err
-	}
-	ci, err := p.store.ByAddress(addr)
-	if err != nil {
-		return err
-	}
-	ep, err := state.SettlingAt()
-	if err != nil {
-		return err
-	}
-	return p.store.SetChannelSettlingAt(ci, ep)
+	return nil
 }
 
 // StartAutoCollect is a routine that ticks every epoch and tries to collect settling payment channels

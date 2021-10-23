@@ -13,12 +13,12 @@ import (
 	"github.com/filecoin-project/specs-actors/v5/support/mock"
 	tutils "github.com/filecoin-project/specs-actors/v5/support/testing"
 	block "github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	keystore "github.com/ipfs/go-ipfs-keystore"
-	cbor "github.com/ipfs/go-ipld-cbor"
 	fil "github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/testutil"
 	"github.com/myelnet/pop/wallet"
@@ -46,6 +46,31 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 func (mb *mockBlocks) Put(b block.Block) error {
 	mb.data[b.Cid()] = b
 	return nil
+}
+
+func (mb *mockBlocks) DeleteBlock(c cid.Cid) error {
+	delete(mb.data, c)
+	return nil
+}
+
+func (mb *mockBlocks) Has(c cid.Cid) (bool, error) {
+	_, ok := mb.data[c]
+	return ok, nil
+}
+
+func (mb *mockBlocks) GetSize(c cid.Cid) (int, error) {
+	return 0, nil
+}
+
+func (mb *mockBlocks) PutMany([]blocks.Block) error {
+	return nil
+}
+
+func (mb *mockBlocks) AllKeysChan(context.Context) (<-chan cid.Cid, error) {
+	return nil, nil
+}
+
+func (mb *mockBlocks) HashOnRead(bool) {
 }
 
 // Test the full lifecycle of a channel in ideal conditions
@@ -76,7 +101,7 @@ func TestChannel(t *testing.T) {
 	require.NoError(t, err)
 
 	store := NewStore(dssync.MutexWrap(ds.NewMapDatastore()))
-	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
+	cborstore := NewFilObjectStore(api, &mockBlocks{make(map[cid.Cid]block.Block)})
 
 	mgr := testMgr{}
 
@@ -273,7 +298,7 @@ func TestLoadActorState(t *testing.T) {
 	w := wallet.NewFromKeystore(ks, wallet.WithFilAPI(api))
 
 	store := NewStore(dssync.MutexWrap(ds.NewMapDatastore()))
-	cborstore := cbor.NewCborStore(&mockBlocks{make(map[cid.Cid]block.Block)})
+	cborstore := NewFilObjectStore(api, &mockBlocks{make(map[cid.Cid]block.Block)})
 
 	mgr := testMgr{}
 
