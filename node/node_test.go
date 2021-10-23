@@ -759,6 +759,12 @@ loop:
 	_, err = cn.exch.Deals().FindOfferByCid(root)
 	require.Error(t, err)
 
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.PayResult.Err, "")
+	}
+	go pn.PaySubmit(ctx, &PayArgs{ChAddr: channels[0].String()})
+	go pn.PaySettle(ctx, &PayArgs{ChAddr: channels[0].String()})
+
 	// update the actor state so the manager can settle things
 	settle()
 }
@@ -870,6 +876,12 @@ loop:
 	ref, err = cn.exch.Index().GetRef(root)
 	require.NoError(t, err)
 	require.Equal(t, true, ref.Has("second"))
+
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.PayResult.Err, "")
+	}
+	go pn.PaySubmit(ctx, &PayArgs{ChAddr: channels[0].String()})
+	go pn.PaySettle(ctx, &PayArgs{ChAddr: channels[0].String()})
 
 	settle()
 }
@@ -983,6 +995,12 @@ loop:
 	require.Equal(t, true, ref.Has("first"))
 	require.Equal(t, true, ref.Has("second"))
 	require.Equal(t, true, ref.Has("third"))
+
+	pn.notify = func(n Notify) {
+		require.Equal(t, n.PayResult.Err, "")
+	}
+	go pn.PaySubmit(ctx, &PayArgs{ChAddr: channels[0].String()})
+	go pn.PaySettle(ctx, &PayArgs{ChAddr: channels[0].String()})
 
 	settle()
 }
