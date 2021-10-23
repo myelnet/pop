@@ -1010,7 +1010,7 @@ func (tx *Tx) dumpStore() error {
 
 		err := utils.MigrateBlocks(tx.ctx, tx.store.Bstore, tx.bs)
 		if err != nil {
-			return err
+			return fmt.Errorf("migrating blocks: %w", err)
 		}
 	}
 
