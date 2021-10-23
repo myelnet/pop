@@ -91,6 +91,10 @@ type Command struct {
 	Get          *GetArgs
 	List         *ListArgs
 	PaySubmit    *PayArgs
+	PayList      *PayArgs
+	PayTrack     *PayArgs
+	PaySettle    *PayArgs
+	PayCollect   *PayArgs
 }
 
 // OffResult doesn't return any value at this time
@@ -166,7 +170,9 @@ type ListResult struct {
 
 // PayResult returns the result of submitted vouchers
 type PayResult struct {
-	Err string
+	SettlingIn  string
+	ChannelList string
+	Err         string
 }
 
 // Notify is a message sent from the daemon to the client
@@ -251,7 +257,23 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 		return nil
 	}
 	if c := cmd.PaySubmit; c != nil {
-		cs.n.PaySubmit(ctx, c)
+		go cs.n.PaySubmit(ctx, c)
+		return nil
+	}
+	if c := cmd.PayList; c != nil {
+		go cs.n.PayList(ctx, c)
+		return nil
+	}
+	if c := cmd.PaySettle; c != nil {
+		go cs.n.PaySettle(ctx, c)
+		return nil
+	}
+	if c := cmd.PayCollect; c != nil {
+		go cs.n.PayCollect(ctx, c)
+		return nil
+	}
+	if c := cmd.PayTrack; c != nil {
+		cs.n.PayTrack(ctx, c)
 		return nil
 	}
 	return fmt.Errorf("CommandServer: no command specified")
@@ -350,6 +372,22 @@ func (cc *CommandClient) List(args *ListArgs) {
 
 func (cc *CommandClient) PaySubmit(args *PayArgs) {
 	cc.send(Command{PaySubmit: args})
+}
+
+func (cc *CommandClient) PayList(args *PayArgs) {
+	cc.send(Command{PayList: args})
+}
+
+func (cc *CommandClient) PaySettle(args *PayArgs) {
+	cc.send(Command{PaySettle: args})
+}
+
+func (cc *CommandClient) PayCollect(args *PayArgs) {
+	cc.send(Command{PayCollect: args})
+}
+
+func (cc *CommandClient) PayTrack(args *PayArgs) {
+	cc.send(Command{PayTrack: args})
 }
 
 func (cc *CommandClient) SetNotifyCallback(fn func(Notify)) {

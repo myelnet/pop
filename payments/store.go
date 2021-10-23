@@ -2,6 +2,7 @@ package payments
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/filecoin-project/go-address"
@@ -9,11 +10,15 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
 	"github.com/google/uuid"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	dsq "github.com/ipfs/go-datastore/query"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	cbor "github.com/ipfs/go-ipld-cbor"
 
+	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
 )
 
@@ -498,4 +503,48 @@ func unmarshallChannelInfo(stored *ChannelInfo, value []byte) (*ChannelInfo, err
 	}
 
 	return stored, nil
+}
+
+// FilObjectStore fetches object from the Filecoin API if it is absent from the blockstore
+type FilObjectStore struct {
+	api    filecoin.API
+	cstore *cbor.BasicIpldStore
+}
+
+// NewFilObjectStore creates a new instance of FilObjectStore
+func NewFilObjectStore(api filecoin.API, bs blockstore.Blockstore) *FilObjectStore {
+	return &FilObjectStore{
+		api:    api,
+		cstore: cbor.NewCborStore(bs),
+	}
+}
+
+// Get fetches the object from filecoin API if absent then proxies the method to the underlying reads
+// and unmarshals the content at `c` into `out`.
+func (fos *FilObjectStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
+	bs, ok := fos.cstore.Blocks.(blockstore.Blockstore)
+	if !ok {
+		return fmt.Errorf("not a blockstore interface")
+	}
+	if has, _ := bs.Has(c); !has {
+		raw, err := fos.api.ChainReadObj(ctx, c)
+		if err != nil {
+			return fmt.Errorf("Unable to read lane states from chain: %v", err)
+		}
+
+		block, err := blocks.NewBlockWithCid(raw, c)
+		if err != nil {
+			return fmt.Errorf("Unable to make a block with obj: %v", err)
+		}
+
+		if err := fos.cstore.Blocks.Put(block); err != nil {
+			return fmt.Errorf("Unable to set block in store: %v", err)
+		}
+	}
+	return fos.cstore.Get(ctx, c, out)
+}
+
+// Put just forwards the method
+func (fos *FilObjectStore) Put(ctx context.Context, v interface{}) (cid.Cid, error) {
+	return fos.cstore.Put(ctx, v)
 }

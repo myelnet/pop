@@ -19,9 +19,7 @@ import (
 	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
 	"github.com/filecoin-project/specs-actors/v5/actors/util/adt"
 	"github.com/hannahhoward/go-pubsub"
-	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
-	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/wallet"
 	"github.com/rs/zerolog/log"
@@ -35,7 +33,7 @@ type channel struct {
 	api           filecoin.API
 	wal           wallet.Driver
 	store         *Store
-	actStore      *cbor.BasicIpldStore
+	actStore      *FilObjectStore
 	lk            *multiLock
 	fundsReqQueue []*fundsReq
 	msgListeners  msgListeners
@@ -590,20 +588,6 @@ func (ch *channel) loadActorState(chAddr address.Address) (ChannelState, error) 
 	err = json.Unmarshal(stateEncod, &state)
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing actor state: %v", err)
-	}
-
-	raw, err := ch.api.ChainReadObj(ch.ctx, state.LaneStates)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to read lane states from chain: %v", err)
-	}
-
-	block, err := blocks.NewBlockWithCid(raw, state.LaneStates)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to make a block with obj: %v", err)
-	}
-
-	if err := ch.actStore.Blocks.Put(block); err != nil {
-		return nil, fmt.Errorf("Unable to set block in store: %v", err)
 	}
 
 	return &state, nil
