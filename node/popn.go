@@ -705,7 +705,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			return
 		}
 		for res := range results {
-			log.Info().Str("status", res.Status).Msg("transfer progress")
+			log.Info().Str("status", res.Status).Int64("received", res.TotalReceived).Msg("transfer progress")
 			if args.Verbose || res.Status != "" {
 				nd.send(Notify{
 					GetResult: &res,
@@ -849,11 +849,20 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 				inf := nd.host.Peerstore().PeerInfo(id)
 				info = &inf
 			}
+			// make sure we're connected
+			err = nd.host.Connect(ctx, *info)
+			if err != nil {
+				sendErr(err)
+				return
+			}
 			offer, err := tx.QueryOffer(*info, sel.All())
 			if err != nil {
 				sendErr(err)
 				return
 			}
+			// append the path manually since it's not set by query
+			tx.AppendPaths(args.Key)
+
 			tx.ApplyOffer(offer)
 		}
 
