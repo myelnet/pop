@@ -739,13 +739,9 @@ func (tx *Tx) Query(paths ...string) error {
 	// For now we assume providers must have all the blocks from a given root
 	// to send a valid offer. When selectors improve we may be able to query for partial offers.
 	tx.sel = selectors.All()
-	// clean paths
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
-		tx.paths = append(tx.paths, p)
-	}
+
+	tx.AppendPaths(paths...)
+
 	offer, err := tx.deals.FindOfferByCid(tx.root)
 	if err == nil {
 		info, err := offer.AddrInfo()
@@ -758,6 +754,17 @@ func (tx *Tx) Query(paths ...string) error {
 		}
 	}
 	return tx.rou.Query(tx.ctx, tx.root, selectors.All())
+}
+
+// AppendPaths used to combine multiple queries
+func (tx *Tx) AppendPaths(paths ...string) {
+	// clean paths
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		tx.paths = append(tx.paths, p)
+	}
 }
 
 // QueryOffer allows querying directly from a given peer

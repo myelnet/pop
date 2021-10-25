@@ -35,6 +35,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -689,7 +690,9 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 	nd.txmu.Unlock()
 
 	// Only support a single segment for now
-	args.Key = segs[0]
+	if len(segs) > 0 {
+		args.Key = segs[0]
+	}
 
 	// Check our supply if we may already have it from a different tx
 	tx := nd.exch.Tx(ctx, exchange.WithRoot(root))
@@ -702,7 +705,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 			return
 		}
 		for res := range results {
-			log.Info().Str("status", res.Status).Msg("transfer progress")
+			log.Info().Str("status", res.Status).Int64("received", res.TotalReceived).Msg("transfer progress")
 			if args.Verbose || res.Status != "" {
 				nd.send(Notify{
 					GetResult: &res,
@@ -800,10 +803,13 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 		tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithStrategy(strategy), exchange.WithTriage())
 		defer tx.Close()
 
-		err = tx.Query(args.Key)
-		if err != nil {
-			sendErr(err)
-			return
+		// if a peer ID/Address is provided we will not use routing and only try to retrieve from them
+		if args.Peer == "" {
+			err = tx.Query(args.Key)
+			if err != nil {
+				sendErr(err)
+				return
+			}
 		}
 		// We can query a specific miner on top of gossip
 		// that offer will be at the top of the list if we receive it
@@ -823,6 +829,41 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 			} else {
 				tx.ApplyOffer(offer)
 			}
+		}
+
+		if args.Peer != "" {
+			info, err := utils.AddrStringToAddrInfo(args.Peer)
+			if err != nil {
+				// maybe we only have a peer ID
+				id, err := peer.Decode(args.Peer)
+				if err != nil {
+					sendErr(err)
+					return
+				}
+				// check if we're connected to the peer
+				conn := nd.host.Network().Connectedness(id)
+				if conn == network.NotConnected {
+					sendErr(errors.New("peer unknown"))
+					return
+				}
+				inf := nd.host.Peerstore().PeerInfo(id)
+				info = &inf
+			}
+			// make sure we're connected
+			err = nd.host.Connect(ctx, *info)
+			if err != nil {
+				sendErr(err)
+				return
+			}
+			offer, err := tx.QueryOffer(*info, sel.All())
+			if err != nil {
+				sendErr(err)
+				return
+			}
+			// append the path manually since it's not set by query
+			tx.AppendPaths(args.Key)
+
+			tx.ApplyOffer(offer)
 		}
 
 		log.Info().Msg("waiting for triage")
