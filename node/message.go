@@ -63,6 +63,7 @@ type GetArgs struct {
 	Timeout  int    `json:"timeout,omitempty"`
 	Verbose  bool   `json:"verbose,omitempty"`
 	Miner    string `json:"miner,omitempty"`
+	Peer     string `json:"peer,omitempty"`
 	Strategy string `json:"strategy,omitempty"`
 	MaxPPB   int64  `json:"maxPPB,omitempty"`
 }
