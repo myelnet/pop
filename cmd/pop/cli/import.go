@@ -36,7 +36,7 @@ func runImport(ctx context.Context, args []string) error {
 	c, cc, ctx, cancel := connect(ctx)
 	defer cancel()
 
-	irc := make(chan *node.ImportResult, 1)
+	irc := make(chan *node.ImportResult, 6)
 	cc.SetNotifyCallback(func(n node.Notify) {
 		if ir := n.ImportResult; ir != nil {
 			irc <- ir
@@ -45,15 +45,24 @@ func runImport(ctx context.Context, args []string) error {
 	go receive(ctx, cc, c)
 
 	cc.Import(&node.ImportArgs{Path: args[0], CacheRF: importArgs.cacheRF})
-	select {
-	case ir := <-irc:
-		if ir.Err != "" {
-			return errors.New(ir.Err)
-		}
 
-		fmt.Println("Imported car with roots", ir.Roots)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	for {
+		select {
+		case ir := <-irc:
+			if ir.Err != "" {
+				return errors.New(ir.Err)
+			}
+
+			if len(ir.Caches) > 0 {
+				fmt.Printf("Cached by %s\n", ir.Caches)
+			}
+
+			if len(ir.Roots) > 0 {
+				fmt.Println("Imported car with roots", ir.Roots)
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
