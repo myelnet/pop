@@ -14,7 +14,6 @@ import (
 var commArgs struct {
 	cacheOnly bool
 	cacheRF   int
-	storageRF int
 }
 
 var commCmd = &ffcli.Command{
