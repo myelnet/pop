@@ -26,7 +26,7 @@ require (
 	github.com/ipfs/go-bitswap v0.3.2 // indirect
 	github.com/ipfs/go-block-format v0.0.3
 	github.com/ipfs/go-blockservice v0.1.4
-	github.com/ipfs/go-cid v0.0.7
+	github.com/ipfs/go-cid v0.0.8-0.20210716091050-de6c03deae1c
 	github.com/ipfs/go-datastore v0.4.5
 	github.com/ipfs/go-ds-badger v0.2.6
 	github.com/ipfs/go-graphsync v0.9.1
@@ -42,10 +42,10 @@ require (
 	github.com/ipfs/go-merkledag v0.3.2
 	github.com/ipfs/go-path v0.0.9
 	github.com/ipfs/go-unixfs v0.2.4
+	github.com/ipld/go-car/v2 v2.1.0
 	github.com/ipld/go-codec-dagpb v1.3.0
 	github.com/ipld/go-ipld-prime v0.12.0
 	github.com/jpillora/backoff v1.0.0
-	github.com/koding/websocketproxy v0.0.0-20181220232114-7ed82d81a28c
 	github.com/libp2p/go-eventbus v0.2.1
 	github.com/libp2p/go-libp2p v0.13.0
 	github.com/libp2p/go-libp2p-blankhost v0.2.0
@@ -54,7 +54,6 @@ require (
 	github.com/libp2p/go-libp2p-kad-dht v0.11.1
 	github.com/libp2p/go-libp2p-noise v0.1.2 // indirect
 	github.com/libp2p/go-libp2p-peer v0.2.0
-	github.com/libp2p/go-libp2p-peerstore v0.2.6
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
 	github.com/libp2p/go-libp2p-swarm v0.4.0
 	github.com/libp2p/go-libp2p-testing v0.4.0
@@ -68,7 +67,7 @@ require (
 	github.com/onsi/ginkgo v1.16.1 // indirect
 	github.com/onsi/gomega v1.11.0 // indirect
 	github.com/peterbourgon/ff/v3 v3.0.0
-	github.com/rs/zerolog v1.20.0
+	github.com/rs/zerolog v1.21.0
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.7.0
 	github.com/tchardin/go-libp2p-blankhost v0.2.1-0.20210408134851-9396bc83e200

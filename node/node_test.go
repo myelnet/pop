@@ -476,6 +476,36 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestImport(t *testing.T) {
+	ctx := context.Background()
+	mn := mocknet.New(ctx)
+
+	cn := newTestNode(ctx, mn, t)
+
+	var nds []*node
+	nds = append(nds, newTestNode(ctx, mn, t))
+	nds = append(nds, newTestNode(ctx, mn, t))
+
+	require.NoError(t, mn.LinkAll())
+	require.NoError(t, mn.ConnectAllButSelf())
+
+	res := make(chan *ImportResult, 3)
+	cn.notify = func(n Notify) {
+		require.Equal(t, n.ImportResult.Err, "")
+		res <- n.ImportResult
+	}
+	cn.Import(ctx, &ImportArgs{Path: "../internal/testutil/testcar-v1.car", CacheRF: 2})
+
+	i := 0
+	for i < 2 {
+		<-res
+		i++
+	}
+
+	r := <-res
+	require.Equal(t, []string{"QmRtuDzjipZnWUgjAHgaatG5sPEJuyCUV41xpFYZ6DtFJr"}, r.Roots)
+}
+
 // Commit 2 different files into a single transaction and then retrieve (Get)
 // the files individually with 2 separate operations. Both Get operations are on the
 // same transaction (ref) and based on the same root CID but retrieve 2 different files.

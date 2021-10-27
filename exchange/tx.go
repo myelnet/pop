@@ -148,6 +148,13 @@ func WithRoot(r cid.Cid) TxOption {
 	}
 }
 
+// WithSize allows overriding the size manually if we know it ahead of time
+func WithSize(size int64) TxOption {
+	return func(tx *Tx) {
+		tx.size = size
+	}
+}
+
 // WithTriage allows a transaction to manually prompt for external confirmation before executing an offer
 func WithTriage() TxOption {
 	return func(tx *Tx) {

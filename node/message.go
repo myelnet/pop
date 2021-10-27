@@ -73,6 +73,12 @@ type ListArgs struct {
 	Page int // potential pagination as the amount may be very large
 }
 
+// ImportArgs provides the path to the car file
+type ImportArgs struct {
+	Path    string
+	CacheRF int
+}
+
 // PayArgs provides params for controlling a payment channel
 type PayArgs struct {
 	ChAddr string
@@ -91,6 +97,7 @@ type Command struct {
 	Commit       *CommArgs
 	Get          *GetArgs
 	List         *ListArgs
+	Import       *ImportArgs
 	PaySubmit    *PayArgs
 	PayList      *PayArgs
 	PayTrack     *PayArgs
@@ -169,6 +176,13 @@ type ListResult struct {
 	Err  string
 }
 
+// ImportResult returns the resulting index entries from the CAR file
+type ImportResult struct {
+	Roots  []string
+	Caches []string
+	Err    string
+}
+
 // PayResult returns the result of submitted vouchers
 type PayResult struct {
 	SettlingIn  string
@@ -186,6 +200,7 @@ type Notify struct {
 	CommResult   *CommResult
 	GetResult    *GetResult
 	ListResult   *ListResult
+	ImportResult *ImportResult
 	PayResult    *PayResult
 }
 
@@ -255,6 +270,10 @@ func (cs *CommandServer) GotMsg(ctx context.Context, cmd *Command) error {
 	}
 	if c := cmd.List; c != nil {
 		go cs.n.List(ctx, c)
+		return nil
+	}
+	if c := cmd.Import; c != nil {
+		go cs.n.Import(ctx, c)
 		return nil
 	}
 	if c := cmd.PaySubmit; c != nil {
@@ -369,6 +388,10 @@ func (cc *CommandClient) Get(args *GetArgs) {
 
 func (cc *CommandClient) List(args *ListArgs) {
 	cc.send(Command{List: args})
+}
+
+func (cc *CommandClient) Import(args *ImportArgs) {
+	cc.send(Command{Import: args})
 }
 
 func (cc *CommandClient) PaySubmit(args *PayArgs) {

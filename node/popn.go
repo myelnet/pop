@@ -15,6 +15,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -32,6 +33,7 @@ import (
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	"github.com/ipfs/go-unixfs/importer/helpers"
 	"github.com/ipfs/go-unixfs/importer/trickle"
+	"github.com/ipld/go-car/v2"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -1018,6 +1020,97 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 			},
 		})
 	}
+}
+
+// Import blocks from a CAR file
+func (nd *node) Import(ctx context.Context, args *ImportArgs) {
+	sendErr := func(err error) {
+		nd.send(Notify{
+			ImportResult: &ImportResult{
+				Err: err.Error(),
+			}})
+	}
+
+	f, err := os.Open(args.Path)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	info, err := f.Stat()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	br, err := car.NewBlockReader(f)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	if len(br.Roots) != 1 {
+		sendErr(fmt.Errorf("unexpected number of roots, exepected 1 got %d", len(br.Roots)))
+		return
+	}
+
+	blks := []blocks.Block{}
+
+	for {
+		block, err := br.Next()
+		if err != nil && err != io.EOF {
+			sendErr(err)
+			return
+		} else if block == nil {
+			break
+		}
+		blks = append(blks, block)
+	}
+
+	root := br.Roots[0]
+	tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithSize(info.Size()))
+	tx.SetCacheRF(args.CacheRF)
+
+	err = tx.Store().Bstore.PutMany(blks)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	ref := tx.Ref()
+	tx.WatchDispatch(func(r exchange.PRecord) {
+		nd.send(Notify{
+			ImportResult: &ImportResult{
+				Caches: []string{
+					r.Provider.String(),
+				},
+			},
+		})
+	})
+	tx.Close()
+
+	err = nd.exch.Index().GC()
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	err = nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	nd.send(Notify{
+		ImportResult: &ImportResult{
+			Roots: []string{ref.PayloadCID.String()},
+		},
+	})
 }
 
 // DAGParams is a set of features used to chunk and format files into DAGs
