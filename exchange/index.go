@@ -47,8 +47,10 @@ type Index struct {
 	// Lower bound is the size we target when evicting to make room for new content
 	// the interval between ub and lb is to try not evicting after every write once we reach ub
 	lb uint64
+	// setFunc is an optional callback called every time a new ref is set. Make sure not to block.
+	setFunc func(DataRef)
 	// deleteFunc, if not nil, is called after a ref is evicted. Make sure not to block there.
-	deleteFunc func(cid.Cid)
+	deleteFunc func(DataRef)
 
 	emu sync.Mutex
 	// gcSet is a cid Set where we put all the cid that will be evicted when calling the Garbage Collector GC()
@@ -105,8 +107,15 @@ func WithBounds(up, lo uint64) IndexOption {
 	}
 }
 
+// WithSetFunc sets a setFunc callback
+func WithSetFunc(fn func(DataRef)) IndexOption {
+	return func(idx *Index) {
+		idx.setFunc = fn
+	}
+}
+
 // WithDeleteFunc sets a deleteFunc callback
-func WithDeleteFunc(fn func(cid.Cid)) IndexOption {
+func WithDeleteFunc(fn func(DataRef)) IndexOption {
 	return func(idx *Index) {
 		idx.deleteFunc = fn
 	}
@@ -293,6 +302,10 @@ func (idx *Index) UpdateRef(ref *DataRef) error {
 
 // SetRef adds a ref in the index and increments the LFU queue
 func (idx *Index) SetRef(ref *DataRef) error {
+	if idx.setFunc != nil {
+		defer idx.setFunc(*ref)
+	}
+
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 	k := ref.PayloadCID.String()
@@ -462,7 +475,7 @@ func (idx *Index) evict(size uint64) uint64 {
 			evicted += uint64(entry.PayloadSize)
 			idx.size -= uint64(entry.PayloadSize)
 			if idx.deleteFunc != nil {
-				idx.deleteFunc(entry.PayloadCID)
+				idx.deleteFunc(*entry)
 			}
 			if evicted >= size {
 				return evicted

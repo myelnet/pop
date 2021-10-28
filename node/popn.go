@@ -247,7 +247,9 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Regions:             regions,
 		Capacity:            opts.Capacity,
 		ReplInterval:        opts.ReplInterval,
-		WatchEvictionFunc:   nd.onDeleteRef,
+		// every time new content is added/deleted we notify the remote routing service
+		WatchEvictionFunc: nd.onDeleteRef,
+		WatchAdditionFunc: nd.onSetRef,
 	}
 	if opts.FilToken != "" {
 		eopts.FilecoinRPCHeader = http.Header{
@@ -625,12 +627,6 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 
 	// Run the garbage collector to remove tagged Refs
 	err = nd.exch.Index().GC()
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	err = nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
 	if err != nil {
 		sendErr(err)
 		return
@@ -1094,13 +1090,13 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 	})
 	tx.Close()
 
-	err = nd.exch.Index().GC()
+	err = nd.exch.Index().SetRef(ref)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	err = nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
+	err = nd.exch.Index().GC()
 	if err != nil {
 		sendErr(err)
 		return
@@ -1288,11 +1284,21 @@ func (nd *node) connPeers() []peer.ID {
 
 // onDeleteRef calls any remote index to delete the related record
 // we spin up routines not to block eviction execution.
-func (nd *node) onDeleteRef(key cid.Cid) {
+func (nd *node) onDeleteRef(ref exchange.DataRef) {
 	go func() {
-		err := nd.remind.Delete(key)
+		err := nd.remind.Delete(ref.PayloadCID)
 		if err != nil {
 			log.Error().Err(err).Msg("deleting remote record")
+		}
+	}()
+}
+
+// onSetRef calls any remote index to publish the related record
+func (nd *node) onSetRef(ref exchange.DataRef) {
+	go func() {
+		err := nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to publish to remote index")
 		}
 	}()
 }

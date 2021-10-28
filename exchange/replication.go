@@ -411,6 +411,12 @@ func (r *Replication) handleRequest(s network.Stream) {
 					log.Debug().Err(err).Msg("error when loading keys")
 				}
 
+				if err := utils.MigrateBlocks(ctx, store.Bstore, r.bs); err != nil {
+					log.Error().Err(err).Msg("error when migrating blocks")
+					// if we fail migrating the blocks we shouldn't set the ref
+					return
+				}
+
 				ref := &DataRef{
 					PayloadCID:  req.PayloadCID,
 					PayloadSize: int64(req.Size),
@@ -420,10 +426,6 @@ func (r *Replication) handleRequest(s network.Stream) {
 				err = r.idx.SetRef(ref)
 				if err != nil {
 					log.Error().Err(err).Msg("error when setting ref")
-				}
-
-				if err := utils.MigrateBlocks(ctx, store.Bstore, r.bs); err != nil {
-					log.Error().Err(err).Msg("error when migrating blocks")
 				}
 
 				if err := r.ms.Delete(sid); err != nil {
