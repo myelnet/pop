@@ -50,7 +50,7 @@ type Index struct {
 	// setFunc is an optional callback called every time a new ref is set. Make sure not to block.
 	setFunc func(DataRef)
 	// deleteFunc, if not nil, is called after a ref is evicted. Make sure not to block there.
-	deleteFunc func(cid.Cid)
+	deleteFunc func(DataRef)
 
 	emu sync.Mutex
 	// gcSet is a cid Set where we put all the cid that will be evicted when calling the Garbage Collector GC()
@@ -115,7 +115,7 @@ func WithSetFunc(fn func(DataRef)) IndexOption {
 }
 
 // WithDeleteFunc sets a deleteFunc callback
-func WithDeleteFunc(fn func(cid.Cid)) IndexOption {
+func WithDeleteFunc(fn func(DataRef)) IndexOption {
 	return func(idx *Index) {
 		idx.deleteFunc = fn
 	}
@@ -475,7 +475,7 @@ func (idx *Index) evict(size uint64) uint64 {
 			evicted += uint64(entry.PayloadSize)
 			idx.size -= uint64(entry.PayloadSize)
 			if idx.deleteFunc != nil {
-				idx.deleteFunc(entry.PayloadCID)
+				idx.deleteFunc(*entry)
 			}
 			if evicted >= size {
 				return evicted

@@ -11,7 +11,6 @@ import (
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
-	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-graphsync"
@@ -74,7 +73,7 @@ type Options struct {
 	// WatchQueriesFunc is an optional function that will return any queries received as a provider
 	WatchQueriesFunc func(deal.Query)
 	// WatchEvictionFunc is an optional function that will yield the root cid for any evicted content.
-	WatchEvictionFunc func(cid.Cid)
+	WatchEvictionFunc func(DataRef)
 	// WatchAdditionFunc is an optional callback notifying when content is added to the index.
 	WatchAdditionFunc func(DataRef)
 }
