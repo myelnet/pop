@@ -75,6 +75,8 @@ type Options struct {
 	WatchQueriesFunc func(deal.Query)
 	// WatchEvictionFunc is an optional function that will yield the root cid for any evicted content.
 	WatchEvictionFunc func(cid.Cid)
+	// WatchAdditionFunc is an optional callback notifying when content is added to the index.
+	WatchAdditionFunc func(DataRef)
 }
 
 // Everything isn't thoroughly validated so we trust users who provide options know what they're doing

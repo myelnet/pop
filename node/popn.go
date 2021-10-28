@@ -248,6 +248,15 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		Capacity:            opts.Capacity,
 		ReplInterval:        opts.ReplInterval,
 		WatchEvictionFunc:   nd.onDeleteRef,
+		// every time new content is added to this provider we notify the remote routing service
+		WatchAdditionFunc: func(ref exchange.DataRef) {
+			go func() {
+				err := nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
+				if err != nil {
+					log.Error().Err(err).Msg("failed to publish to remote index")
+				}
+			}()
+		},
 	}
 	if opts.FilToken != "" {
 		eopts.FilecoinRPCHeader = http.Header{
@@ -625,12 +634,6 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 
 	// Run the garbage collector to remove tagged Refs
 	err = nd.exch.Index().GC()
-	if err != nil {
-		sendErr(err)
-		return
-	}
-
-	err = nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
 	if err != nil {
 		sendErr(err)
 		return
@@ -1094,13 +1097,13 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 	})
 	tx.Close()
 
-	err = nd.exch.Index().GC()
+	err = nd.exch.Index().SetRef(ref)
 	if err != nil {
 		sendErr(err)
 		return
 	}
 
-	err = nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
+	err = nd.exch.Index().GC()
 	if err != nil {
 		sendErr(err)
 		return
