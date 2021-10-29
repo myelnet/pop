@@ -13,3 +13,4 @@ infra/test-nodes/test-files/*
 
 # ignore service worker client code
 sw.js
+content.json

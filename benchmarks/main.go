@@ -156,20 +156,45 @@ func run() error {
 
 	ts := httptest.NewServer(http.FileServer(http.Dir("./static")))
 
-	done := make(chan struct{}, 1)
+	done := make(chan struct{})
+
+	sent := make(chan *network.EventRequestWillBeSent)
+	success := make(chan *network.Response)
+	failure := make(chan *network.EventLoadingFailed)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
+		case *network.EventRequestWillBeSent:
+			sent <- ev
 		case *network.EventResponseReceived:
-			fmt.Printf("* network response received %s:\n", ev.Type)
 			if ev.Response != nil {
-				fmt.Println("URL", ev.Response.URL)
+				success <- ev.Response
 			}
+		case *network.EventLoadingFailed:
+			failure <- ev
 		}
 	})
+	go func() {
+		i := 0
+		for res := range success {
+			fmt.Println("Success:", res.URL, i)
+			i++
+		}
+	}()
+	go func() {
+		for req := range sent {
+			fmt.Println("Request:", req.Request.URL, req.RequestID)
+		}
+	}()
+	go func() {
+		for err := range failure {
+			fmt.Println("Failure:", err.ErrorText, err.RequestID)
+		}
+	}()
 
 	if err := chromedp.Run(ctx, chromedp.Navigate(ts.URL)); err != nil {
 		return err
 	}
+
 	<-done
 
 	return nil
