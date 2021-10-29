@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-
 // Run runs the CLI. The args do not include the binary name.
 func Run(args []string) error {
 	if len(args) == 1 && (args[0] == "-V" || args[0] == "--version" || args[0] == "version") {
@@ -59,6 +58,7 @@ change until a first stable release. To get started run 'pop start'.
 			listCmd,
 			walletCmd,
 			payCmd,
+			importCmd,
 		},
 		FlagSet: rootfs,
 		Exec:    func(context.Context, []string) error { return flag.ErrHelp },
