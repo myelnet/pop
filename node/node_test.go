@@ -32,11 +32,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...ExchangeOption) *node {
+func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...ExchangeOption) *Pop {
 	var err error
 	tn := testutil.NewTestNode(mn, t)
 
-	nd := &node{}
+	nd := &Pop{}
 	nd.ds = tn.Ds
 	nd.bs = tn.Bs
 	nd.ms = tn.Ms
@@ -277,7 +277,7 @@ func TestCommit(t *testing.T) {
 	mn := mocknet.New(ctx)
 	cn := newTestNode(ctx, mn, t, WithCapacity(255000))
 
-	var nds []*node
+	var nds []*Pop
 	nds = append(nds, newTestNode(ctx, mn, t))
 	nds = append(nds, newTestNode(ctx, mn, t))
 
@@ -286,7 +286,7 @@ func TestCommit(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// we create a file larger than the node.Capacity to force eviction when adding later the second file
+	// we create a file larger than the Capacity to force eviction when adding later the second file
 	data := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
 	p := filepath.Join(dir, "data1")

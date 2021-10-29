@@ -10,3 +10,6 @@ infra/test-nodes/install-playbook/key
 infra/test-nodes/logs/*
 infra/test-nodes/test-files/*
 .goreleaser.yml
+
+# ignore service worker client code
+sw.js

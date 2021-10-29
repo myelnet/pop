@@ -145,15 +145,16 @@ type StatusResult struct {
 
 // WalletResult returns the output of every WalletList/WalletExport/WalletPay requests
 type WalletResult struct {
-	Err       string
-	Addresses []string
+	Err            string
+	Addresses      []string
+	DefaultAddress string
 }
 
 // CommResult is feedback on the push operation
 type CommResult struct {
 	Ref    string
 	Caches []string
-	Size   string
+	Size   int64
 	Err    string
 }
 
@@ -213,13 +214,13 @@ type Notify struct {
 
 // CommandServer receives commands on the daemon side and executes them
 type CommandServer struct {
-	n             *node                // the ipfs node we are controlling
+	n             *Pop                 // the pop node we are controlling
 	sendNotifyMsg func(jsonMsg []byte) // send a notification message
 }
 
-func NewCommandServer(ipfs *node, sendNotifyMsg func(b []byte)) *CommandServer {
+func NewCommandServer(node *Pop, sendNotifyMsg func(b []byte)) *CommandServer {
 	return &CommandServer{
-		n:             ipfs,
+		n:             node,
 		sendNotifyMsg: sendNotifyMsg,
 	}
 }

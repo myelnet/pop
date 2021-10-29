@@ -140,8 +140,9 @@ type Options struct {
 	CancelFunc context.CancelFunc
 }
 
-type node struct {
-	host    host.Host
+// Pop is the pop node implementation
+type Pop struct {
+	Host    host.Host
 	ds      datastore.Batching
 	bs      blockstore.Blockstore
 	ms      *multistore.MultiStore
@@ -166,9 +167,9 @@ type node struct {
 }
 
 // New puts together all the components of the ipfs node
-func New(ctx context.Context, opts Options) (*node, error) {
+func New(ctx context.Context, opts Options) (*Pop, error) {
 	var err error
-	nd := &node{
+	nd := &Pop{
 		opts: opts,
 	}
 
@@ -204,7 +205,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	nd.host, err = libp2p.New(
+	nd.Host, err = libp2p.New(
 		ctx,
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings(
@@ -294,7 +295,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		}
 	}
 
-	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
+	nd.exch, err = exchange.New(ctx, nd.Host, nd.ds, eopts)
 	if err != nil {
 		return nil, fmt.Errorf("inializing exchange: %w", err)
 	}
@@ -315,7 +316,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.cancelFunc = opts.CancelFunc
 
-	peering := NewPeeringService(nd.host)
+	peering := NewPeeringService(nd.Host)
 
 	for _, addrStr := range nd.opts.BootstrapPeers {
 		addrInfo, err := utils.AddrStringToAddrInfo(addrStr)
@@ -324,7 +325,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 			continue
 		}
 		// prevent node from adding itself if it's one of the bootstraps
-		if addrInfo.ID.String() == nd.host.ID().String() {
+		if addrInfo.ID.String() == nd.Host.ID().String() {
 			continue
 		}
 		peering.AddPeer(*addrInfo)
@@ -335,7 +336,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 		return nil, err
 	}
 
-	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.host, nd.exch.Wallet(), opts.Domains)
+	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.Host, nd.exch.Wallet(), opts.Domains)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +347,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	nd.exch.Retrieval().Provider().SubscribeToEvents(func(event provider.Event, state deal.ProviderState) {
 		tags := make(map[string]string)
 		tags["requester"] = state.Receiver.String()
-		tags["responder"] = nd.host.ID().String()
+		tags["responder"] = nd.Host.ID().String()
 
 		values := make(map[string]interface{})
 		values["event"] = provider.Events[event]
@@ -360,7 +361,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 }
 
 // send hits out notify callback if we attached one
-func (nd *node) send(n Notify) {
+func (nd *Pop) send(n Notify) {
 	nd.mu.Lock()
 	notify := nd.notify
 	nd.mu.Unlock()
@@ -372,8 +373,15 @@ func (nd *node) send(n Notify) {
 	}
 }
 
+// SetNotify sets a notify callback function
+func (nd *Pop) SetNotify(notify func(Notify)) {
+	nd.mu.Lock()
+	nd.notify = notify
+	nd.mu.Unlock()
+}
+
 // Off shutdown the node gracefully
-func (nd *node) Off(ctx context.Context) {
+func (nd *Pop) Off(ctx context.Context) {
 	nd.send(Notify{OffResult: &OffResult{}})
 	fmt.Println("==> Shut down pop daemon")
 
@@ -381,7 +389,7 @@ func (nd *node) Off(ctx context.Context) {
 }
 
 // Ping the node for sanity check more than anything
-func (nd *node) Ping(ctx context.Context, who string) {
+func (nd *Pop) Ping(ctx context.Context, who string) {
 	sendErr := func(err error) {
 		nd.send(Notify{PingResult: &PingResult{
 			Err: err.Error(),
@@ -395,11 +403,11 @@ func (nd *node) Ping(ctx context.Context, who string) {
 			pstr = append(pstr, p.String())
 		}
 		var addrs []string
-		for _, a := range nd.host.Addrs() {
+		for _, a := range nd.Host.Addrs() {
 			addrs = append(addrs, a.String())
 		}
 		nd.send(Notify{PingResult: &PingResult{
-			ID:      nd.host.ID().String(),
+			ID:      nd.Host.ID().String(),
 			Addrs:   addrs,
 			Peers:   pstr,
 			Version: build.Version,
@@ -422,7 +430,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 	}
 	pid, err := peer.Decode(who)
 	if err == nil {
-		err = nd.ping(ctx, nd.host.Peerstore().PeerInfo(pid))
+		err = nd.ping(ctx, nd.Host.Peerstore().PeerInfo(pid))
 		if err != nil {
 			sendErr(err)
 		}
@@ -431,7 +439,7 @@ func (nd *node) Ping(ctx context.Context, who string) {
 	sendErr(ErrInvalidPeer)
 }
 
-func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
+func (nd *Pop) ping(ctx context.Context, pi peer.AddrInfo) error {
 	strs := make([]string, 0, len(pi.Addrs))
 	for _, a := range pi.Addrs {
 		strs = append(strs, a.String())
@@ -440,7 +448,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	pings := ping.Ping(ctx, nd.host, pi.ID)
+	pings := ping.Ping(ctx, nd.Host, pi.ID)
 
 	select {
 	case res := <-pings:
@@ -448,7 +456,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 			return res.Error
 		}
 		var v string
-		agent, _ := nd.host.Peerstore().Get(pi.ID, "AgentVersion")
+		agent, _ := nd.Host.Peerstore().Get(pi.ID, "AgentVersion")
 		vparts := strings.Split(agent.(string), "-")
 		if len(vparts) == 3 {
 			v = fmt.Sprintf("%s-%s", vparts[1], vparts[2])
@@ -465,7 +473,7 @@ func (nd *node) ping(ctx context.Context, pi peer.AddrInfo) error {
 	}
 }
 
-func (nd *node) filMinerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
+func (nd *Pop) filMinerInfo(ctx context.Context, addr address.Address) (*peer.AddrInfo, error) {
 	miner, err := nd.exch.FilecoinAPI().StateMinerInfo(ctx, addr, filecoin.EmptyTSK)
 	if err != nil {
 		return nil, err
@@ -492,7 +500,7 @@ func (nd *node) filMinerInfo(ctx context.Context, addr address.Address) (*peer.A
 }
 
 // Put a file into a new or pending transaction
-func (nd *node) Put(ctx context.Context, args *PutArgs) {
+func (nd *Pop) Put(ctx context.Context, args *PutArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			PutResult: &PutResult{
@@ -552,7 +560,7 @@ func (nd *node) Put(ctx context.Context, args *PutArgs) {
 
 // Status prints the current transaction status. It shows which files have been added but not yet committed
 // to the network
-func (nd *node) Status(ctx context.Context, args *StatusArgs) {
+func (nd *Pop) Status(ctx context.Context, args *StatusArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			StatusResult: &StatusResult{
@@ -581,7 +589,7 @@ func (nd *node) Status(ctx context.Context, args *StatusArgs) {
 }
 
 // Commit a content transaction for storage
-func (nd *node) Commit(ctx context.Context, args *CommArgs) {
+func (nd *Pop) Commit(ctx context.Context, args *CommArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			CommResult: &CommResult{
@@ -644,14 +652,14 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 	}
 
 	nd.send(Notify{CommResult: &CommResult{
-		Size: filecoin.SizeStr(filecoin.NewInt(uint64(ref.PayloadSize))),
+		Size: ref.PayloadSize,
 		Ref:  ref.PayloadCID.String(),
 	}})
 }
 
 // Get sends a request for content with the given arguments. It also sends feedback to any open cli
 // connections
-func (nd *node) Get(ctx context.Context, args *GetArgs) {
+func (nd *Pop) Get(ctx context.Context, args *GetArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			GetResult: &GetResult{
@@ -745,7 +753,7 @@ func (nd *node) Get(ctx context.Context, args *GetArgs) {
 
 // Load is an RPC method that retrieves a given CID and key to the local blockstore.
 // It sends feedback events to a result channel that it returns.
-func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error) {
+func (nd *Pop) Load(ctx context.Context, args *GetArgs) (chan GetResult, error) {
 	results := make(chan GetResult)
 
 	sendErr := func(err error) {
@@ -850,16 +858,16 @@ func (nd *node) Load(ctx context.Context, args *GetArgs) (chan GetResult, error)
 					return
 				}
 				// check if we're connected to the peer
-				conn := nd.host.Network().Connectedness(id)
+				conn := nd.Host.Network().Connectedness(id)
 				if conn == network.NotConnected {
 					sendErr(errors.New("peer unknown"))
 					return
 				}
-				inf := nd.host.Peerstore().PeerInfo(id)
+				inf := nd.Host.Peerstore().PeerInfo(id)
 				info = &inf
 			}
 			// make sure we're connected
-			err = nd.host.Connect(ctx, *info)
+			err = nd.Host.Connect(ctx, *info)
 			if err != nil {
 				sendErr(err)
 				return
@@ -994,12 +1002,12 @@ type DealInfoResult struct {
 }
 
 // DealInfo returns info about any ongoing deals for a given CID
-func (nd *node) DealInfo(ctx context.Context, args *DealInfoArgs) (DealInfoResult, error) {
+func (nd *Pop) DealInfo(ctx context.Context, args *DealInfoArgs) (DealInfoResult, error) {
 	return DealInfoResult{}, nil
 }
 
 // List returns all the roots for the content stored by this node
-func (nd *node) List(ctx context.Context, args *ListArgs) {
+func (nd *Pop) List(ctx context.Context, args *ListArgs) {
 	list, err := nd.exch.Index().ListRefs()
 	if err != nil {
 		nd.send(Notify{
@@ -1030,7 +1038,7 @@ func (nd *node) List(ctx context.Context, args *ListArgs) {
 }
 
 // Import blocks from a CAR file
-func (nd *node) Import(ctx context.Context, args *ImportArgs) {
+func (nd *Pop) Import(ctx context.Context, args *ImportArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			ImportResult: &ImportResult{
@@ -1170,7 +1178,7 @@ func WithLayout(layout func(*helpers.DagBuilderHelper) (ipldformat.Node, error))
 }
 
 // Add a buffer into the given DAG. These DAGs can eventually be put into transactions.
-func (nd *node) Add(ctx context.Context, dag ipldformat.DAGService, buf io.ReadSeeker, opts ...DAGOption) (cid.Cid, error) {
+func (nd *Pop) Add(ctx context.Context, dag ipldformat.DAGService, buf io.ReadSeeker, opts ...DAGOption) (cid.Cid, error) {
 	bufferedDS := ipldformat.NewBufferedDAG(ctx, dag)
 	dagParams := NewDAGParams(buf)
 	for _, o := range opts {
@@ -1238,7 +1246,7 @@ func selectDAGParams(filepath string, buf io.ReadSeeker) []DAGOption {
 
 // getRef is an internal function to find a ref with a given string cid
 // it is used when quoting the commit storage price or pushing to storage providers
-func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
+func (nd *Pop) getRef(cstr string) (*exchange.DataRef, error) {
 	// Select the commit with the matching CID
 	// TODO: should prob error out if we don't find it
 	if cstr != "" {
@@ -1265,7 +1273,7 @@ func (nd *node) getRef(cstr string) (*exchange.DataRef, error) {
 // addRecursive adds entire file trees into a single transaction
 // it assumes the caller is holding the tx lock until it returns
 // it currently flattens the keys though we may want to maintain the full keys to keep the structure
-func (nd *node) addRecursive(ctx context.Context, name string, file files.Node, added map[string]bool) error {
+func (nd *Pop) addRecursive(ctx context.Context, name string, file files.Node, added map[string]bool) error {
 	switch f := file.(type) {
 	case files.Directory:
 		it := f.Entries()
@@ -1301,8 +1309,8 @@ func (nd *node) addRecursive(ctx context.Context, name string, file files.Node, 
 }
 
 // connPeers returns a list of connected peer IDs
-func (nd *node) connPeers() []peer.ID {
-	conns := nd.host.Network().Conns()
+func (nd *Pop) connPeers() []peer.ID {
+	conns := nd.Host.Network().Conns()
 	var out []peer.ID
 	for _, c := range conns {
 		pid := c.RemotePeer()
@@ -1313,7 +1321,7 @@ func (nd *node) connPeers() []peer.ID {
 
 // onDeleteRef calls any remote index to delete the related record
 // we spin up routines not to block eviction execution.
-func (nd *node) onDeleteRef(ref exchange.DataRef) {
+func (nd *Pop) onDeleteRef(ref exchange.DataRef) {
 	go func() {
 		err := nd.remind.Delete(ref.PayloadCID)
 		if err != nil {
@@ -1323,7 +1331,7 @@ func (nd *node) onDeleteRef(ref exchange.DataRef) {
 }
 
 // onSetRef calls any remote index to publish the related record
-func (nd *node) onSetRef(ref exchange.DataRef) {
+func (nd *Pop) onSetRef(ref exchange.DataRef) {
 	go func() {
 		err := nd.remind.Publish(ref.PayloadCID, ref.PayloadSize)
 		if err != nil {

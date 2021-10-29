@@ -68,7 +68,7 @@ func runListKeys(ctx context.Context, args []string) error {
 			return errors.New(kr.Err)
 		}
 
-		keys := strings.Join(kr.Addresses, "\n ==> ")
+		keys := strings.Replace(strings.Join(kr.Addresses, "\n ==> "), kr.DefaultAddress, kr.DefaultAddress+" (default)", 1)
 
 		fmt.Printf("List of all your keys : \n ==> %s \n", keys)
 		return nil
