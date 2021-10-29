@@ -587,10 +587,10 @@ func TestSendDispatchNoPeers(t *testing.T) {
 	require.NoError(t, supply.Start(bgCtx))
 
 	options := DispatchOptions{
-		BackoffMin:     10 * time.Millisecond,
-		BackoffAttemps: 4,
-		RF:             5,
-		StoreID:        storeID,
+		BackoffMin:      10 * time.Millisecond,
+		BackoffAttempts: 4,
+		RF:              5,
+		StoreID:         storeID,
 	}
 	res, err := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
 	require.NoError(t, err)
@@ -720,10 +720,10 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	}
 	// get 5 requests and give up after 4 attemps
 	options := DispatchOptions{
-		BackoffMin:     200 * time.Millisecond,
-		BackoffAttemps: 4,
-		RF:             7,
-		StoreID:        storeID,
+		BackoffMin:      200 * time.Millisecond,
+		BackoffAttempts: 4,
+		RF:              7,
+		StoreID:         storeID,
 	}
 	res, err := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
 	require.NoError(t, err)
