@@ -118,7 +118,6 @@ func runGossip(runenv *runtime.RunEnv, initCtx *run.InitContext) error {
 			return err
 		}
 		// Only cache the content locally
-		tx.SetCacheRF(0)
 		if err := tx.Commit(); err != nil {
 			return err
 		}

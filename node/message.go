@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -51,7 +52,9 @@ type WalletPayArgs struct {
 
 // CommArgs are passed to the Commit command
 type CommArgs struct {
-	CacheRF int // CacheRF is the cache replication factor or number of cache provider will request
+	CacheRF    int // CacheRF is the cache replication factor or number of cache provider will request
+	Attempts   int
+	BackoffMin time.Duration
 }
 
 // GetArgs get passed to the Get command
@@ -75,8 +78,10 @@ type ListArgs struct {
 
 // ImportArgs provides the path to the car file
 type ImportArgs struct {
-	Path    string
-	CacheRF int
+	Path       string
+	CacheRF    int
+	Attempts   int
+	BackoffMin time.Duration
 }
 
 // PayArgs provides params for controlling a payment channel

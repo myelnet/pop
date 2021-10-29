@@ -680,7 +680,6 @@ func TestPreload(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Put("third", cid3, 26000))
 
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	ref := tx.Ref()
 	root := ref.PayloadCID
@@ -842,7 +841,6 @@ func TestLoadKey(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Put("third", cid3, 26000))
 
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	ref := tx.Ref()
 	root := ref.PayloadCID
@@ -959,7 +957,6 @@ func TestLoadAll(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Put("third", cid3, 26000))
 
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	ref := tx.Ref()
 	root := ref.PayloadCID

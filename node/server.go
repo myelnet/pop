@@ -258,7 +258,6 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 		if cacheRF > 12 {
 			cacheRF = 12
 		}
-		tx.SetCacheRF(cacheRF)
 
 		for part, err := mr.NextPart(); err == nil; part, err = mr.NextPart() {
 			fileReader := files.NewReaderFile(part)
@@ -286,7 +285,11 @@ func (s *server) postHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		err = tx.Commit()
+		err = tx.Commit(func(opts *exchange.DispatchOptions) {
+			opts.RF = cacheRF
+			opts.BackoffMin = 1 * time.Minute
+			opts.BackoffAttempts = 1
+		})
 		if err != nil {
 			http.Error(w, "failed to commit tx", http.StatusInternalServerError)
 			return

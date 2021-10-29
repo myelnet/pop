@@ -380,8 +380,9 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 					rootCid := link.(cidlink.Link).Cid
 					require.NoError(t, ptx.Put(KeyFromPath(fname), rootCid, int64(len(bytes))))
 
-					ptx.SetCacheRF(1)
-					require.NoError(t, ptx.Commit())
+					require.NoError(t, ptx.Commit(func(opts *DispatchOptions) {
+						opts.RF = 1
+					}))
 					ptx.WatchDispatch(func(rec PRecord) {
 						// No need to check
 					})

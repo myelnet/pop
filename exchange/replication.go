@@ -3,6 +3,7 @@ package exchange
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"sync"
 	"time"
@@ -28,7 +29,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//go:generate cbor-gen-for Request
+//go:generate cbor-gen-for Request ReplicationResponse
 
 // PopRequestProtocolID is the protocol for requesting caches to store new content
 const PopRequestProtocolID = protocol.ID("/myel/pop/request/1.0")
@@ -38,6 +39,7 @@ type Request struct {
 	Method     Method
 	PayloadCID cid.Cid
 	Size       uint64
+	Seed       []byte // is added to seed the content hash when proving a peer has the content
 }
 
 // Type defines Request as a datatransfer voucher for pulling the data from the request
@@ -54,6 +56,11 @@ const (
 	// FetchIndex is a request from one content provider to another to retrieve their index
 	FetchIndex
 )
+
+// ReplicationResponse is sent by the recipient to express if they do or do not have content
+type ReplicationResponse struct {
+	Proof *cid.Cid
+}
 
 // IndexEvt is emitted when a new index is loaded in the replication service
 type IndexEvt struct {
@@ -79,6 +86,20 @@ func (rs *RequestStream) ReadRequest() (Request, error) {
 // WriteRequest encodes and writes a Request message to a stream
 func (rs *RequestStream) WriteRequest(m Request) error {
 	return cborutil.WriteCborRPC(rs.rw, &m)
+}
+
+// ReadResponse from the replication protocol stream
+func (rs *RequestStream) ReadResponse() (ReplicationResponse, error) {
+	var r ReplicationResponse
+	if err := r.UnmarshalCBOR(rs.buf); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+// WriteResponse to the replication protocol stream
+func (rs *RequestStream) WriteResponse(r ReplicationResponse) error {
+	return cborutil.WriteCborRPC(rs.rw, &r)
 }
 
 // Close the stream
@@ -367,9 +388,19 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// TODO: validate request
 
 		// Check if we may already have this content
-		// TODO: create RefExists method
-		_, err := r.idx.GetRef(req.PayloadCID)
+		_, err := r.idx.PeekRef(req.PayloadCID)
 		if err == nil {
+			// TODO: create a proper proof using different hash than the current CID
+			err = rs.WriteResponse(ReplicationResponse{Proof: &req.PayloadCID})
+			if err != nil {
+				log.Error().Err(err).Msg("writing replication response")
+				return
+			}
+			return
+		}
+		err = rs.WriteResponse(ReplicationResponse{})
+		if err != nil {
+			log.Error().Err(err).Msg("writing replication response")
 			return
 		}
 
@@ -377,21 +408,21 @@ func (r *Replication) handleRequest(s network.Stream) {
 		// It will be automatically picked up in the TransportConfigurer
 		sid := r.ms.Next()
 		if err := r.AddStore(req.PayloadCID, sid); err != nil {
-			log.Error().Err(err).Msg("error when creating new store")
+			log.Error().Err(err).Msg("creating new store")
 			return
 		}
 
 		ctx := context.Background()
 		chid, err := r.dt.OpenPullDataChannel(ctx, p, &req, req.PayloadCID, sel.All())
 		if err != nil {
-			log.Error().Err(err).Msg("error when opening channel data channel")
+			log.Error().Err(err).Msg("opening channel data channel")
 			return
 		}
 
 		for {
 			state, err := r.dt.ChannelState(ctx, chid)
 			if err != nil {
-				log.Error().Err(err).Msg("error when fetching channel state")
+				log.Error().Err(err).Msg("fetching channel state")
 				return
 			}
 
@@ -399,7 +430,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 			case datatransfer.Failed, datatransfer.Cancelled:
 				err = r.idx.DropRef(state.BaseCID())
 				if err != nil {
-					log.Error().Err(err).Msg("error when droping ref")
+					log.Error().Err(err).Msg("droping ref")
 				}
 				return
 
@@ -408,11 +439,11 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				keys, err := utils.MapLoadableKeys(req.PayloadCID, store.LinkSystem)
 				if err != nil {
-					log.Debug().Err(err).Msg("error when loading keys")
+					log.Debug().Err(err).Msg("loading keys")
 				}
 
 				if err := utils.MigrateBlocks(ctx, store.Bstore, r.bs); err != nil {
-					log.Error().Err(err).Msg("error when migrating blocks")
+					log.Error().Err(err).Msg("migrating blocks")
 					// if we fail migrating the blocks we shouldn't set the ref
 					return
 				}
@@ -425,11 +456,11 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 				err = r.idx.SetRef(ref)
 				if err != nil {
-					log.Error().Err(err).Msg("error when setting ref")
+					log.Error().Err(err).Msg("setting ref")
 				}
 
 				if err := r.ms.Delete(sid); err != nil {
-					log.Error().Err(err).Msg("error when deleting store")
+					log.Error().Err(err).Msg("deleting store")
 				}
 				return
 			}
@@ -445,18 +476,18 @@ type PRecord struct {
 
 // DispatchOptions exposes parameters to affect the duration of a Dispatch operation
 type DispatchOptions struct {
-	BackoffMin     time.Duration
-	BackoffAttemps int
-	RF             int
-	StoreID        multistore.StoreID
+	BackoffMin      time.Duration
+	BackoffAttempts int
+	RF              int
+	StoreID         multistore.StoreID
 }
 
 // DefaultDispatchOptions provides useful defaults
 // We can change these if the content requires a long transfer time
 var DefaultDispatchOptions = DispatchOptions{
-	BackoffMin:     5 * time.Second,
-	BackoffAttemps: 4,
-	RF:             6,
+	BackoffMin:      5 * time.Second,
+	BackoffAttempts: 4,
+	RF:              6,
 }
 
 // Dispatch to the network until we have propagated the content to enough peers
@@ -512,7 +543,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 	requests:
 		for {
 			// Give up after 6 attempts. Maybe should make this customizable for servers that can afford it
-			if int(b.Attempt()) > opt.BackoffAttemps {
+			if int(b.Attempt()) > opt.BackoffAttempts {
 				return
 			}
 			// Select the providers we want to send to minus those we already confirmed
@@ -526,7 +557,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 			}
 			if len(providers) > 0 {
 				// sendAllRequests
-				r.sendAllRequests(req, providers)
+				go r.sendAllRequests(req, providers, resChan)
 			}
 
 			delay := b.Duration()
@@ -551,17 +582,32 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 	return out, nil
 }
 
-func (r *Replication) sendAllRequests(req Request, peers []peer.ID) {
+func (r *Replication) sendAllRequests(req Request, peers []peer.ID, resChan chan<- PRecord) {
 	for _, p := range peers {
+		// seed the request with some random bytes
+		seed := make([]byte, 16)
+		rand.Read(seed)
+		req.Seed = seed
+		// TODO: compute the content hash with the seed
 		stream, err := r.NewRequestStream(p)
 		if err != nil {
 			continue
 		}
 		err = stream.WriteRequest(req)
-		stream.Close()
 		if err != nil {
 			continue
 		}
+		res, err := stream.ReadResponse()
+		if err != nil {
+			log.Error().Err(err).Msg("reading response")
+		}
+		if res.Proof != nil {
+			resChan <- PRecord{
+				Provider:   p,
+				PayloadCID: req.PayloadCID,
+			}
+		}
+		stream.Close()
 	}
 }
 

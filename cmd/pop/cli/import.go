@@ -6,13 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
 var importArgs struct {
-	cacheRF int
+	cacheRF    int
+	attempts   int
+	backoffMin time.Duration
 }
 
 var importCmd = &ffcli.Command{
@@ -28,6 +31,8 @@ The 'pop import <path-to-car>' directly imports archived DAGs to the blockstore.
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("import", flag.ExitOnError)
 		fs.IntVar(&importArgs.cacheRF, "cache-rf", 0, "number of providers to replicate the content to")
+		fs.IntVar(&importArgs.attempts, "attempts", 0, "number of attempts until we reach the desired replication factor. 0 will be ignored")
+		fs.DurationVar(&importArgs.backoffMin, "backoff-min", 3*time.Minute, "minimum delay to wait before trying again")
 		return fs
 	})(),
 }
@@ -44,7 +49,12 @@ func runImport(ctx context.Context, args []string) error {
 	})
 	go receive(ctx, cc, c)
 
-	cc.Import(&node.ImportArgs{Path: args[0], CacheRF: importArgs.cacheRF})
+	cc.Import(&node.ImportArgs{
+		Path:       args[0],
+		CacheRF:    importArgs.cacheRF,
+		Attempts:   importArgs.attempts,
+		BackoffMin: importArgs.backoffMin,
+	})
 
 	for {
 		select {

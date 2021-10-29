@@ -160,7 +160,6 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 		deals:      e.dmgr,
 		index:      e.idx,
 		repl:       e.rpl,
-		cacheRF:    6,
 		codec:      0x71,
 		clientAddr: e.opts.Wallet.DefaultAddress(),
 		sel:        selectors.All(),
