@@ -10,6 +10,8 @@ builds:
       - linux
     goarch:
       - amd64
+    ldflags:
+      - ${LDFLAGS}
   - id: "pop2"
     binary: pop-arm64-linux
     main: "./cmd/pop"
@@ -21,6 +23,8 @@ builds:
       - linux
     goarch:
       - arm64
+    ldflags:
+      - ${LDFLAGS}
   - id: "pop3"
     binary: pop-amd64-darwin
     main: "./cmd/pop"
@@ -32,6 +36,8 @@ builds:
       - darwin
     goarch:
       - amd64
+    ldflags:
+      - ${LDFLAGS}
   - id: "pop4"
     binary: pop-arm64-darwin
     main: "./cmd/pop"
@@ -43,14 +49,10 @@ builds:
       - darwin
     goarch:
       - arm64
+    ldflags:
+      - ${LDFLAGS}
 archives:
   - format: binary
-  # - replacements:
-  #     darwin: Darwin
-  #     linux: Linux
-  #     windows: Windows
-  #     386: i386
-  #     amd64: x86_64
 checksum:
   name_template: 'checksums.txt'
 snapshot:
