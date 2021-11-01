@@ -489,6 +489,9 @@ func TestImport(t *testing.T) {
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
 
+	// Let all the peers fill the table
+	time.Sleep(time.Second)
+
 	res := make(chan *ImportResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.ImportResult.Err, "")
