@@ -69,7 +69,9 @@ func TestTx(t *testing.T) {
 	require.Equal(t, size, int64(56000))
 
 	// Commit the transaction will dipatch the content to the network
-	require.NoError(t, tx.Commit())
+	require.NoError(t, tx.Commit(func(opts *DispatchOptions) {
+		opts.RF = 6
+	}))
 
 	var records []PRecord
 	tx.WatchDispatch(func(rec PRecord) {
@@ -327,7 +329,6 @@ func TestMapFieldSelector(t *testing.T) {
 		rootCid := link.(cidlink.Link).Cid
 		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 
@@ -403,7 +404,6 @@ func TestMultiTx(t *testing.T) {
 		rootCid := link.(cidlink.Link).Cid
 		require.NoError(t, tx.Put(KeyFromPath(p), rootCid, int64(len(bytes))))
 	}
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, pn.Index().SetRef(tx.Ref()))
 	require.NoError(t, tx.Close())
@@ -459,7 +459,6 @@ func TestTxGetEntries(t *testing.T) {
 	_, filepaths := genTestFiles(t)
 
 	tx := pn.Tx(ctx)
-	tx.SetCacheRF(0)
 	for _, p := range filepaths {
 		link, bytes := n1.LoadFileToStore(ctx, t, tx.Store(), p)
 		rootCid := link.(cidlink.Link).Cid

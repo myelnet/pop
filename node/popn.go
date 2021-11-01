@@ -598,8 +598,11 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		sendErr(ErrNoTx)
 		return
 	}
-	nd.tx.SetCacheRF(args.CacheRF)
-	err := nd.tx.Commit()
+	err := nd.tx.Commit(func(opts *exchange.DispatchOptions) {
+		opts.RF = args.CacheRF
+		opts.BackoffMin = args.BackoffMin
+		opts.BackoffAttempts = args.Attempts
+	})
 	if err != nil {
 		nd.txmu.Unlock()
 		sendErr(err)
@@ -1063,8 +1066,10 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 	}
 
 	root := br.Roots[0]
-	tx := nd.exch.Tx(ctx, exchange.WithRoot(root), exchange.WithSize(info.Size()))
-	tx.SetCacheRF(args.CacheRF)
+	tx := nd.exch.Tx(ctx,
+		exchange.WithRoot(root),
+		exchange.WithSize(info.Size()),
+	)
 
 	err = tx.Store().Bstore.PutMany(blks)
 	if err != nil {
@@ -1072,7 +1077,11 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 		return
 	}
 
-	err = tx.Commit()
+	err = tx.Commit(func(opts *exchange.DispatchOptions) {
+		opts.RF = args.CacheRF
+		opts.BackoffAttempts = args.Attempts
+		opts.BackoffMin = args.BackoffMin
+	})
 	if err != nil {
 		sendErr(err)
 		return

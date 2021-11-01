@@ -92,7 +92,6 @@ func runBootstrapSupply(runenv *runtime.RunEnv, initCtx *run.InitContext) error 
 				return err
 			}
 
-			tx.SetCacheRF(0)
 			err = tx.Commit()
 			if err != nil {
 				return err

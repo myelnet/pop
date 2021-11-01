@@ -6,14 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
 var commArgs struct {
-	cacheOnly bool
-	cacheRF   int
+	cacheRF    int
+	attempts   int
+	backoffMin time.Duration
 }
 
 var commCmd = &ffcli.Command{
@@ -30,6 +32,8 @@ with a given level of cashing. By default it will attempt multiple storage deals
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("commit", flag.ExitOnError)
 		fs.IntVar(&commArgs.cacheRF, "cache-rf", 2, "number of cache providers to dispatch to")
+		fs.IntVar(&commArgs.attempts, "attempts", 0, "number of attempts until we reach the desired replication factor. 0 will be ignored")
+		fs.DurationVar(&commArgs.backoffMin, "backoff-min", 3*time.Minute, "minimum delay to wait before trying again")
 		return fs
 	})(),
 }
@@ -47,7 +51,9 @@ func runCommit(ctx context.Context, args []string) error {
 	go receive(ctx, cc, c)
 
 	cc.Commit(&node.CommArgs{
-		CacheRF: commArgs.cacheRF,
+		CacheRF:    commArgs.cacheRF,
+		Attempts:   commArgs.attempts,
+		BackoffMin: commArgs.backoffMin,
 	})
 	for {
 		select {

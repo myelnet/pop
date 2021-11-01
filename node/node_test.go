@@ -489,6 +489,9 @@ func TestImport(t *testing.T) {
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
 
+	// Let all the peers fill the table
+	time.Sleep(time.Second)
+
 	res := make(chan *ImportResult, 3)
 	cn.notify = func(n Notify) {
 		require.Equal(t, n.ImportResult.Err, "")
@@ -680,7 +683,6 @@ func TestPreload(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Put("third", cid3, 26000))
 
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	ref := tx.Ref()
 	root := ref.PayloadCID
@@ -842,7 +844,6 @@ func TestLoadKey(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Put("third", cid3, 26000))
 
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	ref := tx.Ref()
 	root := ref.PayloadCID
@@ -959,7 +960,6 @@ func TestLoadAll(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Put("third", cid3, 26000))
 
-	tx.SetCacheRF(0)
 	require.NoError(t, tx.Commit())
 	ref := tx.Ref()
 	root := ref.PayloadCID

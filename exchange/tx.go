@@ -96,8 +96,6 @@ type Tx struct {
 	chunkSize int64
 	// codec defines what IPLD multicodec to use for assembling the entries
 	codec uint64
-	// cacheRF is the cache replication factor used when committing to storage
-	cacheRF int
 	// sel is the selector used to select specific nodes only to retrieve. if not provided we select
 	// all the nodes by default
 	sel ipld.Node
@@ -167,13 +165,6 @@ func WithCodec(codec uint64) TxOption {
 	return func(tx *Tx) {
 		tx.codec = codec
 	}
-}
-
-// SetCacheRF sets the cache replication factor before committing
-// we don't set it as an option as the value may only be known when committing
-// Setting a replication factor of 0 will not trigger any network requests when committing
-func (tx *Tx) SetCacheRF(rf int) {
-	tx.cacheRF = rf
 }
 
 // Put a DAG for a given key in the transaction
@@ -369,8 +360,11 @@ func (tx *Tx) Ref() *DataRef {
 	}
 }
 
+// DispatchOption is a functional option for customizing DispatchOptions
+type DispatchOption = func(*DispatchOptions)
+
 // Commit sends the transaction on the exchange
-func (tx *Tx) Commit() error {
+func (tx *Tx) Commit(dopts ...DispatchOption) error {
 	if tx.Err != nil {
 		return tx.Err
 	}
@@ -378,9 +372,15 @@ func (tx *Tx) Commit() error {
 	tx.committed = true
 
 	opts := DefaultDispatchOptions
-	if tx.cacheRF > 0 {
-		opts.RF = tx.cacheRF
-		opts.StoreID = tx.storeID
+	// force default to 0
+	opts.RF = 0
+	opts.StoreID = tx.storeID
+
+	for _, opt := range dopts {
+		opt(&opts)
+	}
+
+	if opts.RF > 0 {
 		var err error
 		tx.dispatching, err = tx.repl.Dispatch(tx.root, uint64(tx.size), opts)
 		if err != nil {

@@ -506,11 +506,20 @@ func TestMultiDispatchStreams(t *testing.T) {
 		err := tnode.Dt.Stop(ctx)
 		require.NoError(t, err)
 	})
-	tnode.LoadFileToNewStore(ctx, t, fname)
+	_, sid, _ := tnode.LoadFileToNewStore(ctx, t, fname)
+	store, err := tnode.Ms.Get(sid)
+	require.NoError(t, err)
+	// migrate blocks over to global store
+	require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, tnode.Bs))
+
 	idx2, err := NewIndex(tnode.Ds, tnode.Bs)
 	require.NoError(t, err)
+	require.NoError(t, idx2.SetRef(&DataRef{
+		PayloadCID:  rootCid,
+		PayloadSize: int64(256000),
+	}))
 	opts2 := Options{Regions: regions, MultiStore: tnode.Ms, Blockstore: tnode.Bs}
-	hn1, err := NewReplication(tnode.Host, idx, tnode.Dt, NewMockRetriever(tnode.Dt, idx2), opts2)
+	hn1, err := NewReplication(tnode.Host, idx2, tnode.Dt, NewMockRetriever(tnode.Dt, idx2), opts2)
 	require.NoError(t, err)
 	require.NoError(t, hn1.Start(ctx))
 	receivers[tnode.Host.ID()] = hn1
@@ -525,6 +534,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// Wait for all peers to be received in the peer manager
+	// if the peer already has it we will receive a confirm message
 	for i := 0; i < 7; i++ {
 		select {
 		case <-sub.Out():
@@ -536,16 +546,19 @@ func TestMultiDispatchStreams(t *testing.T) {
 	dopts := DefaultDispatchOptions
 	dopts.StoreID = storeID
 	// hn will tell dopts.RF (6) of its neighbors that it has a new rootCid and expects them to retrieve it
-	res, err := hn.Dispatch(rootCid, uint64(len(origBytes)), dopts)
+	out, err := hn.Dispatch(rootCid, uint64(len(origBytes)), dopts)
 	require.NoError(t, err)
 
 	var recs []PRecord
-	for rec := range res {
-		recs = append(recs, rec)
+	for pr := range out {
+		recs = append(recs, pr)
 	}
 	require.Equal(t, len(recs), 6)
 
-	time.Sleep(time.Second)
+	// delay a bit to avoid race condition since out callbacks are triggered upon transfers completed on the
+	// client side not provider
+	time.Sleep(300 * time.Millisecond)
+
 	for _, r := range recs {
 		p := tnds[r.Provider]
 		p.VerifyFileTransferred(ctx, t, p.DAG, rootCid, origBytes)
@@ -587,10 +600,10 @@ func TestSendDispatchNoPeers(t *testing.T) {
 	require.NoError(t, supply.Start(bgCtx))
 
 	options := DispatchOptions{
-		BackoffMin:     10 * time.Millisecond,
-		BackoffAttemps: 4,
-		RF:             5,
-		StoreID:        storeID,
+		BackoffMin:      10 * time.Millisecond,
+		BackoffAttempts: 4,
+		RF:              5,
+		StoreID:         storeID,
 	}
 	res, err := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
 	require.NoError(t, err)
@@ -720,10 +733,10 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	}
 	// get 5 requests and give up after 4 attemps
 	options := DispatchOptions{
-		BackoffMin:     200 * time.Millisecond,
-		BackoffAttemps: 4,
-		RF:             7,
-		StoreID:        storeID,
+		BackoffMin:      200 * time.Millisecond,
+		BackoffAttempts: 4,
+		RF:              7,
+		StoreID:         storeID,
 	}
 	res, err := supply.Dispatch(rootCid, uint64(len(origBytes)), options)
 	require.NoError(t, err)
