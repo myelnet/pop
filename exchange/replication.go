@@ -480,6 +480,7 @@ type DispatchOptions struct {
 	BackoffAttempts int
 	RF              int
 	StoreID         multistore.StoreID
+	Peers           []peer.ID // optional peers to target
 }
 
 // DefaultDispatchOptions provides useful defaults
@@ -548,7 +549,7 @@ func (r *Replication) Dispatch(root cid.Cid, size uint64, opt DispatchOptions) (
 			}
 			// Select the providers we want to send to minus those we already confirmed
 			// received the requests
-			providers := r.pm.Peers(opt.RF-n, r.rgs, rcv)
+			providers := r.pm.Peers(opt.RF-n, r.rgs, rcv, opt.Peers)
 
 			// Authorize the transfer
 			for _, p := range providers {

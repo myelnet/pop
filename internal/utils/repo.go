@@ -136,3 +136,19 @@ var HAMTHashOption = hamt.UseHashFunction(func(input []byte) []byte {
 	res := sha256.Sum256(input)
 	return res[:]
 })
+
+// StringsToPeerIDs parses a list of strings into peer IDs
+func StringsToPeerIDs(strIDs []string) ([]peer.ID, error) {
+	var peers []peer.ID
+	for _, s := range strIDs {
+		if s == "" {
+			continue
+		}
+		pid, err := peer.Decode(s)
+		if err != nil {
+			return peers, fmt.Errorf("failed to decode peer %s: %w", s, err)
+		}
+		peers = append(peers, pid)
+	}
+	return peers, nil
+}

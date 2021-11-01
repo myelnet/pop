@@ -16,6 +16,7 @@ var importArgs struct {
 	cacheRF    int
 	attempts   int
 	backoffMin time.Duration
+	peers      string
 }
 
 var importCmd = &ffcli.Command{
@@ -33,6 +34,7 @@ The 'pop import <path-to-car>' directly imports archived DAGs to the blockstore.
 		fs.IntVar(&importArgs.cacheRF, "cache-rf", 0, "number of providers to replicate the content to")
 		fs.IntVar(&importArgs.attempts, "attempts", 0, "number of attempts until we reach the desired replication factor. 0 will be ignored")
 		fs.DurationVar(&importArgs.backoffMin, "backoff-min", 3*time.Minute, "minimum delay to wait before trying again")
+		fs.StringVar(&importArgs.peers, "peers", "", "list of comma separated peer ids to include in the replication set")
 		return fs
 	})(),
 }
@@ -54,6 +56,7 @@ func runImport(ctx context.Context, args []string) error {
 		CacheRF:    importArgs.cacheRF,
 		Attempts:   importArgs.attempts,
 		BackoffMin: importArgs.backoffMin,
+		Peers:      strings.Split(importArgs.peers, ","),
 	})
 
 	for {

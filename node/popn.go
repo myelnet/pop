@@ -592,16 +592,23 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 			},
 		})
 	}
+	peers, err := utils.StringsToPeerIDs(args.Peers)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
 	nd.txmu.Lock()
 	if nd.tx == nil {
 		nd.txmu.Unlock()
 		sendErr(ErrNoTx)
 		return
 	}
-	err := nd.tx.Commit(func(opts *exchange.DispatchOptions) {
+	err = nd.tx.Commit(func(opts *exchange.DispatchOptions) {
 		opts.RF = args.CacheRF
 		opts.BackoffMin = args.BackoffMin
 		opts.BackoffAttempts = args.Attempts
+		opts.Peers = peers
 	})
 	if err != nil {
 		nd.txmu.Unlock()
@@ -1030,6 +1037,12 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 			}})
 	}
 
+	peers, err := utils.StringsToPeerIDs(args.Peers)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
 	f, err := os.Open(args.Path)
 	if err != nil {
 		sendErr(err)
@@ -1081,6 +1094,7 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 		opts.RF = args.CacheRF
 		opts.BackoffAttempts = args.Attempts
 		opts.BackoffMin = args.BackoffMin
+		opts.Peers = peers
 	})
 	if err != nil {
 		sendErr(err)

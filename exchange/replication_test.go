@@ -795,14 +795,14 @@ func TestPeerMgr(t *testing.T) {
 	repl := receivers[0]
 	ignore := make(map[peer.ID]bool)
 
-	peers := repl.pm.Peers(6, regions, ignore)
+	peers := repl.pm.Peers(6, regions, ignore, []peer.ID{})
 	require.Equal(t, 6, len(peers))
 
 	// Let's ignore a couple
 	ignore[peers[0]] = true
 	ignore[peers[1]] = true
 
-	peers2 := repl.pm.Peers(6, regions, ignore)
+	peers2 := repl.pm.Peers(6, regions, ignore, []peer.ID{})
 	require.Equal(t, 6, len(peers2))
 	for _, pid := range peers2 {
 		if pid == peers[0] || pid == peers[1] {
@@ -811,10 +811,19 @@ func TestPeerMgr(t *testing.T) {
 	}
 
 	// Try to get more than available
-	peers3 := repl.pm.Peers(10, regions, ignore)
+	peers3 := repl.pm.Peers(10, regions, ignore, []peer.ID{})
 	require.Equal(t, 8, len(peers3))
 
 	// 0 peers should return 0 peers
-	peers4 := repl.pm.Peers(0, regions, ignore)
+	peers4 := repl.pm.Peers(0, regions, ignore, []peer.ID{})
 	require.Equal(t, 0, len(peers4))
+
+	// we can init with some peers
+	peers5 := repl.pm.Peers(3, regions, map[peer.ID]bool{}, []peer.ID{peers3[5], peers3[6], peers3[7]})
+	require.Equal(t, 3, len(peers5))
+	for _, pid := range peers5 {
+		if pid != peers3[5] && pid != peers3[6] && pid != peers3[7] {
+			t.Fatal("Peers did not include initial peers")
+		}
+	}
 }
