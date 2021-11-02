@@ -14,6 +14,13 @@ func All() ipld.Node {
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 }
 
+// AllWithDepth reaches all the blocks within the given depth
+func AllWithDepth(depth int64) ipld.Node {
+	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
+	return ssb.ExploreRecursive(selector.RecursionLimitDepth(depth),
+		ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
+}
+
 // Entries selects all entries of an IPLD collection without traversing any data linked in the entries
 // Limitting the recursion depth to 1 will reach all the entries of a map but not beyond.
 func Entries() ipld.Node {
