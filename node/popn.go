@@ -341,10 +341,13 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	// remove unwanted blocks that might be in the blockstore but are removed from the index
-	err = nd.exch.Index().CleanBlockStore(ctx)
-	if err != nil {
-		return nil, err
-	}
+	// TODO: this is shitty for performance
+	go func() {
+		err = nd.exch.Index().CleanBlockStore(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("cleaning blockstore")
+		}
+	}()
 
 	nd.metrics = metrics.New(opts.Metrics)
 
