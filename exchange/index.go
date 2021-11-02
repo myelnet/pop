@@ -205,7 +205,7 @@ func (idx *Index) loadFromStore() error {
 		}
 		idx.root, err = idx.LoadRoot(r, idx.store)
 		if err != nil {
-			return err
+			return fmt.Errorf("loading root: %w", err)
 		}
 		idx.rootCID = r
 	}
