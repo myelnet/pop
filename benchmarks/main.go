@@ -125,7 +125,7 @@ func run() error {
 	roots = append(roots, Offer{
 		Root:           root,
 		Selector:       "/",
-		PeerAddr:       addrs[0].String(),
+		PeerAddr:       addrs[1].String(), // use localhost
 		Size:           cr.Size,
 		PaymentAddress: wl.DefaultAddress,
 	})
