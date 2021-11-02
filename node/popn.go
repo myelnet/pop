@@ -85,6 +85,9 @@ var (
 
 	// ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
 	ErrInvalidPeer = errors.New("invalid peer ID or address")
+
+	// ErrCacheRFInvalid is returned if the cache RF is inconsistant with the specified peers
+	ErrCacheRFInvalid = errors.New("Cache replication factor is smaller than specified peers")
 )
 
 var (
@@ -597,6 +600,10 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 		sendErr(err)
 		return
 	}
+	if len(peers) > args.CacheRF {
+		sendErr(ErrCacheRFInvalid)
+		return
+	}
 
 	nd.txmu.Lock()
 	if nd.tx == nil {
@@ -1040,6 +1047,11 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 	peers, err := utils.StringsToPeerIDs(args.Peers)
 	if err != nil {
 		sendErr(err)
+		return
+	}
+
+	if len(peers) > args.CacheRF {
+		sendErr(ErrCacheRFInvalid)
 		return
 	}
 
