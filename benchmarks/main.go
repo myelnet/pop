@@ -42,12 +42,12 @@ type Content struct {
 }
 
 func run() error {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))
+	// opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	// allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	// defer cancel()
 
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	// create a temp repo
@@ -121,11 +121,14 @@ func run() error {
 	nd.WalletList(ctx, nil)
 	wl := <-wres
 
+	peerAddr := addrs[1].String()
+	fmt.Println("peer address", peerAddr)
+
 	var roots []Offer
 	roots = append(roots, Offer{
 		Root:           root,
 		Selector:       "/",
-		PeerAddr:       addrs[1].String(), // use localhost
+		PeerAddr:       peerAddr, // use localhost
 		Size:           cr.Size,
 		PaymentAddress: wl.DefaultAddress,
 	})
@@ -186,18 +189,23 @@ func run() error {
 	})
 	go func() {
 		i := 0
+		total := 0.0
 		for {
 			select {
 			case res := <-success:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
-				fmt.Println("requestTime", res.Timing.RequestTime)
+				fmt.Println("size", res.EncodedDataLength)
 				fmt.Println("receiveHeadersEnd", res.Timing.ReceiveHeadersEnd)
+				speed := res.EncodedDataLength / res.Timing.ReceiveHeadersEnd
+				total += speed
+
 			case err := <-failure:
 				fmt.Println("Failure:", err.ErrorText, err.RequestID)
 			}
 			i++
 			if i == len(assets) {
+				fmt.Println("Average speed", total/float64(i))
 				close(done)
 				return
 			}
