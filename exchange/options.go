@@ -151,7 +151,7 @@ func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchang
 	// Setup datatransfer network
 	dtNet := dtnet.NewFromLibp2pHost(h)
 	// Setup graphsync transport
-	tp := gstransport.NewTransport(h.ID(), gs)
+	tp := gstransport.NewTransport(h.ID(), gs, dtNet)
 	// Build the manager
 	dt, err := dtfimpl.NewDataTransfer(dtDs, cidDir, dtNet, tp)
 	if err != nil {
