@@ -180,7 +180,7 @@ func NewIndex(ds datastore.Batching, bstore blockstore.Blockstore, opts ...Index
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading linked list: %w", err)
 	}
 
 	return idx, nil
