@@ -569,6 +569,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			log.Info().Str("key", key).Msg("removed from index")
 			return traversal.SkipMe{}
 		}
 		return ferr
