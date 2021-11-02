@@ -428,10 +428,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 
 			switch state.Status() {
 			case datatransfer.Failed, datatransfer.Cancelled:
-				err = r.idx.DropRef(state.BaseCID())
-				if err != nil {
-					log.Error().Err(err).Msg("droping ref")
-				}
+				log.Error().Str("message", state.Message()).Str("status", datatransfer.Statuses[state.Status()]).Msg("transfer failed")
 				return
 
 			case datatransfer.Completed:

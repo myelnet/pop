@@ -115,7 +115,7 @@ func (tn *TestNode) SetupDataTransfer(ctx context.Context, t testing.TB) {
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
 	tn.DTStore = namespace.Wrap(tn.Ds, datastore.NewKey("DataTransfer"))
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.LinkSys)
-	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs)
+	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs, tn.DTNet)
 	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTTmpDir, tn.DTNet, dtTransport)
 	require.NoError(t, err)
 
