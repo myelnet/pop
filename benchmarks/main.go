@@ -175,19 +175,25 @@ func run() error {
 	})
 	go func() {
 		i := 0
-		for res := range success {
-			fmt.Println("Success:", res.URL, i)
+		for {
+			select {
+			case res := <-success:
+				fmt.Println("Response:", res.URL, i)
+				fmt.Println("requestTime", res.Timing.RequestTime)
+				fmt.Println("receiveHeadersEnd", res.Timing.ReceiveHeadersEnd)
+			case err := <-failure:
+				fmt.Println("Failure:", err.ErrorText, err.RequestID)
+			}
 			i++
+			if i == len(assets) {
+				close(done)
+				return
+			}
 		}
 	}()
 	go func() {
 		for req := range sent {
 			fmt.Println("Request:", req.Request.URL, req.RequestID)
-		}
-	}()
-	go func() {
-		for err := range failure {
-			fmt.Println("Failure:", err.ErrorText, err.RequestID)
 		}
 	}()
 
