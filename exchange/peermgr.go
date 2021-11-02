@@ -107,13 +107,25 @@ func (pm *PeerMgr) Run(ctx context.Context) error {
 }
 
 // Peers returns n active peers for a given list of regions and peers to ignore
-func (pm *PeerMgr) Peers(n int, rl []Region, ignore map[peer.ID]bool) []peer.ID {
+func (pm *PeerMgr) Peers(n int, rl []Region, ignore map[peer.ID]bool, init []peer.ID) []peer.ID {
 	var peers []peer.ID
 	if n == 0 {
 		return peers
 	}
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+	// add initial peers first
+	for _, p := range init {
+		// peers not connected will be ignored
+		if _, ok := pm.peers[p]; ok && !ignore[p] {
+			peers = append(peers, p)
+		}
+	}
+	// Check if we have enough peers and return
+	if len(peers) == n {
+		return peers
+	}
+
 	for _, r := range rl {
 		for p, v := range pm.peers {
 			if ignore[p] {

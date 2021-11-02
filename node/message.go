@@ -55,6 +55,7 @@ type CommArgs struct {
 	CacheRF    int // CacheRF is the cache replication factor or number of cache provider will request
 	Attempts   int
 	BackoffMin time.Duration
+	Peers      []string
 }
 
 // GetArgs get passed to the Get command
@@ -82,6 +83,7 @@ type ImportArgs struct {
 	CacheRF    int
 	Attempts   int
 	BackoffMin time.Duration
+	Peers      []string
 }
 
 // PayArgs provides params for controlling a payment channel

@@ -16,6 +16,7 @@ var commArgs struct {
 	cacheRF    int
 	attempts   int
 	backoffMin time.Duration
+	peers      string
 }
 
 var commCmd = &ffcli.Command{
@@ -34,6 +35,7 @@ with a given level of cashing. By default it will attempt multiple storage deals
 		fs.IntVar(&commArgs.cacheRF, "cache-rf", 2, "number of cache providers to dispatch to")
 		fs.IntVar(&commArgs.attempts, "attempts", 0, "number of attempts until we reach the desired replication factor. 0 will be ignored")
 		fs.DurationVar(&commArgs.backoffMin, "backoff-min", 3*time.Minute, "minimum delay to wait before trying again")
+		fs.StringVar(&commArgs.peers, "peers", "", "list of comma separated peer ids to include in the replication set")
 		return fs
 	})(),
 }
@@ -54,6 +56,7 @@ func runCommit(ctx context.Context, args []string) error {
 		CacheRF:    commArgs.cacheRF,
 		Attempts:   commArgs.attempts,
 		BackoffMin: commArgs.backoffMin,
+		Peers:      strings.Split(commArgs.peers, ","),
 	})
 	for {
 		select {

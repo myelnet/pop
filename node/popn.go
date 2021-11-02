@@ -85,6 +85,9 @@ var (
 
 	// ErrInvalidPeer is returned when trying to ping a peer with invalid peer ID or address
 	ErrInvalidPeer = errors.New("invalid peer ID or address")
+
+	// ErrCacheRFInvalid is returned if the cache RF is inconsistant with the specified peers
+	ErrCacheRFInvalid = errors.New("Cache replication factor is smaller than specified peers")
 )
 
 var (
@@ -592,16 +595,27 @@ func (nd *node) Commit(ctx context.Context, args *CommArgs) {
 			},
 		})
 	}
+	peers, err := utils.StringsToPeerIDs(args.Peers)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+	if len(peers) > args.CacheRF {
+		sendErr(ErrCacheRFInvalid)
+		return
+	}
+
 	nd.txmu.Lock()
 	if nd.tx == nil {
 		nd.txmu.Unlock()
 		sendErr(ErrNoTx)
 		return
 	}
-	err := nd.tx.Commit(func(opts *exchange.DispatchOptions) {
+	err = nd.tx.Commit(func(opts *exchange.DispatchOptions) {
 		opts.RF = args.CacheRF
 		opts.BackoffMin = args.BackoffMin
 		opts.BackoffAttempts = args.Attempts
+		opts.Peers = peers
 	})
 	if err != nil {
 		nd.txmu.Unlock()
@@ -1030,6 +1044,17 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 			}})
 	}
 
+	peers, err := utils.StringsToPeerIDs(args.Peers)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	if len(peers) > args.CacheRF {
+		sendErr(ErrCacheRFInvalid)
+		return
+	}
+
 	f, err := os.Open(args.Path)
 	if err != nil {
 		sendErr(err)
@@ -1081,6 +1106,7 @@ func (nd *node) Import(ctx context.Context, args *ImportArgs) {
 		opts.RF = args.CacheRF
 		opts.BackoffAttempts = args.Attempts
 		opts.BackoffMin = args.BackoffMin
+		opts.Peers = peers
 	})
 	if err != nil {
 		sendErr(err)

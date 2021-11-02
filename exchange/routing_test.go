@@ -49,7 +49,7 @@ func noop(*testutil.TestNode) {}
 
 func calcResponse(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.Offer, error) {
 	return deal.Offer{
-		PayloadCID:                 blockGen.Next().Cid(),
+		PayloadCID:                 q.PayloadCID,
 		Size:                       uint64(268009),
 		PaymentAddress:             address.TestAddress,
 		MinPricePerByte:            abi.NewTokenAmount(2),
@@ -286,6 +286,8 @@ func TestMessageForwarding(t *testing.T) {
 	mn := mocknet.New(bgCtx)
 
 	cnode := testutil.NewTestNode(mn, t)
+	// create a random block to mock the content
+	blk := testutil.CreateRandomBlock(t, cnode.Bs)
 	ps, err := pubsub.NewGossipSub(ctx, cnode.Host)
 	require.NoError(t, err)
 	// We don't need store getters or address getters as we're manually sending responses in
@@ -333,7 +335,7 @@ func TestMessageForwarding(t *testing.T) {
 			addrs, _ := net.Addrs()
 
 			answer := deal.Offer{
-				PayloadCID:                 blockGen.Next().Cid(),
+				PayloadCID:                 blk.Cid(),
 				ID:                         "02Qm",
 				PeerAddr:                   addrs[0].Bytes(),
 				Size:                       1600,
