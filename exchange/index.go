@@ -550,7 +550,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 
 	cidSet := cid.NewSet()
 
-	err := utils.WalkDAG(idx.rootCID, idx.bstore, sel.AllWithDepth(2), func(blk blocks.Block) error {
+	err := utils.WalkDAG(idx.rootCID, idx.bstore, sel.All(), func(blk blocks.Block) error {
 		key := cid.NewCidV1(cid.Raw, blk.Cid().Hash())
 		cidSet.Add(key)
 		return nil
