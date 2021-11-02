@@ -557,6 +557,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 	}, func(k cid.Cid, ferr error) error {
 		key := k.String()
 		ref, ok := idx.Refs[key]
+		// clean up any refs absent from the blockstore
 		if ok {
 			if _, err := idx.root.Delete(ctx, key); err != nil {
 				return err
@@ -570,9 +571,9 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 				return err
 			}
 			log.Info().Str("key", key).Msg("removed from index")
-			return traversal.SkipMe{}
 		}
-		return ferr
+		// missing blocks will not fail the traversal
+		return traversal.SkipMe{}
 	})
 	if err != nil {
 		return err
