@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -41,7 +42,12 @@ type Content struct {
 }
 
 func run() error {
-	ctx, cancel := chromedp.NewContext(context.Background())
+	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+
+	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	// create a temp repo
@@ -171,6 +177,11 @@ func run() error {
 			}
 		case *network.EventLoadingFailed:
 			failure <- ev
+		case *runtime.EventConsoleAPICalled:
+			fmt.Printf("* console.%s call:\n", ev.Type)
+			for _, arg := range ev.Args {
+				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
+			}
 		}
 	})
 	go func() {
@@ -179,6 +190,7 @@ func run() error {
 			select {
 			case res := <-success:
 				fmt.Println("Response:", res.URL, i)
+				fmt.Println("status", res.Status)
 				fmt.Println("requestTime", res.Timing.RequestTime)
 				fmt.Println("receiveHeadersEnd", res.Timing.ReceiveHeadersEnd)
 			case err := <-failure:
