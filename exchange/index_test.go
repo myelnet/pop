@@ -719,3 +719,39 @@ func TestCleanBlockStore(t *testing.T) {
 	idx, err = NewIndex(ds, bs)
 	require.NoError(t, err)
 }
+
+func TestCleanBlockStoreRecover(t *testing.T) {
+	ds := dss.MutexWrap(datastore.NewMapDatastore())
+	bs := blockstore.NewGCBlockstore(blockstore.NewBlockstore(ds), blockstore.NewGCLocker())
+
+	idx, err := NewIndex(ds, bs)
+	require.NoError(t, err)
+
+	// generate random block1 (codec: dagcbor)
+	blk1 := testutil.CreateRandomBlock(t, idx.Bstore())
+	require.NoError(t, idx.Bstore().Put(blk1))
+
+	// generate random block2 (codec: raw)
+	blk2 := gstestutil.GenerateBlocksOfSize(1, 10000)[0]
+	require.NoError(t, idx.Bstore().Put(blk2))
+
+	// set blk1-ref1 in index
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  blk1.Cid(),
+		PayloadSize: int64(len(blk1.RawData())),
+	}))
+
+	// set blk2-ref2 in index
+	require.NoError(t, idx.SetRef(&DataRef{
+		PayloadCID:  blk2.Cid(),
+		PayloadSize: int64(len(blk2.RawData())),
+	}))
+
+	require.NoError(t, bs.DeleteBlock(blk1.Cid()))
+
+	// should not return any error and clean it up from the blockstore
+	require.NoError(t, idx.CleanBlockStore(context.TODO()))
+
+	_, err = idx.GetRef(blk1.Cid())
+	require.Error(t, err)
+}

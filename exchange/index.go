@@ -15,6 +15,7 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	cbor "github.com/ipfs/go-ipld-cbor"
+	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/myelnet/pop/internal/utils"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/rs/zerolog/log"
@@ -493,7 +494,7 @@ func (idx *Index) tagForGC(ref *DataRef) error {
 	return utils.WalkDAG(ref.PayloadCID, idx.bstore, sel.All(), func(block blocks.Block) error {
 		idx.gcSet.Add(block.Cid())
 		return nil
-	})
+	}, nil)
 }
 
 // GC removes tagged CIDs
@@ -553,6 +554,24 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 		key := cid.NewCidV1(cid.Raw, blk.Cid().Hash())
 		cidSet.Add(key)
 		return nil
+	}, func(k cid.Cid, ferr error) error {
+		key := k.String()
+		ref, ok := idx.Refs[key]
+		if ok {
+			if _, err := idx.root.Delete(ctx, key); err != nil {
+				return err
+			}
+
+			idx.remBlistEntry(ref.bucketNode, ref)
+
+			delete(idx.Refs, key)
+			err := idx.Flush()
+			if err != nil {
+				return err
+			}
+			return traversal.SkipMe{}
+		}
+		return ferr
 	})
 	if err != nil {
 		return err
