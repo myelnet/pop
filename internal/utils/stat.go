@@ -57,17 +57,20 @@ func Stat(store *multistore.Store, root cid.Cid, sel ipld.Node) (DAGStat, error)
 		res.NumBlocks++
 
 		return nil
-	})
+	}, nil)
 
 	return res, err
 }
 
 // WalkDAG executes a DAG traversal for a given root and selector and calls a callback function for every block loaded during the traversal
+// an optional callback also returns missing block and forwards the errors
 func WalkDAG(
 	root cid.Cid,
 	bs blockstore.Blockstore,
 	sel ipld.Node,
-	f func(blocks.Block) error) error {
+	f func(blocks.Block) error,
+	missingF func(cid.Cid, error) error) error {
+
 	link := cidlink.Link{Cid: root}
 	// The root node could be a raw node so we need to select the builder accordingly
 	nodeType, err := Chooser(link, ipld.LinkContext{})
@@ -85,6 +88,9 @@ func WalkDAG(
 
 			block, err := bs.Get(c.Cid)
 			if err != nil {
+				if missingF != nil {
+					return nil, missingF(c.Cid, err)
+				}
 				return nil, err
 			}
 
@@ -290,7 +296,7 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 func MigrateSelectBlocks(from blockstore.Blockstore, to blockstore.Blockstore, root cid.Cid, sel ipld.Node) error {
 	return WalkDAG(root, from, sel, func(block blocks.Block) error {
 		return to.Put(block)
-	})
+	}, nil)
 }
 
 // CodecFromString returns a codec code from a string name
