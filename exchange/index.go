@@ -180,7 +180,7 @@ func NewIndex(ds datastore.Batching, bstore blockstore.Blockstore, opts ...Index
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading linked list: %w", err)
 	}
 
 	return idx, nil
@@ -205,7 +205,7 @@ func (idx *Index) loadFromStore() error {
 		}
 		idx.root, err = idx.LoadRoot(r, idx.store)
 		if err != nil {
-			return err
+			return fmt.Errorf("loading root: %w", err)
 		}
 		idx.rootCID = r
 	}

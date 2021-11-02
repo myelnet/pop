@@ -296,7 +296,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inializing exchange: %w", err)
 	}
 
 	if opts.PrivKey != "" {
@@ -336,12 +336,6 @@ func New(ctx context.Context, opts Options) (*node, error) {
 	}
 
 	nd.remind, err = NewRemoteIndex(opts.RemoteIndexURL, nd.host, nd.exch.Wallet(), opts.Domains)
-	if err != nil {
-		return nil, err
-	}
-
-	// remove unwanted blocks that might be in the blockstore but are removed from the index
-	err = nd.exch.Index().CleanBlockStore(ctx)
 	if err != nil {
 		return nil, err
 	}
