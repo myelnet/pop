@@ -60,7 +60,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		WithSetFunc(opts.WatchAdditionFunc),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inializing index: %w", err)
 	}
 
 	// register a pubsub topic for each region

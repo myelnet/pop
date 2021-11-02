@@ -296,7 +296,7 @@ func New(ctx context.Context, opts Options) (*node, error) {
 
 	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, eopts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inializing exchange: %w", err)
 	}
 
 	if opts.PrivKey != "" {
