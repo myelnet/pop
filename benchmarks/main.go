@@ -13,6 +13,11 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/filecoin-project/go-address"
+	"github.com/ipld/go-ipld-prime/codec/dagcbor"
+	"github.com/ipld/go-ipld-prime/datamodel"
+	"github.com/ipld/go-ipld-prime/fluent/qp"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 
@@ -37,8 +42,7 @@ type Offer struct {
 }
 
 type Content struct {
-	Roots []Offer `json:"roots"`
-	Keys  []Asset `json:"keys"`
+	Keys []Asset `json:"keys"`
 }
 
 func run() error {
@@ -124,14 +128,46 @@ func run() error {
 	peerAddr := addrs[1].String()
 	fmt.Println("peer address", peerAddr)
 
-	var roots []Offer
-	roots = append(roots, Offer{
-		Root:           root,
-		Selector:       "/",
-		PeerAddr:       peerAddr, // use localhost
-		Size:           cr.Size,
-		PaymentAddress: wl.DefaultAddress,
+	payAddr, err := address.NewFromString(wl.DefaultAddress)
+	if err != nil {
+		return err
+	}
+
+	r := node.RRecord{
+		PeerAddr: addrs[1].Bytes(),
+		PayAddr:  payAddr,
+		Size:     cr.Size,
+	}
+
+	rbuf := new(bytes.Buffer)
+	if err := r.MarshalCBOR(rbuf); err != nil {
+		return err
+	}
+
+	n, err := qp.BuildList(basicnode.Prototype.Any, 1, func(la datamodel.ListAssembler) {
+		qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
 	})
+	if err != nil {
+		return err
+	}
+
+	lbuf := new(bytes.Buffer)
+	if err := dagcbor.Encode(n, lbuf); err != nil {
+		return err
+	}
+
+	rf, err := os.Create("./static/" + root)
+	if err != nil {
+		return err
+	}
+	_, err = rf.Write(lbuf.Bytes())
+	if err != nil {
+		return err
+	}
+	if err := rf.Close(); err != nil {
+		return err
+	}
+
 	var assets []Asset
 	for _, k := range keys {
 		assets = append(assets, Asset{
@@ -141,8 +177,7 @@ func run() error {
 	}
 
 	content := Content{
-		Roots: roots,
-		Keys:  assets,
+		Keys: assets,
 	}
 
 	buf := new(bytes.Buffer)
@@ -164,6 +199,7 @@ func run() error {
 	}
 
 	ts := httptest.NewServer(http.FileServer(http.Dir("./static")))
+	defer ts.Close()
 
 	done := make(chan struct{})
 
