@@ -24,10 +24,7 @@ function registerSW(url) {
             }
           }
           if (installingWorker.state === 'activated') {
-	    fetch('/content.json')
-	      .then(res => res.json())
-	      .then(res => renderGallery(res.keys))
-	      .catch(err => console.log('failed to fetch content info', err))
+	    console.log(installingWorker.state)
           }
         };
       };
