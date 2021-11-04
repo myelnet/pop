@@ -34,7 +34,6 @@ func TransportConfigurer(thisPeer peer.ID, storeGetter StoreGetter) datatransfer
 		otherPeer := channelID.OtherParty(thisPeer)
 		store, err := storeGetter.Get(otherPeer, dealProposal.ID)
 		if err != nil {
-			log.Error().Err(err).Msg("attempting to configure data store")
 			return
 		}
 		if store == nil {

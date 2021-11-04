@@ -130,7 +130,7 @@ type PutResult struct {
 	RootCid   string
 	Key       string
 	Cid       string
-	Size      string
+	Size      int64
 	TotalSize string
 	Len       int
 	Err       string

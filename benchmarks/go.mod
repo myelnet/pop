@@ -8,6 +8,7 @@ require (
 	github.com/filecoin-project/go-address v0.0.5
 	github.com/ipld/go-ipld-prime v0.12.0
 	github.com/libp2p/go-libp2p-core v0.8.5
+	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/myelnet/pop v0.1.0
 )
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/utils"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
@@ -93,7 +94,7 @@ loop:
 				fmt.Printf("--\n")
 			}
 
-			fmt.Fprintf(w, "%s\t%s\n", pr.Key, pr.Size)
+			fmt.Fprintf(w, "%s\t%s\n", pr.Key, filecoin.SizeStr(filecoin.NewInt(uint64(pr.Size))))
 
 			if i == pr.Len {
 				fmt.Fprintf(w, "--\t\n")

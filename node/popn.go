@@ -549,7 +549,7 @@ func (nd *Pop) Put(ctx context.Context, args *PutArgs) {
 			PutResult: &PutResult{
 				Key:  k,
 				Cid:  e.Value.String(),
-				Size: filecoin.SizeStr(filecoin.NewInt(uint64(e.Size))),
+				Size: e.Size,
 				// NumBlocks: stats.NumBlocks, TODO: should Entry contain the number of blocks?
 				RootCid:   nd.tx.Root().String(),
 				TotalSize: filecoin.SizeStr(filecoin.NewInt(uint64(totalSize))),
