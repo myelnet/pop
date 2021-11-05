@@ -13,9 +13,9 @@ install:
 	install -C ./pop /usr/local/bin/pop
 
 benchmarks:
-	rm -f bcli
-	go build -ldflags=$(ldflags) -o bcli ./cmd/bcli
-	install -C ./bcli /usr/local/bin/bcli
+	rm -f ./cmd/bcli/bcli
+	cd ./cmd/bcli && go build -ldflags=$(ldflags) -o bcli .
+	install -C ./cmd/bcli/bcli /usr/local/bin/bcli
 
 # builds image locally
 snapshot:

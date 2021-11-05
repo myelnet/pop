@@ -1,4 +1,4 @@
-module github.com/myelnet/pop/benchmarks
+module github.com/myelnet/pop/cmd/bcli
 
 go 1.16
 
