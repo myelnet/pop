@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var jsonEscapedZero = []byte(`\u0000`)
+var JsonEscapedZero = []byte(`\u0000`)
 
 // OffArgs get passed to the Off command
 type OffArgs struct{}
@@ -312,8 +312,8 @@ func (cs *CommandServer) send(n Notify) {
 	if err != nil {
 		log.Fatal().Err(err).Interface("n", n).Msg("Failed json.Marshal(notify)")
 	}
-	if bytes.Contains(b, jsonEscapedZero) {
-		log.Error().Msg("[unexpected] zero byte in BackendServer.send notify message")
+	if bytes.Contains(b, JsonEscapedZero) {
+		log.Error().Msg("[unexpected] zero byte in CommandServer.send notify message")
 	}
 	cs.sendNotifyMsg(b)
 }
@@ -335,12 +335,12 @@ func (cc *CommandClient) GotNotifyMsg(b []byte) {
 		// not interesting
 		return
 	}
-	if bytes.Contains(b, jsonEscapedZero) {
-		log.Error().Msg("[unexpected] zero byte in BackendClient.GotNotifyMsg message")
+	if bytes.Contains(b, JsonEscapedZero) {
+		log.Error().Msg("[unexpected] zero byte in CommandClient.GotNotifyMsg message")
 	}
 	n := Notify{}
 	if err := json.Unmarshal(b, &n); err != nil {
-		log.Fatal().Err(err).Int("len", len(b)).Msg("BackendClient.Notify: cannot decode message")
+		log.Fatal().Err(err).Int("len", len(b)).Msg("CommandClient.Notify: cannot decode message")
 	}
 	if cc.notify != nil {
 		cc.notify(n)
@@ -352,7 +352,7 @@ func (cc *CommandClient) send(cmd Command) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed json.Marshal(cmd)")
 	}
-	if bytes.Contains(b, jsonEscapedZero) {
+	if bytes.Contains(b, JsonEscapedZero) {
 		log.Error().Err(err).Msg("[unexpected] zero byte in CommandClient.send")
 	}
 	cc.sendCommandMsg(b)

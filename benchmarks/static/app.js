@@ -65,30 +65,6 @@ function checkValidSW(url) {
     });
 }
 
-var imgSection = document.querySelector('section');
-
-/**
- * Renders a list of image elements across the webpage
- *
- * @param {{ name: string, url: string }[]}
- */
-function renderGallery(items) {
-  // load each set of image, alt text, name and caption
-  for (var i = 0; i <= items.length - 1; i++) {
-    var myImage = document.createElement('img');
-    var myFigure = document.createElement('figure');
-    var myCaption = document.createElement('caption');
-
-    myImage.src = items[i].url;
-    myImage.setAttribute('alt', items[i].name);
-    myCaption.innerHTML = '<strong>' + items[i].name + '</strong>';
-
-    imgSection.appendChild(myFigure);
-    myFigure.appendChild(myImage);
-    myFigure.appendChild(myCaption);
-  }
-}
-
 window.onload = function () {
   checkValidSW('/sw.js');
   navigator.serviceWorker.ready.then(() => {
