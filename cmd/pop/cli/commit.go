@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
@@ -68,7 +69,8 @@ func runCommit(ctx context.Context, args []string) error {
 				fmt.Printf("Cached by %s\n", cr.Caches)
 			}
 			if cr.Ref != "" {
-				fmt.Printf("==> Committed transaction %s (%s)\n", cr.Ref, cr.Size)
+				size := filecoin.SizeStr(filecoin.NewInt(uint64(cr.Size)))
+				fmt.Printf("==> Committed transaction %s (%s)\n", cr.Ref, size)
 				return nil
 			}
 		case <-ctx.Done():

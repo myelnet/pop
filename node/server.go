@@ -38,7 +38,7 @@ import (
 
 // server listens for connection and controls the node to execute requests
 type server struct {
-	node *node
+	node *Pop
 
 	csMu sync.Mutex // lock order: csMu, then mu
 	cs   *CommandServer
@@ -365,7 +365,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	nd.metrics.Record("check-in",
-		map[string]string{"peer": nd.host.ID().String()},
+		map[string]string{"peer": nd.Host.ID().String()},
 		map[string]interface{}{"msg": "logging-on"})
 
 	if nd.metrics.URL() != "" {

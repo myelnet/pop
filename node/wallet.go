@@ -11,7 +11,7 @@ import (
 )
 
 // WalletList returns a list of all addresses for which we have the private keys
-func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
+func (nd *Pop) WalletList(ctx context.Context, args *WalletListArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			WalletResult: &WalletResult{
@@ -33,12 +33,15 @@ func (nd *node) WalletList(ctx context.Context, args *WalletListArgs) {
 	}
 
 	nd.send(Notify{
-		WalletResult: &WalletResult{Addresses: stringAddresses},
+		WalletResult: &WalletResult{
+			Addresses:      stringAddresses,
+			DefaultAddress: nd.exch.Wallet().DefaultAddress().String(),
+		},
 	})
 }
 
 // WalletExport writes the private key for a given address to a file at the given path
-func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
+func (nd *Pop) WalletExport(ctx context.Context, args *WalletExportArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			WalletResult: &WalletResult{
@@ -59,7 +62,7 @@ func (nd *node) WalletExport(ctx context.Context, args *WalletExportArgs) {
 }
 
 // WalletPay transfers funds from one given address for which we have the private key to another one
-func (nd *node) WalletPay(ctx context.Context, args *WalletPayArgs) {
+func (nd *Pop) WalletPay(ctx context.Context, args *WalletPayArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{
 			WalletResult: &WalletResult{
@@ -94,7 +97,7 @@ func (nd *node) WalletPay(ctx context.Context, args *WalletPayArgs) {
 // importPrivateKey from a hex encoded private key to use as default on the exchange instead of
 // the auto generated one. This is mostly for development and will be reworked into a nicer command
 // eventually
-func (nd *node) importPrivateKey(ctx context.Context, pk string) error {
+func (nd *Pop) importPrivateKey(ctx context.Context, pk string) error {
 	var iki wallet.KeyInfo
 
 	data, err := hex.DecodeString(pk)
@@ -121,7 +124,7 @@ func (nd *node) importPrivateKey(ctx context.Context, pk string) error {
 }
 
 // exportPrivateKey exports the private key of a given address to an output file
-func (nd *node) exportPrivateKey(ctx context.Context, addr, outputPath string) error {
+func (nd *Pop) exportPrivateKey(ctx context.Context, addr, outputPath string) error {
 	adr, err := address.NewFromString(addr)
 	if err != nil {
 		return fmt.Errorf("failed to decode address: %v", err)

@@ -16,7 +16,7 @@ import (
 )
 
 // PaySubmit vouchers for a given payment channel
-func (nd *node) PaySubmit(ctx context.Context, args *PayArgs) {
+func (nd *Pop) PaySubmit(ctx context.Context, args *PayArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{PayResult: &PayResult{
 			Err: err.Error(),
@@ -45,7 +45,7 @@ func (nd *node) PaySubmit(ctx context.Context, args *PayArgs) {
 }
 
 // PaySettle sends a settle message for a given actor and saves the time after which it can be collected
-func (nd *node) PaySettle(ctx context.Context, args *PayArgs) {
+func (nd *Pop) PaySettle(ctx context.Context, args *PayArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{PayResult: &PayResult{
 			Err: err.Error(),
@@ -75,7 +75,7 @@ func (nd *node) PaySettle(ctx context.Context, args *PayArgs) {
 }
 
 // PayCollect sends a collect message for a given actor, validating before to make sure the channel is in the right state
-func (nd *node) PayCollect(ctx context.Context, args *PayArgs) {
+func (nd *Pop) PayCollect(ctx context.Context, args *PayArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{PayResult: &PayResult{
 			Err: err.Error(),
@@ -95,7 +95,7 @@ func (nd *node) PayCollect(ctx context.Context, args *PayArgs) {
 
 // PayTrack the given channel loading the state from chain and adding it to the store
 // currently only for inbound channels. Mostly for debugging purposes
-func (nd *node) PayTrack(ctx context.Context, args *PayArgs) {
+func (nd *Pop) PayTrack(ctx context.Context, args *PayArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{PayResult: &PayResult{
 			Err: err.Error(),
@@ -122,7 +122,7 @@ func (nd *node) PayTrack(ctx context.Context, args *PayArgs) {
 }
 
 // PayList all vouchers for all payment channels we have
-func (nd *node) PayList(ctx context.Context, args *PayArgs) {
+func (nd *Pop) PayList(ctx context.Context, args *PayArgs) {
 	sendErr := func(err error) {
 		nd.send(Notify{PayResult: &PayResult{
 			Err: err.Error(),

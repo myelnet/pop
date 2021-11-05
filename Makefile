@@ -12,6 +12,11 @@ install:
 	go build -ldflags=$(ldflags) -o pop ./cmd/pop
 	install -C ./pop /usr/local/bin/pop
 
+benchmarks:
+	rm -f bcli
+	go build -ldflags=$(ldflags) -o bcli ./cmd/bcli
+	install -C ./bcli /usr/local/bin/bcli
+
 # builds image locally
 snapshot:
 	envsubst <$(releaser_template) >$(releaser_spec)

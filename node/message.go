@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var jsonEscapedZero = []byte(`\u0000`)
+var JsonEscapedZero = []byte(`\u0000`)
 
 // OffArgs get passed to the Off command
 type OffArgs struct{}
@@ -60,16 +60,18 @@ type CommArgs struct {
 
 // GetArgs get passed to the Get command
 type GetArgs struct {
-	Cid      string `json:"cid"`
-	Key      string `json:"key,omitempty"`
-	Sel      string `json:"sel,omitempty"`
-	Out      string `json:"out,omitempty"`
-	Timeout  int    `json:"timeout,omitempty"`
-	Verbose  bool   `json:"verbose,omitempty"`
-	Miner    string `json:"miner,omitempty"`
-	Peer     string `json:"peer,omitempty"`
-	Strategy string `json:"strategy,omitempty"`
-	MaxPPB   int64  `json:"maxPPB,omitempty"`
+	Cid          string `json:"cid"`
+	Key          string `json:"key,omitempty"`
+	Sel          string `json:"sel,omitempty"`
+	Out          string `json:"out,omitempty"`
+	Timeout      int    `json:"timeout,omitempty"`
+	Verbose      bool   `json:"verbose,omitempty"`
+	Miner        string `json:"miner,omitempty"`
+	Peer         string `json:"peer,omitempty"`
+	Strategy     string `json:"strategy,omitempty"`
+	MaxPPB       int64  `json:"maxPPB,omitempty"`
+	ProviderAddr string `json:"providerAddr,omitempty"`
+	Size         int64  `json:"size,omitempty"`
 }
 
 // ListArgs provides params for the List command
@@ -130,7 +132,7 @@ type PutResult struct {
 	RootCid   string
 	Key       string
 	Cid       string
-	Size      string
+	Size      int64
 	TotalSize string
 	Len       int
 	Err       string
@@ -145,15 +147,16 @@ type StatusResult struct {
 
 // WalletResult returns the output of every WalletList/WalletExport/WalletPay requests
 type WalletResult struct {
-	Err       string
-	Addresses []string
+	Err            string
+	Addresses      []string
+	DefaultAddress string
 }
 
 // CommResult is feedback on the push operation
 type CommResult struct {
 	Ref    string
 	Caches []string
-	Size   string
+	Size   int64
 	Err    string
 }
 
@@ -213,13 +216,13 @@ type Notify struct {
 
 // CommandServer receives commands on the daemon side and executes them
 type CommandServer struct {
-	n             *node                // the ipfs node we are controlling
+	n             *Pop                 // the pop node we are controlling
 	sendNotifyMsg func(jsonMsg []byte) // send a notification message
 }
 
-func NewCommandServer(ipfs *node, sendNotifyMsg func(b []byte)) *CommandServer {
+func NewCommandServer(node *Pop, sendNotifyMsg func(b []byte)) *CommandServer {
 	return &CommandServer{
-		n:             ipfs,
+		n:             node,
 		sendNotifyMsg: sendNotifyMsg,
 	}
 }
@@ -311,8 +314,8 @@ func (cs *CommandServer) send(n Notify) {
 	if err != nil {
 		log.Fatal().Err(err).Interface("n", n).Msg("Failed json.Marshal(notify)")
 	}
-	if bytes.Contains(b, jsonEscapedZero) {
-		log.Error().Msg("[unexpected] zero byte in BackendServer.send notify message")
+	if bytes.Contains(b, JsonEscapedZero) {
+		log.Error().Msg("[unexpected] zero byte in CommandServer.send notify message")
 	}
 	cs.sendNotifyMsg(b)
 }
@@ -334,12 +337,12 @@ func (cc *CommandClient) GotNotifyMsg(b []byte) {
 		// not interesting
 		return
 	}
-	if bytes.Contains(b, jsonEscapedZero) {
-		log.Error().Msg("[unexpected] zero byte in BackendClient.GotNotifyMsg message")
+	if bytes.Contains(b, JsonEscapedZero) {
+		log.Error().Msg("[unexpected] zero byte in CommandClient.GotNotifyMsg message")
 	}
 	n := Notify{}
 	if err := json.Unmarshal(b, &n); err != nil {
-		log.Fatal().Err(err).Int("len", len(b)).Msg("BackendClient.Notify: cannot decode message")
+		log.Fatal().Err(err).Int("len", len(b)).Msg("CommandClient.Notify: cannot decode message")
 	}
 	if cc.notify != nil {
 		cc.notify(n)
@@ -351,7 +354,7 @@ func (cc *CommandClient) send(cmd Command) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed json.Marshal(cmd)")
 	}
-	if bytes.Contains(b, jsonEscapedZero) {
+	if bytes.Contains(b, JsonEscapedZero) {
 		log.Error().Err(err).Msg("[unexpected] zero byte in CommandClient.send")
 	}
 	cc.sendCommandMsg(b)

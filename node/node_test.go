@@ -32,16 +32,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...ExchangeOption) *node {
+func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...ExchangeOption) *Pop {
 	var err error
 	tn := testutil.NewTestNode(mn, t)
 
-	nd := &node{}
+	nd := &Pop{}
 	nd.ds = tn.Ds
 	nd.bs = tn.Bs
 	nd.ms = tn.Ms
 	nd.dag = tn.DAG
-	nd.host = tn.Host
+	nd.Host = tn.Host
 
 	exchangeOpts := exchange.Options{
 		Blockstore:  nd.bs,
@@ -62,10 +62,10 @@ func newTestNode(ctx context.Context, mn mocknet.Mocknet, t *testing.T, opts ...
 		)
 	}
 
-	nd.exch, err = exchange.New(ctx, nd.host, nd.ds, exchangeOpts)
+	nd.exch, err = exchange.New(ctx, nd.Host, nd.ds, exchangeOpts)
 	require.NoError(t, err)
 
-	nd.remind, err = NewRemoteIndex("", nd.host, nd.exch.Wallet(), []string{})
+	nd.remind, err = NewRemoteIndex("", nd.Host, nd.exch.Wallet(), []string{})
 	require.NoError(t, err)
 
 	return nd
@@ -92,7 +92,7 @@ func TestPing(t *testing.T) {
 	nd := newTestNode(ctx, mn, t)
 
 	nd.notify = func(n Notify) {
-		require.Equal(t, n.PingResult.ID, nd.host.ID().String())
+		require.Equal(t, n.PingResult.ID, nd.Host.ID().String())
 	}
 	nd.Ping(ctx, "")
 }
@@ -277,7 +277,7 @@ func TestCommit(t *testing.T) {
 	mn := mocknet.New(ctx)
 	cn := newTestNode(ctx, mn, t, WithCapacity(255000))
 
-	var nds []*node
+	var nds []*Pop
 	nds = append(nds, newTestNode(ctx, mn, t))
 	nds = append(nds, newTestNode(ctx, mn, t))
 
@@ -286,7 +286,7 @@ func TestCommit(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// we create a file larger than the node.Capacity to force eviction when adding later the second file
+	// we create a file larger than the Capacity to force eviction when adding later the second file
 	data := make([]byte, 256000)
 	rand.New(rand.NewSource(time.Now().UnixNano())).Read(data)
 	p := filepath.Join(dir, "data1")
@@ -482,7 +482,7 @@ func TestImport(t *testing.T) {
 
 	cn := newTestNode(ctx, mn, t)
 
-	var nds []*node
+	var nds []*Pop
 	nds = append(nds, newTestNode(ctx, mn, t))
 	nds = append(nds, newTestNode(ctx, mn, t))
 
