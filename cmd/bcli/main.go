@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -40,6 +41,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+//go:embed static/*
+var staticFiles embed.FS
 
 // BrowserClient is a controller for a client node in a headless chrome browser
 type BrowserClient struct {
@@ -432,7 +436,8 @@ func runStart(parent context.Context, args []string) error {
 		}
 	}
 
-	ts := httptest.NewServer(http.FileServer(http.Dir("./static")))
+	staticFS := http.FS(staticFiles)
+	ts := httptest.NewServer(http.FileServer(staticFS))
 	defer ts.Close()
 
 	ready := make(chan struct{}, 1)
@@ -451,7 +456,9 @@ func runStart(parent context.Context, args []string) error {
 		}
 	})
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(ts.URL)); err != nil {
+	fmt.Println("test server running at", ts.URL)
+
+	if err := chromedp.Run(ctx, chromedp.Navigate(ts.URL+"/static")); err != nil {
 		return err
 	}
 	// wait for service worker to be ready
