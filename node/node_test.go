@@ -21,10 +21,17 @@ import (
 	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
 	"github.com/filecoin-project/specs-actors/v5/support/mock"
 	tutils "github.com/filecoin-project/specs-actors/v5/support/testing"
+	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
+	badgerds "github.com/ipfs/go-ds-badger"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	keystore "github.com/ipfs/go-ipfs-keystore"
+	"github.com/ipfs/go-merkledag"
+	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/exchange"
 	"github.com/myelnet/pop/filecoin"
 	"github.com/myelnet/pop/internal/testutil"
@@ -507,6 +514,84 @@ func TestImport(t *testing.T) {
 
 	r := <-res
 	require.Equal(t, []string{"QmRtuDzjipZnWUgjAHgaatG5sPEJuyCUV41xpFYZ6DtFJr"}, r.Roots)
+}
+
+func TestImportIndexLoad(t *testing.T) {
+	ctx := context.Background()
+	mn := mocknet.New(ctx)
+	p := "../../Downloads/bad-images/images"
+	files, err := os.ReadDir(p)
+	require.NoError(t, err)
+
+	repo := t.TempDir()
+
+	newNode := func() *node {
+		nd := &node{}
+
+		dsopts := badgerds.DefaultOptions
+		dsopts.SyncWrites = false
+		dsopts.Truncate = true
+
+		nd.ds, err = badgerds.NewDatastore(filepath.Join(repo, "datastore"), &dsopts)
+		require.NoError(t, err)
+
+		nd.ms, err = multistore.NewMultiDstore(nd.ds)
+		require.NoError(t, err)
+
+		nd.bs = blockstore.NewBlockstore(nd.ds)
+
+		nd.dag = merkledag.NewDAGService(blockservice.New(nd.bs, offline.Exchange(nd.bs)))
+
+		peer, err := tnet.RandPeerNetParams()
+		require.NoError(t, err)
+
+		nd.host, err = mn.AddPeer(peer.PrivKey, peer.Addr)
+		require.NoError(t, err)
+
+		exchangeOpts := exchange.Options{
+			Blockstore:  nd.bs,
+			MultiStore:  nd.ms,
+			RepoPath:    repo,
+			FilecoinAPI: filecoin.NewMockLotusAPI(),
+		}
+
+		exchangeOpts.Wallet = wallet.NewFromKeystore(
+			keystore.NewMemKeystore(),
+			wallet.WithFilAPI(exchangeOpts.FilecoinAPI),
+		)
+
+		nd.exch, err = exchange.New(ctx, nd.host, nd.ds, exchangeOpts)
+		require.NoError(t, err)
+
+		nd.remind, err = NewRemoteIndex("", nd.host, nd.exch.Wallet(), []string{})
+		require.NoError(t, err)
+		return nd
+	}
+
+	cn := newNode()
+
+	for i, file := range files {
+		if file.Name() == ".DS_Store" {
+			continue
+		}
+		fmt.Printf("importing file %d of %d: %s\n", i+1, len(files), file.Name())
+		res := make(chan *ImportResult, 1)
+		cn.notify = func(n Notify) {
+			require.Equal(t, n.ImportResult.Err, "")
+			res <- n.ImportResult
+		}
+		cn.Import(ctx, &ImportArgs{Path: p + "/" + file.Name(), CacheRF: 0})
+
+		<-res
+
+		cn.ds.Close()
+		cn = newNode()
+		cn.ds.Close()
+		cn = newNode()
+		cn.ds.Close()
+		cn = newNode()
+
+	}
 }
 
 // Commit 2 different files into a single transaction and then retrieve (Get)
