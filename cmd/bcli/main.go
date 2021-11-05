@@ -24,6 +24,7 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/filecoin-project/go-address"
+	"github.com/ipfs/go-path"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/fluent/qp"
@@ -54,6 +55,35 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 			GetResult: &node.GetResult{
 				Err: err.Error(),
 			}})
+	}
+	p := path.FromString(args.Cid)
+	// /<cid>/path/file.ext => cid, ["path", file.ext"]
+	root, _, err := path.SplitAbsPath(p)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	addr, err := ma.NewMultiaddr(args.Peer)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	payAddr, err := address.NewFromString(args.ProviderAddr)
+	if err != nil {
+		sendErr(err)
+		return
+	}
+
+	err = writeStaticRecord(root.String(), node.RRecord{
+		PeerAddr: addr.Bytes(),
+		PayAddr:  payAddr,
+		Size:     args.Size,
+	})
+	if err != nil {
+		sendErr(err)
+		return
 	}
 
 	resp, err := chromedp.RunResponse(ctx, chromedp.Navigate(c.url+"/"+args.Cid))
@@ -214,10 +244,45 @@ func serveTCP(ctx context.Context, server *server, l net.Listener) {
 	}
 }
 
+// writeStaticRecord to disk static directory encoded as CBOR
+func writeStaticRecord(key string, r node.RRecord) error {
+	rbuf := new(bytes.Buffer)
+	if err := r.MarshalCBOR(rbuf); err != nil {
+		return err
+	}
+
+	n, err := qp.BuildList(basicnode.Prototype.Any, 1, func(la datamodel.ListAssembler) {
+		qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
+	})
+	if err != nil {
+		return err
+	}
+
+	lbuf := new(bytes.Buffer)
+	if err := dagcbor.Encode(n, lbuf); err != nil {
+		return err
+	}
+
+	rf, err := os.Create("./static/" + key)
+	if err != nil {
+		return err
+	}
+	_, err = rf.Write(lbuf.Bytes())
+	if err != nil {
+		return err
+	}
+	if err := rf.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type Content struct {
 	Root  string
 	Keys  []string
 	Sizes []int64
+	Offer node.RRecord
 }
 
 func runNode(ctx context.Context, cancel context.CancelFunc, contentDir string) (co Content, err error) {
@@ -313,35 +378,7 @@ func runNode(ctx context.Context, cancel context.CancelFunc, contentDir string) 
 		PayAddr:  payAddr,
 		Size:     cr.Size,
 	}
-
-	rbuf := new(bytes.Buffer)
-	if err := r.MarshalCBOR(rbuf); err != nil {
-		return co, err
-	}
-
-	n, err := qp.BuildList(basicnode.Prototype.Any, 1, func(la datamodel.ListAssembler) {
-		qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
-	})
-	if err != nil {
-		return co, err
-	}
-
-	lbuf := new(bytes.Buffer)
-	if err := dagcbor.Encode(n, lbuf); err != nil {
-		return co, err
-	}
-
-	rf, err := os.Create("./static/" + root)
-	if err != nil {
-		return co, err
-	}
-	_, err = rf.Write(lbuf.Bytes())
-	if err != nil {
-		return co, err
-	}
-	if err := rf.Close(); err != nil {
-		return co, err
-	}
+	co.Offer = r
 
 	return co, nil
 }
@@ -443,6 +480,8 @@ var getArgs struct {
 	timeout  int
 	peer     string
 	maxppb   int64
+	paddr    string
+	size     int64
 }
 
 var getCmd = &ffcli.Command{
@@ -460,6 +499,8 @@ The 'bcli get' command retrieves blocks with a given root cid and an optional se
 		fs.IntVar(&getArgs.timeout, "timeout", 60, "timeout before the request should be cancelled by the node (in minutes)")
 		fs.StringVar(&getArgs.peer, "peer", "", "target a specific peer when retrieving the content")
 		fs.Int64Var(&getArgs.maxppb, "maxppb", 0, "max price per byte (0=\"default node's value\", -1=\"free retrieval\")")
+		fs.StringVar(&getArgs.paddr, "provider-addr", "", "provider filecoin address")
+		fs.Int64Var(&getArgs.size, "size", 0, "expected size of the content if known")
 		return fs
 	})(),
 }
@@ -481,11 +522,13 @@ func runGet(ctx context.Context, args []string) error {
 	}
 
 	cc.Get(&node.GetArgs{
-		Cid:     args[0],
-		Timeout: getArgs.timeout,
-		Sel:     getArgs.selector,
-		Peer:    getArgs.peer,
-		MaxPPB:  getArgs.maxppb,
+		Cid:          args[0],
+		Timeout:      getArgs.timeout,
+		Sel:          getArgs.selector,
+		Peer:         getArgs.peer,
+		MaxPPB:       getArgs.maxppb,
+		ProviderAddr: getArgs.paddr,
+		Size:         getArgs.size,
 	})
 
 	for {
@@ -530,6 +573,10 @@ func runE2E(parent context.Context, args []string) error {
 
 	content, err := runNode(ctx, cancel, e2eArgs.contentDir)
 	if err != nil {
+		return err
+	}
+
+	if err := writeStaticRecord(content.Root, content.Offer); err != nil {
 		return err
 	}
 
