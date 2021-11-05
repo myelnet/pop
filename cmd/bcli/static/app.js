@@ -66,7 +66,7 @@ function checkValidSW(url) {
 }
 
 window.onload = function () {
-  checkValidSW('/sw.js');
+  checkValidSW('/static/sw.js');
   navigator.serviceWorker.ready.then(() => {
     console.log(
       'This web app is serving content from a Myel client in a service worker'
