@@ -22,9 +22,8 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 
 ADD "https://api.github.com/repos/myelnet/pop/commits?per_page=1" latest_commit
 RUN git clone https://github.com/myelnet/pop;
-RUN cd pop; make all;
+RUN cd pop; make benchmarks;
 
-COPY ./install-playbook/key /root/key
 COPY ./install-playbook/test-node-script.sh ./test-node-script.sh
 
 RUN chmod +x ./test-node-script.sh

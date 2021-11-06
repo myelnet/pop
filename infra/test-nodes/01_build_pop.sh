@@ -36,8 +36,6 @@ echo
 
 read -p "Enter FIL address you want to export key for: " FIL_ADDRESS
 
-pop wallet export $FIL_ADDRESS $PWD/install-playbook/key
-
 docker build --platform linux/x86_64 -t ${REGISTRY_URL}:latest .
 # uncomment if using aws registry
 # aws ecr get-login-password --region "$(cut -d'.' -f4 <<<${REGISTRY_URL})" | docker login --username AWS --password-stdin "$(cut -d'/' -f1 <<<${REGISTRY_URL})"
