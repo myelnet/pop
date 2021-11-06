@@ -12,7 +12,7 @@ do
   pidx=$((1 + $RANDOM % $numProviders))
   IFS=" " read dns pid <<<  `sed "${pidx}q;d" ./test-files/providers`
 
-  bcli get -peer="/dns4/$dns/tcp/41504/p2p/$pid" "$cid/*"
+  bcli get -peer="/dns4/$dns/tcp/41504/p2p/$pid" "$cid"
 
   sleep 5
 
