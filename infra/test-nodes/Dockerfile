@@ -1,4 +1,4 @@
-FROM debian:latest
+FROM chromedp/headless-shell:latest
 
 RUN apt-get update -y && \
     apt-get install -y build-essential curl wget git
@@ -15,16 +15,16 @@ RUN \
 	echo "${GOLANG_DIST_SHA} *go.tgz" | sha256sum -c - && \
 	rm -rf /usr/local/go && \
 	tar -C /usr/local -xzf go.tgz && \
-	rm go.tgz && \
-  go version
+	rm go.tgz
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
+RUN go version;
+
 ADD "https://api.github.com/repos/myelnet/pop/commits?per_page=1" latest_commit
 RUN git clone https://github.com/myelnet/pop;
-RUN cd pop; make all;
+RUN cd pop; make benchmarks;
 
-COPY ./install-playbook/key /root/key
 COPY ./install-playbook/test-node-script.sh ./test-node-script.sh
 
 RUN chmod +x ./test-node-script.sh
