@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -42,12 +41,63 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//go:embed static/*
+//go:embed index.html app.js sw.js
 var staticFiles embed.FS
+
+// Routing matches provider records with content IDs
+type Routing struct {
+	mu      sync.Mutex
+	records map[string][]byte
+}
+
+// NewRouting makes a new routing instanc
+func NewRouting() *Routing {
+	return &Routing{
+		records: make(map[string][]byte),
+	}
+}
+
+// Set encodes and adds a new record
+func (r *Routing) Set(key string, rec node.RRecord) error {
+	rbuf := new(bytes.Buffer)
+	if err := rec.MarshalCBOR(rbuf); err != nil {
+		return err
+	}
+
+	n, err := qp.BuildList(basicnode.Prototype.Any, 1, func(la datamodel.ListAssembler) {
+		qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
+	})
+	if err != nil {
+		return err
+	}
+
+	lbuf := new(bytes.Buffer)
+	if err := dagcbor.Encode(n, lbuf); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.records[key] = lbuf.Bytes()
+	r.mu.Unlock()
+	return nil
+}
+
+// Get writes the bytes to a writer
+func (r *Routing) Get(w http.ResponseWriter, req *http.Request) {
+	key := strings.TrimPrefix(req.URL.Path, "/routing/")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.records[key]
+	if !ok {
+		http.Error(w, "record not found", http.StatusNotFound)
+	}
+	w.Write(rec)
+}
 
 // BrowserClient is a controller for a client node in a headless chrome browser
 type BrowserClient struct {
 	url        string
+	routing    *Routing
 	mu         sync.Mutex
 	notify     func(node.Notify)
 	cancelFunc context.CancelFunc
@@ -80,7 +130,7 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 		return
 	}
 
-	err = writeStaticRecord(root.String(), node.RRecord{
+	err = c.routing.Set(root.String(), node.RRecord{
 		PeerAddr: addr.Bytes(),
 		PayAddr:  payAddr,
 		Size:     args.Size,
@@ -248,40 +298,6 @@ func serveTCP(ctx context.Context, server *server, l net.Listener) {
 	}
 }
 
-// writeStaticRecord to disk static directory encoded as CBOR
-func writeStaticRecord(key string, r node.RRecord) error {
-	rbuf := new(bytes.Buffer)
-	if err := r.MarshalCBOR(rbuf); err != nil {
-		return err
-	}
-
-	n, err := qp.BuildList(basicnode.Prototype.Any, 1, func(la datamodel.ListAssembler) {
-		qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
-	})
-	if err != nil {
-		return err
-	}
-
-	lbuf := new(bytes.Buffer)
-	if err := dagcbor.Encode(n, lbuf); err != nil {
-		return err
-	}
-
-	rf, err := os.Create("./static/" + key)
-	if err != nil {
-		return err
-	}
-	_, err = rf.Write(lbuf.Bytes())
-	if err != nil {
-		return err
-	}
-	if err := rf.Close(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 type Content struct {
 	Root  string
 	Keys  []string
@@ -436,9 +452,25 @@ func runStart(parent context.Context, args []string) error {
 		}
 	}
 
-	staticFS := http.FS(staticFiles)
-	ts := httptest.NewServer(http.FileServer(staticFS))
-	defer ts.Close()
+	sl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.FS(staticFiles)))
+
+	routing := NewRouting()
+	mux.HandleFunc("/routing/", routing.Get)
+
+	s := &http.Server{
+		Handler: mux,
+	}
+
+	go func() {
+		s.Serve(sl)
+	}()
+	defer s.Close()
 
 	ready := make(chan struct{}, 1)
 
@@ -456,16 +488,19 @@ func runStart(parent context.Context, args []string) error {
 		}
 	})
 
-	fmt.Println("test server running at", ts.URL)
+	addr := "http://" + sl.Addr().String()
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(ts.URL+"/static")); err != nil {
+	fmt.Println("test server running at", addr)
+
+	if err := chromedp.Run(ctx, chromedp.Navigate(addr)); err != nil {
 		return err
 	}
 	// wait for service worker to be ready
 	<-ready
 
 	nd := &BrowserClient{
-		url:        ts.URL,
+		url:        addr,
+		routing:    routing,
 		cancelFunc: cancel,
 	}
 
@@ -583,12 +618,30 @@ func runE2E(parent context.Context, args []string) error {
 		return err
 	}
 
-	if err := writeStaticRecord(content.Root, content.Offer); err != nil {
+	routing := NewRouting()
+
+	if err := routing.Set(content.Root, content.Offer); err != nil {
 		return err
 	}
 
-	ts := httptest.NewServer(http.FileServer(http.Dir("./static")))
-	defer ts.Close()
+	sl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.FS(staticFiles)))
+
+	mux.HandleFunc("/routing/", routing.Get)
+
+	s := &http.Server{
+		Handler: mux,
+	}
+
+	go func() {
+		s.Serve(sl)
+	}()
+	defer s.Close()
 
 	ready := make(chan struct{})
 	done := make(chan struct{})
@@ -653,7 +706,11 @@ func runE2E(parent context.Context, args []string) error {
 		}
 	}()
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(ts.URL)); err != nil {
+	addr := "http://" + sl.Addr().String()
+
+	fmt.Println("test server running at", addr)
+
+	if err := chromedp.Run(ctx, chromedp.Navigate(addr)); err != nil {
 		return err
 	}
 
