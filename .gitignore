@@ -11,6 +11,3 @@ infra/test-nodes/logs/*
 infra/test-nodes/test-files/*
 .goreleaser.yml
 
-# ignore service worker client code
-sw.js
-content.json
