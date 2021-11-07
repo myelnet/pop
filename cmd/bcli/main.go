@@ -118,26 +118,28 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 		return
 	}
 
-	addr, err := ma.NewMultiaddr(args.Peer)
-	if err != nil {
-		sendErr(err)
-		return
-	}
+	if args.Peer != "" {
+		addr, err := ma.NewMultiaddr(args.Peer)
+		if err != nil {
+			sendErr(err)
+			return
+		}
 
-	payAddr, err := address.NewFromString(args.ProviderAddr)
-	if err != nil {
-		sendErr(err)
-		return
-	}
+		payAddr, err := address.NewFromString(args.ProviderAddr)
+		if err != nil {
+			sendErr(err)
+			return
+		}
 
-	err = c.routing.Set(root.String(), node.RRecord{
-		PeerAddr: addr.Bytes(),
-		PayAddr:  payAddr,
-		Size:     args.Size,
-	})
-	if err != nil {
-		sendErr(err)
-		return
+		err = c.routing.Set(root.String(), node.RRecord{
+			PeerAddr: addr.Bytes(),
+			PayAddr:  payAddr,
+			Size:     args.Size,
+		})
+		if err != nil {
+			sendErr(err)
+			return
+		}
 	}
 
 	resp, err := chromedp.RunResponse(ctx, chromedp.Navigate(c.url+"/"+args.Cid))
@@ -328,7 +330,7 @@ func runNode(ctx context.Context, cancel context.CancelFunc, contentDir string) 
 			prs <- *pr
 		}
 	})
-	go nd.Put(ctx, &node.PutArgs{Path: e2eArgs.contentDir, Codec: 0x71})
+	go nd.Put(ctx, &node.PutArgs{Path: contentDir, Codec: 0x71})
 
 	i := 1
 	for {
@@ -442,6 +444,8 @@ func runStart(parent context.Context, args []string) error {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
+	routing := NewRouting()
+
 	if startArgs.provider {
 		content, err := runNode(ctx, cancel, startArgs.contentDir)
 		if err != nil {
@@ -449,6 +453,10 @@ func runStart(parent context.Context, args []string) error {
 		}
 		for _, k := range content.Keys {
 			fmt.Println("Added", k)
+		}
+		// when running a provider a record is added by default
+		if err := routing.Set(content.Root, content.Offer); err != nil {
+			return err
 		}
 	}
 
@@ -460,7 +468,6 @@ func runStart(parent context.Context, args []string) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(staticFiles)))
 
-	routing := NewRouting()
 	mux.HandleFunc("/routing/", routing.Get)
 
 	s := &http.Server{
@@ -558,10 +565,6 @@ func runGet(ctx context.Context, args []string) error {
 		}
 	})
 	go receive(ctx, cc, c)
-
-	if getArgs.peer == "" {
-		return fmt.Errorf("a valid peer address is required")
-	}
 
 	cc.Get(&node.GetArgs{
 		Cid:          args[0],
