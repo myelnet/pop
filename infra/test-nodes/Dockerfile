@@ -1,4 +1,4 @@
-FROM chromedp/headless-shell:latest
+FROM debian:latest
 
 RUN apt-get update -y && \
     apt-get install -y build-essential curl wget git
@@ -20,6 +20,12 @@ RUN \
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 RUN go version;
+
+RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+    apt-get install -y ./google-chrome-stable_current_amd64.deb
+
+RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash && \
+    apt-get install git-lfs
 
 ADD "https://api.github.com/repos/myelnet/pop/commits?per_page=1" latest_commit
 RUN git clone https://github.com/myelnet/pop;

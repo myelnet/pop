@@ -2,6 +2,9 @@
 
 nohup bcli start &
 
+sed -i '/^$/d' ./test-files/providers
+sed -i '/^$/d' ./test-files/cids
+
 while true
 do
   numCIDS=`wc -l < ./test-files/cids`
@@ -12,7 +15,10 @@ do
   pidx=$((1 + $RANDOM % $numProviders))
   IFS=" " read dns pid <<<  `sed "${pidx}q;d" ./test-files/providers`
 
-  bcli get -peer="/dns4/$dns/tcp/41504/p2p/$pid" "$cid"
+  echo "/dns4/$dns/tcp/443/wss/p2p/$pid"
+  echo $cid
+
+  bcli get -peer="/dns4/$dns/tcp/443/wss/p2p/$pid" -provider-addr="f1fhv76uecv5i3rrlp4wysqtpl7jaqy3lncupc3zi" "$cid/*"
 
   sleep 5
 
