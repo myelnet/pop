@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -21,7 +22,9 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/profiler"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/serviceworker"
 	"github.com/chromedp/chromedp"
 	"github.com/filecoin-project/go-address"
 	"github.com/ipfs/go-path"
@@ -479,7 +482,7 @@ func runStart(parent context.Context, args []string) error {
 	}()
 	defer s.Close()
 
-	ready := make(chan struct{}, 1)
+	ready := make(chan serviceworker.Version)
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -487,9 +490,12 @@ func runStart(parent context.Context, args []string) error {
 			fmt.Printf("* console.%s call:\n", ev.Type)
 			for _, arg := range ev.Args {
 				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
-
-				if fmt.Sprintf("%s", arg.Value) == "\"activated\"" {
-					ready <- struct{}{}
+			}
+		case *serviceworker.EventWorkerVersionUpdated:
+			if len(ev.Versions) > 0 {
+				v := ev.Versions[0]
+				if v.Status == "activated" {
+					ready <- *v
 				}
 			}
 		}
@@ -593,6 +599,8 @@ func runGet(ctx context.Context, args []string) error {
 var e2eArgs struct {
 	contentDir string
 	headless   bool
+	maxreqs    int64
+	profiler   bool
 }
 
 var e2eCmd = &ffcli.Command{
@@ -603,6 +611,8 @@ var e2eCmd = &ffcli.Command{
 		fs := flag.NewFlagSet("e2e", flag.ExitOnError)
 		fs.StringVar(&e2eArgs.contentDir, "content", "./content", "path to some content to add to the provider")
 		fs.BoolVar(&e2eArgs.headless, "headless", true, "run chrome as headless (without GUI)")
+		fs.Int64Var(&e2eArgs.maxreqs, "max-reqs", math.MaxInt64, "max number of requests")
+		fs.BoolVar(&e2eArgs.profiler, "profiler", false, "run profiler on all requests")
 		return fs
 	})(),
 }
@@ -646,7 +656,7 @@ func runE2E(parent context.Context, args []string) error {
 	}()
 	defer s.Close()
 
-	ready := make(chan struct{})
+	ready := make(chan serviceworker.Version)
 	done := make(chan struct{})
 
 	success := make(chan *network.Response)
@@ -666,9 +676,12 @@ func runE2E(parent context.Context, args []string) error {
 			fmt.Printf("* console.%s call:\n", ev.Type)
 			for _, arg := range ev.Args {
 				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
-
-				if fmt.Sprintf("%s", arg.Value) == "\"activated\"" {
-					close(ready)
+			}
+		case *serviceworker.EventWorkerVersionUpdated:
+			if len(ev.Versions) > 0 {
+				v := ev.Versions[0]
+				if v.Status == "activated" {
+					ready <- *v
 				}
 			}
 		}
@@ -680,6 +693,10 @@ func runE2E(parent context.Context, args []string) error {
 		attempted := make(map[string]*network.Request)
 
 		for {
+			if int64(i) == e2eArgs.maxreqs {
+				close(done)
+				return
+			}
 			select {
 			case req := <-request:
 				fmt.Println("Request:", req.Request.URL, req.RequestID)
@@ -687,14 +704,14 @@ func runE2E(parent context.Context, args []string) error {
 			case res := <-success:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
-				fmt.Println("size", res.EncodedDataLength)
-				fmt.Println("receiveHeadersEnd", res.Timing.ReceiveHeadersEnd)
 				speed := res.EncodedDataLength / res.Timing.ReceiveHeadersEnd
 				total += speed
 
 				delete(attempted, res.URL)
 
-				i++
+				if res.FromServiceWorker {
+					i++
+				}
 
 			case err := <-failure:
 				fmt.Println("==> Failure:", err.ErrorText, err.RequestID)
@@ -703,7 +720,7 @@ func runE2E(parent context.Context, args []string) error {
 				for k := range attempted {
 					fmt.Println("Timeout", k)
 				}
-				close(done)
+				// close(done)
 				return
 			}
 		}
@@ -713,13 +730,27 @@ func runE2E(parent context.Context, args []string) error {
 
 	fmt.Println("test server running at", addr)
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(addr)); err != nil {
+	if err := chromedp.Run(ctx,
+		serviceworker.Enable(),
+		chromedp.Navigate(addr),
+	); err != nil {
 		return err
 	}
 
-	<-ready
+	swv := <-ready
 
-	for _, k := range content.Keys {
+	err = chromedp.Run(ctx,
+		serviceworker.InspectWorker(swv.VersionID),
+	)
+	if err != nil {
+		return err
+	}
+
+	var actions []chromedp.Action
+	for i, k := range content.Keys {
+		if int64(i) == e2eArgs.maxreqs {
+			break
+		}
 		exp := fmt.Sprintf(`
     var imgSection = document.querySelector('section');
     var myImage = document.createElement('img');
@@ -734,13 +765,61 @@ func runE2E(parent context.Context, args []string) error {
     myFigure.appendChild(myImage);
     myFigure.appendChild(myCaption);
 `, "/"+content.Root+"/"+k, k, k)
-		err := chromedp.Run(ctx, chromedp.Evaluate(exp, nil))
+		actions = append(actions, chromedp.Evaluate(exp, nil))
+	}
+
+	if e2eArgs.profiler {
+		err := runProfiler(ctx, swv, done, actions...)
 		if err != nil {
 			return err
 		}
+	} else {
+		err = chromedp.Run(ctx, actions...)
+		if err != nil {
+			return err
+		}
+		<-done
 	}
 
+	return nil
+}
+
+// run the profiler on one or many actions. caller is responsible for saying when the actions a completed
+func runProfiler(ctx context.Context, v serviceworker.Version, done chan struct{}, actions ...chromedp.Action) error {
+	swctx, cancelswctx := chromedp.NewContext(ctx, chromedp.WithTargetID(v.TargetID))
+	defer cancelswctx()
+	err := chromedp.Run(swctx,
+		profiler.Enable(),
+		profiler.Start(),
+	)
+	if err != nil {
+		return fmt.Errorf("running profiler: %w", err)
+	}
+
+	err = chromedp.Run(ctx, actions...)
+	if err != nil {
+		return err
+	}
 	<-done
+
+	var ret *profiler.Profile
+	err = chromedp.Run(swctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			ret, err = profiler.Stop().Do(ctx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, nd := range ret.Nodes {
+		fmt.Println(">", nd.CallFrame.FunctionName, "hits", nd.HitCount)
+	}
 
 	return nil
 }
