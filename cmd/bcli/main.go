@@ -163,6 +163,7 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	values["content"] = args.Cid
 	values["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
 	values["ppb"] = args.MaxPPB
+	values["time"] = resp.ResponseTime.Time().Unix()
 
 	c.metrics.Record("retrieval", tags, values)
 	c.send(node.Notify{GetResult: &node.GetResult{}})
