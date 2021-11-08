@@ -39,6 +39,7 @@ import (
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
 
+	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/node"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -99,8 +100,10 @@ func (r *Routing) Get(w http.ResponseWriter, req *http.Request) {
 
 // BrowserClient is a controller for a client node in a headless chrome browser
 type BrowserClient struct {
+	id         string
 	url        string
 	routing    *Routing
+	metrics    metrics.MetricsRecorder
 	mu         sync.Mutex
 	notify     func(node.Notify)
 	cancelFunc context.CancelFunc
@@ -151,6 +154,16 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 		return
 	}
 	fmt.Println("Status", resp.Status)
+
+	tags := make(map[string]string)
+	tags["responder"] = args.Peer
+	tags["requester"] = c.id
+
+	values := make(map[string]interface{})
+	values["content"] = args.Cid
+	values["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
+
+	c.metrics.Record("retrieval", tags, values)
 	c.send(node.Notify{GetResult: &node.GetResult{}})
 }
 
@@ -414,10 +427,15 @@ type Command struct {
 }
 
 var startArgs struct {
-	headless    bool
-	provider    bool
-	privKeyPath string
-	contentDir  string
+	headless     bool
+	provider     bool
+	privKeyPath  string
+	contentDir   string
+	influxURL    string
+	influxToken  string
+	influxOrg    string
+	influxBucket string
+	serverid     string
 }
 
 var startCmd = &ffcli.Command{
@@ -430,11 +448,27 @@ var startCmd = &ffcli.Command{
 		fs.BoolVar(&startArgs.provider, "provider", false, "start a provider node to retrieve from")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.contentDir, "content", "./content", "path to some content to add to the provider")
+		fs.StringVar(&startArgs.influxURL, "influxdb-url", "", "url to an influx db endpoint")
+		fs.StringVar(&startArgs.influxToken, "influxdb-token", "", "auth token to access influx db endpoint")
+		fs.StringVar(&startArgs.influxOrg, "influxdb-org", "", "organization id for influx db access")
+		fs.StringVar(&startArgs.influxBucket, "influxdb-bucket", "", "influx db bucket to use")
+		fs.StringVar(&startArgs.serverid, "server-id", "", "identification given to this client")
 		return fs
 	})(),
 }
 
 func runStart(parent context.Context, args []string) error {
+	influxConfig := &metrics.Config{
+		InfluxURL:   startArgs.influxURL,
+		InfluxToken: startArgs.influxToken,
+		Org:         startArgs.influxOrg,
+		Bucket:      startArgs.influxBucket,
+	}
+	if err := influxConfig.Validate(); err != nil {
+		influxConfig = nil
+	}
+	m := metrics.New(influxConfig)
+
 	l, err := net.Listen("tcp", "0.0.0.0:2002")
 	if err != nil {
 		return err
@@ -482,7 +516,7 @@ func runStart(parent context.Context, args []string) error {
 	}()
 	defer s.Close()
 
-	ready := make(chan serviceworker.Version)
+	ready := make(chan struct{})
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -490,12 +524,8 @@ func runStart(parent context.Context, args []string) error {
 			fmt.Printf("* console.%s call:\n", ev.Type)
 			for _, arg := range ev.Args {
 				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
-			}
-		case *serviceworker.EventWorkerVersionUpdated:
-			if len(ev.Versions) > 0 {
-				v := ev.Versions[0]
-				if v.Status == "activated" {
-					ready <- *v
+				if string(arg.Value) == "\"activated\"" {
+					close(ready)
 				}
 			}
 		}
@@ -505,14 +535,18 @@ func runStart(parent context.Context, args []string) error {
 
 	fmt.Println("test server running at", addr)
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(addr)); err != nil {
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(addr),
+	); err != nil {
 		return err
 	}
 	// wait for service worker to be ready
 	<-ready
 
 	nd := &BrowserClient{
+		id:         startArgs.serverid,
 		url:        addr,
+		metrics:    m,
 		routing:    routing,
 		cancelFunc: cancel,
 	}
@@ -704,6 +738,7 @@ func runE2E(parent context.Context, args []string) error {
 			case res := <-success:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
+				fmt.Printf("settled in %fms\n", res.Timing.WorkerRespondWithSettled)
 				speed := res.EncodedDataLength / res.Timing.ReceiveHeadersEnd
 				total += speed
 

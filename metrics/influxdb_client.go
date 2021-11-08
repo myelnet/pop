@@ -1,55 +1,73 @@
 package metrics
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	influxdb "github.com/influxdata/influxdb-client-go/v2"
 )
 
-const EnvInfluxDBURL = "INFLUXDB_URL"
-const EnvInfluxDBToken = "INFLUXDB_TOKEN"
-const EnvInfluxDBOrg = "INFLUXDB_ORG"
-const EnvInfluxDBBucket = "INFLUXDB_BUCKET"
-
+const (
+	EnvInfluxDBURL    = "INFLUXDB_URL"
+	EnvInfluxDBToken  = "INFLUXDB_TOKEN"
+	EnvInfluxDBOrg    = "INFLUXDB_ORG"
+	EnvInfluxDBBucket = "INFLUXDB_BUCKET"
+)
 
 type Config struct {
-  InfluxURL string
-  InfluxToken string
-  Org string
-  Bucket string
+	InfluxURL   string
+	InfluxToken string
+	Org         string
+	Bucket      string
+}
+
+func (c *Config) Validate() error {
+	if c.InfluxURL == "" {
+		return fmt.Errorf("missing db url")
+	}
+	if c.InfluxToken == "" {
+		return fmt.Errorf("missing auth token")
+	}
+	if c.Org == "" {
+		return fmt.Errorf("missing organization name")
+	}
+	if c.Bucket == "" {
+		return fmt.Errorf("missing bucket")
+	}
+	return nil
 }
 
 type MetricsRecorder interface {
-  Record(string, map[string]string, map[string]interface{})
-  URL() string
+	Record(string, map[string]string, map[string]interface{})
+	URL() string
 }
 
 // implements MetricsRecorder
 type InfluxDBClient struct {
-  client influxdb.Client
-  InfluxURL string
-  Org    string
-  Bucket string
+	client    influxdb.Client
+	InfluxURL string
+	Org       string
+	Bucket    string
 }
 
 func (idbc *InfluxDBClient) Record(name string, tag map[string]string, value map[string]interface{}) {
-  p := influxdb.NewPoint(name, tag, value, time.Now())
+	p := influxdb.NewPoint(name, tag, value, time.Now())
 
-  // get non-blocking write client
-  writeAPI := idbc.client.WriteAPI(idbc.Org, idbc.Bucket)
+	// get non-blocking write client
+	writeAPI := idbc.client.WriteAPI(idbc.Org, idbc.Bucket)
 
-  // write point asynchronously
-  writeAPI.WritePoint(p)
-  // Flush writes
-  writeAPI.Flush()
+	// write point asynchronously
+	writeAPI.WritePoint(p)
+	// Flush writes
+	writeAPI.Flush()
 }
 
 func (idbc *InfluxDBClient) URL() string {
-  return idbc.InfluxURL
+	return idbc.InfluxURL
 }
 
-type NullMetrics struct {}
+type NullMetrics struct{}
 
 func (*NullMetrics) Record(name string, tag map[string]string, value map[string]interface{}) {}
 
@@ -57,37 +75,35 @@ func (*NullMetrics) URL() string { return "" }
 
 func New(params *Config) MetricsRecorder {
 
-  if params == nil {
-    return &NullMetrics{}
-  }
-  // Create a new client using an InfluxDB server base URL and an authentication token
-  client := influxdb.NewClient(params.InfluxURL, params.InfluxToken)
+	if params == nil {
+		return &NullMetrics{}
+	}
+	// Create a new client using an InfluxDB server base URL and an authentication token
+	client := influxdb.NewClient(params.InfluxURL, params.InfluxToken)
 
-  return &InfluxDBClient{client, params.InfluxURL, params.Org, params.Bucket}
-
+	return &InfluxDBClient{client, params.InfluxURL, params.Org, params.Bucket}
 }
 
 func GetInfluxParams() *Config {
-  addr := os.Getenv(EnvInfluxDBURL)
+	addr := os.Getenv(EnvInfluxDBURL)
 	if addr == "" {
 		return nil
 	}
 
-  token := os.Getenv(EnvInfluxDBToken)
+	token := os.Getenv(EnvInfluxDBToken)
 	if token == "" {
 		return nil
 	}
 
-  org := os.Getenv(EnvInfluxDBOrg)
-  if org == "" {
-    return nil
-  }
+	org := os.Getenv(EnvInfluxDBOrg)
+	if org == "" {
+		return nil
+	}
 
-  bucket := os.Getenv(EnvInfluxDBBucket)
-  if bucket == "" {
-    return nil
-  }
+	bucket := os.Getenv(EnvInfluxDBBucket)
+	if bucket == "" {
+		return nil
+	}
 
-  return &Config{addr, token, org, bucket}
-
+	return &Config{addr, token, org, bucket}
 }
