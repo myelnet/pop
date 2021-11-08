@@ -13,7 +13,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/myelnet/pop/internal/utils"
-	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/node"
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"github.com/rs/zerolog"
@@ -37,8 +36,8 @@ type PopConfig struct {
 	filTokenType  string
 	domains       string
 	indexEndpoint string
-	logLevel string
-	logDir string
+	logLevel      string
+	logDir        string
 }
 
 var startArgs PopConfig
@@ -179,7 +178,6 @@ Manage your Myel point of presence from the command line.
 
 	opts := node.Options{
 		RepoPath:       path,
-		Metrics:        metrics.GetInfluxParams(),
 		BootstrapPeers: bAddrs,
 		FilEndpoint:    startArgs.filEndpoint,
 		FilToken:       filToken,
