@@ -18,7 +18,7 @@ do
   echo "/dns4/$dns/tcp/443/wss/p2p/$pid"
   echo $cid
 
-  bcli get -peer="/dns4/$dns/tcp/443/wss/p2p/$pid" -provider-addr="f1fhv76uecv5i3rrlp4wysqtpl7jaqy3lncupc3zi" "$cid/*"
+  bcli get -peer="/dns4/$dns/tcp/443/wss/p2p/$pid" -provider-addr="f1fhv76uecv5i3rrlp4wysqtpl7jaqy3lncupc3zi" "$cid"
 
   sleep 5
 

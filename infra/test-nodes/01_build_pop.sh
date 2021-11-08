@@ -24,16 +24,6 @@ then
   exit 2
 fi
 
-echo "Required arguments"
-echo "------------------"
-echo "AWS regions (REGIONS): $REGIONS"
-echo "AWS images (IMAGES): $IMAGES"
-echo "AWS worker node type (WORKER_NODE_TYPE): $WORKER_NODE_TYPE"
-echo "Worker nodes in each zone (WORKER_NODES): $WORKER_NODES"
-
-echo
-
-
 docker build --platform linux/x86_64 -t ${REGISTRY_URL}:latest .
 # uncomment if using aws registry
 # aws ecr get-login-password --region "$(cut -d'.' -f4 <<<${REGISTRY_URL})" | docker login --username AWS --password-stdin "$(cut -d'/' -f1 <<<${REGISTRY_URL})"
