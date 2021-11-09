@@ -14,6 +14,7 @@ require (
 	github.com/myelnet/pop v0.1.0
 	github.com/peterbourgon/ff/v3 v3.0.0
 	github.com/rs/zerolog v1.21.0
+	github.com/stretchr/testify v1.7.0
 )
 
 replace github.com/myelnet/pop => ../../
