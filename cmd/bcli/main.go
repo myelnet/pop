@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -21,7 +22,9 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/profiler"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/serviceworker"
 	"github.com/chromedp/chromedp"
 	"github.com/filecoin-project/go-address"
 	"github.com/ipfs/go-path"
@@ -36,6 +39,7 @@ import (
 	"github.com/peterbourgon/ff/v3"
 	"github.com/peterbourgon/ff/v3/ffcli"
 
+	"github.com/myelnet/pop/metrics"
 	"github.com/myelnet/pop/node"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -96,8 +100,10 @@ func (r *Routing) Get(w http.ResponseWriter, req *http.Request) {
 
 // BrowserClient is a controller for a client node in a headless chrome browser
 type BrowserClient struct {
+	id         string
 	url        string
 	routing    *Routing
+	metrics    metrics.MetricsRecorder
 	mu         sync.Mutex
 	notify     func(node.Notify)
 	cancelFunc context.CancelFunc
@@ -148,6 +154,17 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 		return
 	}
 	fmt.Println("Status", resp.Status)
+
+	tags := make(map[string]string)
+	tags["responder"] = args.Peer
+	tags["requester"] = c.id
+
+	values := make(map[string]interface{})
+	values["content"] = args.Cid
+	values["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
+	values["ppb"] = args.MaxPPB
+
+	c.metrics.Record("retrieval", tags, values)
 	c.send(node.Notify{GetResult: &node.GetResult{}})
 }
 
@@ -411,10 +428,15 @@ type Command struct {
 }
 
 var startArgs struct {
-	headless    bool
-	provider    bool
-	privKeyPath string
-	contentDir  string
+	headless     bool
+	provider     bool
+	privKeyPath  string
+	contentDir   string
+	influxURL    string
+	influxToken  string
+	influxOrg    string
+	influxBucket string
+	serverid     string
 }
 
 var startCmd = &ffcli.Command{
@@ -427,11 +449,27 @@ var startCmd = &ffcli.Command{
 		fs.BoolVar(&startArgs.provider, "provider", false, "start a provider node to retrieve from")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
 		fs.StringVar(&startArgs.contentDir, "content", "./content", "path to some content to add to the provider")
+		fs.StringVar(&startArgs.influxURL, "influxdb-url", "", "url to an influx db endpoint")
+		fs.StringVar(&startArgs.influxToken, "influxdb-token", "", "auth token to access influx db endpoint")
+		fs.StringVar(&startArgs.influxOrg, "influxdb-org", "", "organization id for influx db access")
+		fs.StringVar(&startArgs.influxBucket, "influxdb-bucket", "", "influx db bucket to use")
+		fs.StringVar(&startArgs.serverid, "server-id", "", "identification given to this client")
 		return fs
 	})(),
 }
 
 func runStart(parent context.Context, args []string) error {
+	influxConfig := &metrics.Config{
+		InfluxURL:   startArgs.influxURL,
+		InfluxToken: startArgs.influxToken,
+		Org:         startArgs.influxOrg,
+		Bucket:      startArgs.influxBucket,
+	}
+	if err := influxConfig.Validate(); err != nil {
+		influxConfig = nil
+	}
+	m := metrics.New(influxConfig)
+
 	l, err := net.Listen("tcp", "0.0.0.0:2002")
 	if err != nil {
 		return err
@@ -479,7 +517,7 @@ func runStart(parent context.Context, args []string) error {
 	}()
 	defer s.Close()
 
-	ready := make(chan struct{}, 1)
+	ready := make(chan struct{})
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -487,9 +525,8 @@ func runStart(parent context.Context, args []string) error {
 			fmt.Printf("* console.%s call:\n", ev.Type)
 			for _, arg := range ev.Args {
 				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
-
-				if fmt.Sprintf("%s", arg.Value) == "\"activated\"" {
-					ready <- struct{}{}
+				if string(arg.Value) == "\"activated\"" {
+					close(ready)
 				}
 			}
 		}
@@ -499,14 +536,18 @@ func runStart(parent context.Context, args []string) error {
 
 	fmt.Println("test server running at", addr)
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(addr)); err != nil {
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(addr),
+	); err != nil {
 		return err
 	}
 	// wait for service worker to be ready
 	<-ready
 
 	nd := &BrowserClient{
+		id:         startArgs.serverid,
 		url:        addr,
+		metrics:    m,
 		routing:    routing,
 		cancelFunc: cancel,
 	}
@@ -593,6 +634,8 @@ func runGet(ctx context.Context, args []string) error {
 var e2eArgs struct {
 	contentDir string
 	headless   bool
+	maxreqs    int64
+	profiler   bool
 }
 
 var e2eCmd = &ffcli.Command{
@@ -603,6 +646,8 @@ var e2eCmd = &ffcli.Command{
 		fs := flag.NewFlagSet("e2e", flag.ExitOnError)
 		fs.StringVar(&e2eArgs.contentDir, "content", "./content", "path to some content to add to the provider")
 		fs.BoolVar(&e2eArgs.headless, "headless", true, "run chrome as headless (without GUI)")
+		fs.Int64Var(&e2eArgs.maxreqs, "max-reqs", math.MaxInt64, "max number of requests")
+		fs.BoolVar(&e2eArgs.profiler, "profiler", false, "run profiler on all requests")
 		return fs
 	})(),
 }
@@ -646,7 +691,7 @@ func runE2E(parent context.Context, args []string) error {
 	}()
 	defer s.Close()
 
-	ready := make(chan struct{})
+	ready := make(chan serviceworker.Version)
 	done := make(chan struct{})
 
 	success := make(chan *network.Response)
@@ -666,9 +711,12 @@ func runE2E(parent context.Context, args []string) error {
 			fmt.Printf("* console.%s call:\n", ev.Type)
 			for _, arg := range ev.Args {
 				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
-
-				if fmt.Sprintf("%s", arg.Value) == "\"activated\"" {
-					close(ready)
+			}
+		case *serviceworker.EventWorkerVersionUpdated:
+			if len(ev.Versions) > 0 {
+				v := ev.Versions[0]
+				if v.Status == "activated" {
+					ready <- *v
 				}
 			}
 		}
@@ -680,6 +728,10 @@ func runE2E(parent context.Context, args []string) error {
 		attempted := make(map[string]*network.Request)
 
 		for {
+			if int64(i) == e2eArgs.maxreqs {
+				close(done)
+				return
+			}
 			select {
 			case req := <-request:
 				fmt.Println("Request:", req.Request.URL, req.RequestID)
@@ -687,14 +739,15 @@ func runE2E(parent context.Context, args []string) error {
 			case res := <-success:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
-				fmt.Println("size", res.EncodedDataLength)
-				fmt.Println("receiveHeadersEnd", res.Timing.ReceiveHeadersEnd)
+				fmt.Printf("settled in %fms\n", res.Timing.WorkerRespondWithSettled)
 				speed := res.EncodedDataLength / res.Timing.ReceiveHeadersEnd
 				total += speed
 
 				delete(attempted, res.URL)
 
-				i++
+				if res.FromServiceWorker {
+					i++
+				}
 
 			case err := <-failure:
 				fmt.Println("==> Failure:", err.ErrorText, err.RequestID)
@@ -703,7 +756,7 @@ func runE2E(parent context.Context, args []string) error {
 				for k := range attempted {
 					fmt.Println("Timeout", k)
 				}
-				close(done)
+				// close(done)
 				return
 			}
 		}
@@ -713,13 +766,27 @@ func runE2E(parent context.Context, args []string) error {
 
 	fmt.Println("test server running at", addr)
 
-	if err := chromedp.Run(ctx, chromedp.Navigate(addr)); err != nil {
+	if err := chromedp.Run(ctx,
+		serviceworker.Enable(),
+		chromedp.Navigate(addr),
+	); err != nil {
 		return err
 	}
 
-	<-ready
+	swv := <-ready
 
-	for _, k := range content.Keys {
+	err = chromedp.Run(ctx,
+		serviceworker.InspectWorker(swv.VersionID),
+	)
+	if err != nil {
+		return err
+	}
+
+	var actions []chromedp.Action
+	for i, k := range content.Keys {
+		if int64(i) == e2eArgs.maxreqs {
+			break
+		}
 		exp := fmt.Sprintf(`
     var imgSection = document.querySelector('section');
     var myImage = document.createElement('img');
@@ -734,13 +801,61 @@ func runE2E(parent context.Context, args []string) error {
     myFigure.appendChild(myImage);
     myFigure.appendChild(myCaption);
 `, "/"+content.Root+"/"+k, k, k)
-		err := chromedp.Run(ctx, chromedp.Evaluate(exp, nil))
+		actions = append(actions, chromedp.Evaluate(exp, nil))
+	}
+
+	if e2eArgs.profiler {
+		err := runProfiler(ctx, swv, done, actions...)
 		if err != nil {
 			return err
 		}
+	} else {
+		err = chromedp.Run(ctx, actions...)
+		if err != nil {
+			return err
+		}
+		<-done
 	}
 
+	return nil
+}
+
+// run the profiler on one or many actions. caller is responsible for saying when the actions a completed
+func runProfiler(ctx context.Context, v serviceworker.Version, done chan struct{}, actions ...chromedp.Action) error {
+	swctx, cancelswctx := chromedp.NewContext(ctx, chromedp.WithTargetID(v.TargetID))
+	defer cancelswctx()
+	err := chromedp.Run(swctx,
+		profiler.Enable(),
+		profiler.Start(),
+	)
+	if err != nil {
+		return fmt.Errorf("running profiler: %w", err)
+	}
+
+	err = chromedp.Run(ctx, actions...)
+	if err != nil {
+		return err
+	}
 	<-done
+
+	var ret *profiler.Profile
+	err = chromedp.Run(swctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			ret, err = profiler.Stop().Do(ctx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, nd := range ret.Nodes {
+		fmt.Println(">", nd.CallFrame.FunctionName, "hits", nd.HitCount)
+	}
 
 	return nil
 }
