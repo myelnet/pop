@@ -8,6 +8,7 @@ infra/k8s/install-playbook/key
 infra/k8s/*.resp
 infra/k8s/k8s-myel-pops/*/*
 infra/test-nodes/install-playbook/key
+infra/test-nodes/install-playbook/influxdb-env.sh
 infra/test-nodes/logs/*
 infra/test-nodes/test-files/*
 .goreleaser.yml
