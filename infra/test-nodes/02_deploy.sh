@@ -31,6 +31,8 @@ echo "AWS regions (REGIONS): $REGIONS"
 echo "AWS images (IMAGES): $IMAGES"
 echo "AWS worker node type (WORKER_NODE_TYPE): $WORKER_NODE_TYPE"
 echo "Worker nodes in each zone (WORKER_NODES): $WORKER_NODES"
+echo "Docker registry (REGISTRY_URL): $REGISTRY_URL"
+echo "Test script (TEST_SCRIPT): $TEST_SCRIPT"
 
 echo
 
