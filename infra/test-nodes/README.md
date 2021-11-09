@@ -17,7 +17,7 @@ Assumes you have the `aws cli`, `docker`, and the `pop` library set up appropria
 
 The scripts for deploying the cluster are in order:
 - `01_build_pop.sh`
-- `02_deploy.sh  
+- `02_deploy.sh`
 - `03_delete.sh`
 
 `01_build_pop.sh` builds the test pop image and pushes it to a docker registry.
