@@ -158,14 +158,24 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	tags := make(map[string]string)
 	tags["responder"] = args.Peer
 	tags["requester"] = c.id
+	tags["content"] = args.Cid
 
-	values := make(map[string]interface{})
-	values["content"] = args.Cid
-	values["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
-	values["ppb"] = args.MaxPPB
-	values["time"] = resp.ResponseTime.Time().Unix()
+	fields := make(map[string]interface{})
+	fields["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
+	fields["ppb"] = args.MaxPPB
+	fields["time"] = resp.ResponseTime.Time().Unix()
 
-	c.metrics.Record("retrieval", tags, values)
+	if timing, ok := resp.Headers["Server-Timing"]; ok {
+		values := parseTimingHeader(timing.(string))
+		if dial, ok := values["dial"]; ok {
+			if dur, ok := dial["dur"]; ok {
+				fields["dial"] = dur
+			}
+		}
+	}
+	fmt.Println(fields)
+
+	c.metrics.Record("retrieval", tags, fields)
 	c.send(node.Notify{GetResult: &node.GetResult{}})
 }
 
@@ -729,7 +739,7 @@ func runE2E(parent context.Context, args []string) error {
 		attempted := make(map[string]*network.Request)
 
 		for {
-			if int64(i) == e2eArgs.maxreqs {
+			if int64(i) == e2eArgs.maxreqs || i > 0 && len(attempted) == 0 {
 				close(done)
 				return
 			}
@@ -859,6 +869,33 @@ func runProfiler(ctx context.Context, v serviceworker.Version, done chan struct{
 	}
 
 	return nil
+}
+
+func parseTimingHeader(s string) map[string]map[string]string {
+	values := strings.Split(s, ",")
+
+	table := make(map[string]map[string]string)
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		cols := strings.Split(v, ";")
+		if len(cols) != 2 {
+			continue
+		}
+		k := cols[0]
+		params := cols[1:]
+		fps := make(map[string]string)
+		for _, p := range params {
+			pair := strings.Split(p, "=")
+			if len(pair) != 2 {
+				continue
+			}
+			fps[pair[0]] = pair[1]
+		}
+		if len(fps) > 0 {
+			table[k] = fps
+		}
+	}
+	return table
 }
 
 func connect(ctx context.Context) (net.Conn, *node.CommandClient, context.Context, context.CancelFunc) {
