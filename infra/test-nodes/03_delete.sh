@@ -18,6 +18,7 @@ echo
 
 my_dir="$(dirname "$0")"
 source "$my_dir/install-playbook/cluster-env.sh"
+source "$my_dir/install-playbook/influxdb-env.sh"
 source "$my_dir/install-playbook/validation.sh"
 
 echo "Required arguments"
