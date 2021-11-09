@@ -15,23 +15,6 @@ START_TIME=`date +%s`
 echo "Creating Myel test nodes..."
 echo
 
-
-export REGISTRY_URL=$1
-export TEST_SCRIPT=$2
-
-
-if [ -z "$REGISTRY_URL" ]
-then
-  echo -e "Please provide a docker registry url. For example: \`./01_build.sh aws.com/my-registry\`"
-  exit 2
-fi
-
-if [ -z "$TEST_SCRIPT" ]
-then
-  echo -e "Please provide a test script to run."
-  exit 2
-fi
-
 BOOT_SCRIPT=$(mktemp)
 envsubst <./install-playbook/boot-script.sh >$BOOT_SCRIPT
 
