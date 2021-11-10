@@ -16,6 +16,4 @@ echo "Installing docker ..."
 
 echo "Running image ..."
 
-CMD="chmod +x /test-files/${TEST_SCRIPT}; /test-files/${TEST_SCRIPT}"
-
-sudo docker run -d -v `pwd`/test-files:/test-files ${REGISTRY_URL} sh -c "$CMD"
+sudo docker run -d -v `pwd`/test-files:/test-files ${REGISTRY_URL} sh -c "chmod +x /test-files/${TEST_SCRIPT}; /test-files/${TEST_SCRIPT}"

@@ -8,11 +8,11 @@ declare -i i=0
 while true
 do
 
-  ((i % 100 == 0)) && killall bcli && sleep 5 && \
-                  nohup bcli start -server-id=${REGIONS[$index]}-${ip} \
+  ((i % 100 == 0)) && pkill -15 bcli && sleep 5 && \
+                  nohup bcli start -server-id=${region}-${ip} \
                                    -influxdb-url=${INFLUXDB_URL} \
                                    -influxdb-token=${INFLUXDB_TOKEN} \
-                                   -influxdb-org=${INFLUXDB_ORG}
+                                   -influxdb-org=${INFLUXDB_ORG} \
                                    -influxdb-bucket=${INFLUXDB_BUCKET} &
 
   sleep 5

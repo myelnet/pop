@@ -27,6 +27,8 @@ RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.d
 RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash && \
     apt-get install git-lfs
 
+RUN apt-get install -y procps
+
 ADD "https://api.github.com/repos/myelnet/pop/commits?per_page=1" latest_commit
 RUN git clone https://github.com/myelnet/pop;
 RUN cd pop; make benchmarks;
