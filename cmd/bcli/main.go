@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -163,13 +164,12 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	fields := make(map[string]interface{})
 	fields["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
 	fields["ppb"] = args.MaxPPB
-	fields["time"] = resp.ResponseTime.Time().Unix()
 
 	if timing, ok := resp.Headers["Server-Timing"]; ok {
 		values := parseTimingHeader(timing.(string))
 		if dial, ok := values["dial"]; ok {
 			if dur, ok := dial["dur"]; ok {
-				fields["dial"] = dur
+				fields["dial"], _ = strconv.ParseFloat(dur, 8)
 			}
 		}
 	}

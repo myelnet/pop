@@ -16,21 +16,20 @@ Assumes you have the `aws cli`, `docker`, and the `pop` library set up appropria
 ## Using these scripts
 
 The scripts for deploying the cluster are in order:
-- `01_build_pop.sh DOCKER_REPO` eg. `DOCKER_REPO=docker.io/myel/test-nodes`
-- `02_deploy.sh DOCKER_REPO DOCKER_USERNAME DOCKER_PASSWORD`  eg. `DOCKER_REPO=docker.io/myel/test-nodes, DOCKER_USERNAME=username, DOCKER_PASSWORD=password`
+- `01_build_pop.sh`
+- `02_deploy.sh`
 - `03_delete.sh`
 
 `01_build_pop.sh` builds the test pop image and pushes it to a docker registry.
 
-`02_deploy.sh` deploys the docker image to a series of aws EC2 instances with specifications detailed in `install-playbook/cluster-env.sh`.
+`02_deploy.sh` deploys a docker image to a series of aws EC2 instances with specifications detailed in `install-playbook/cluster-env.sh`.
 
 `delete_kops.sh` destroys all aws resources associated with the cluster.
 
 ## Notes
 
-- The deployment requires an existing pop to be running locally (`pop start`) as it extracts the FIL private key from this node to share it with all deployed containers in the cluster.
 
-- Requires the creation of a `test-files` folder containing newline delimited files `cids` and `providers`. The first contains a list of test CIDs to retrieve from providers, the second contains a provider DNS and peer ID on each line -- these are the tested providers. 
+- Requires the creation of a `test-files` folder containing newline delimited files `cids` and `providers`. The first contains a list of test CIDs to retrieve from providers, the second contains a provider DNS and peer ID on each line -- these are the tested providers.
 
 ``` bash
 QmNM8jASu723xuVSNPmBf8Yyaq4tkzaDWBCE3sVuQoaDjR

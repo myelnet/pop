@@ -17,35 +17,10 @@ echo
 
 
 
-export REGISTRY_URL=$1
-export DOCKER_LOGIN=$2
-export DOCKER_PASSWORD=$3
-
-if [ -z "$REGISTRY_URL" ]
-then
-  echo -e "Please provide a docker registry url. For example: \`./01_build.sh aws.com/my-registry\`"
-  exit 2
-fi
-
-if [ -z "$DOCKER_LOGIN" ]
-then
-  echo -e "Please provide a docker login."
-  exit 2
-fi
-
-if [ -z "$DOCKER_PASSWORD" ]
-then
-  echo -e "Please provide a docker password."
-  exit 2
-fi
-
-BOOT_SCRIPT=$(mktemp)
-envsubst <./install-playbook/boot-script.sh >$BOOT_SCRIPT
-
-echo $BOOT_SCRIPT
 
 my_dir="$(dirname "$0")"
 source "$my_dir/install-playbook/cluster-env.sh"
+source "$my_dir/install-playbook/influxdb-env.sh"
 source "$my_dir/install-playbook/validation.sh"
 
 echo "Required arguments"
@@ -54,10 +29,14 @@ echo "AWS regions (REGIONS): $REGIONS"
 echo "AWS images (IMAGES): $IMAGES"
 echo "AWS worker node type (WORKER_NODE_TYPE): $WORKER_NODE_TYPE"
 echo "Worker nodes in each zone (WORKER_NODES): $WORKER_NODES"
+echo "Docker registry (REGISTRY_URL): $REGISTRY_URL"
+echo "Test script (TEST_SCRIPT): $TEST_SCRIPT"
 
 echo
 
-
+BOOT_SCRIPT=$(mktemp)
+envsubst <./install-playbook/boot-script.sh >$BOOT_SCRIPT
+echo "Boot script created at ${BOOT_SCRIPT}"
 
 # Verify with the user before continuing.
 echo
@@ -83,37 +62,39 @@ for index in ${!REGIONS[@]};
 
 do
 
-  LOG_DIR=./logs/${REGIONS[$index]}
+  export region=${REGIONS[$index]}
+  image=${IMAGES[$index]}
+  log_dir=./logs/${region}
 
-  mkdir -p $LOG_DIR
+  mkdir -p $log_dir
 
-  echo "Deploying ${WORKER_NODES[$index]} nodes in ${REGIONS[$index]}, with image ${IMAGES[$index]}"
+  echo "Deploying $WORKER_NODES nodes in $region, with image $image"
 
-  aws --region ${REGIONS[$index]}  ec2 create-key-pair --key-name MyelTest --query 'KeyMaterial' --output text > ~/.ssh/MyelTest-${REGIONS[$index]}.pem
+  aws --region $region  ec2 create-key-pair --key-name MyelTest --query 'KeyMaterial' --output text > ~/.ssh/MyelTest-$region.pem
 
-  chmod 400 ~/.ssh/MyelTest-${REGIONS[$index]}.pem
+  chmod 400 ~/.ssh/MyelTest-$region.pem
 
-  aws --region ${REGIONS[$index]} ec2 create-security-group --group-name test-nodes --description "Security group for testing nodes" --output text >> $LOG_DIR/sg.out
+  aws --region $region ec2 create-security-group --group-name test-nodes --description "Security group for testing nodes" --output text > $log_dir/sg.out
 
-  aws --region ${REGIONS[$index]} ec2 authorize-security-group-ingress --group-name test-nodes \
+  aws --region $region ec2 authorize-security-group-ingress --group-name test-nodes \
     --protocol tcp \
     --port 41504 \
-    --cidr 0.0.0.0/0 >> $LOG_DIR/ingress.out
+    --cidr 0.0.0.0/0 > $log_dir/ingress.out
 
-  aws --region ${REGIONS[$index]} ec2 authorize-security-group-ingress --group-name test-nodes \
+  aws --region $region ec2 authorize-security-group-ingress --group-name test-nodes \
     --protocol tcp \
     --port 22 \
-    --cidr 0.0.0.0/0 >> $LOG_DIR/ingress-ssh.out
+    --cidr 0.0.0.0/0 > $log_dir/ingress-ssh.out
 
-  aws --region ${REGIONS[$index]}  ec2 run-instances --key-name $KEY_NAME --image-id ${IMAGES[$index]} --count ${WORKER_NODES}  --instance-type $WORKER_NODE_TYPE \
+  aws --region $region  ec2 run-instances --key-name $KEY_NAME --image-id $image --count ${WORKER_NODES}  --instance-type $WORKER_NODE_TYPE \
           --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=test-node}]" \
-          --placement  "AvailabilityZone= ${REGIONS[$index]}a,Tenancy=default" \
+          --placement  "AvailabilityZone= ${region}a,Tenancy=default" \
           --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=500,VolumeType=gp2}" \
-          --security-groups "test-nodes" >> $LOG_DIR/ec2.out
+          --security-groups "test-nodes" > $log_dir/ec2.out
 
-  sleep 60
+  sleep 80
 
-  ips=`aws --region ${REGIONS[$index]} \
+  ips=`aws --region $region \
         ec2 describe-instances \
         --filters \
         "Name=instance-state-name,Values=running" \
@@ -122,15 +103,29 @@ do
         --output text`
   ipset=(`echo ${ips}  | tr '\n' ' '`);
 
+
+
+
   for ip in "${ipset[@]}"
   do
+     export ip=$ip
+
+     test_script_vm=$(mktemp)
+     envsubst '${region} ${ip} ${INFLUXDB_URL} ${INFLUXDB_TOKEN} ${INFLUXDB_ORG} ${INFLUXDB_BUCKET}' <./install-playbook/$TEST_SCRIPT >$test_script_vm
+
+     echo "Test script created at ${test_script_vm}"
+
      echo "Booting $ip"
         # Skip null items
      if [ -z "$ip" ]; then
        continue
      fi
-     scp -r -i ~/.ssh/MyelTest-${REGIONS[$index]}.pem ./test-files ubuntu@$ip:/home/ubuntu
-     ssh -i ~/.ssh/MyelTest-${REGIONS[$index]}.pem ubuntu@$ip 'bash -s' < $BOOT_SCRIPT
+     scp -o StrictHostKeyChecking=no -r -i ~/.ssh/MyelTest-${region}.pem ./test-files ubuntu@$ip:/home/ubuntu
+     scp -o StrictHostKeyChecking=no -i ~/.ssh/MyelTest-${region}.pem $test_script_vm ubuntu@$ip:/home/ubuntu/test-files/$TEST_SCRIPT
+     ssh -o StrictHostKeyChecking=no -i ~/.ssh/MyelTest-${region}.pem ubuntu@$ip 'bash -s' < $BOOT_SCRIPT
+
+     sudo rm $test_script_vm
+
   done
 
 done
