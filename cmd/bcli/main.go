@@ -243,7 +243,7 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	tags["content"] = args.Cid
 
 	fields := make(map[string]interface{})
-	fields["transfer-duration"] = tduration
+	fields["transfer-duration"] = tduration.Milliseconds()
 	fields["ttfb"] = resp.Timing.WorkerRespondWithSettled
 	fields["ppb"] = args.MaxPPB
 
@@ -533,7 +533,7 @@ var startCmd = &ffcli.Command{
 		fs.BoolVar(&startArgs.headless, "headless", true, "run chrome as headless (without GUI)")
 		fs.BoolVar(&startArgs.provider, "provider", false, "start a provider node to retrieve from")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
-		fs.StringVar(&startArgs.contentDir, "content", "./content", "path to some content to add to the provider")
+		fs.StringVar(&startArgs.contentDir, "content", "./images", "path to some content to add to the provider")
 		fs.StringVar(&startArgs.influxURL, "influxdb-url", "", "url to an influx db endpoint")
 		fs.StringVar(&startArgs.influxToken, "influxdb-token", "", "auth token to access influx db endpoint")
 		fs.StringVar(&startArgs.influxOrg, "influxdb-org", "", "organization id for influx db access")
@@ -731,7 +731,7 @@ var e2eCmd = &ffcli.Command{
 	Exec:      runE2E,
 	FlagSet: (func() *flag.FlagSet {
 		fs := flag.NewFlagSet("e2e", flag.ExitOnError)
-		fs.StringVar(&e2eArgs.contentDir, "content", "./content", "path to some content to add to the provider")
+		fs.StringVar(&e2eArgs.contentDir, "content", "./images", "path to some content to add to the provider")
 		fs.BoolVar(&e2eArgs.headless, "headless", true, "run chrome as headless (without GUI)")
 		fs.Int64Var(&e2eArgs.maxreqs, "max-reqs", math.MaxInt64, "max number of requests")
 		fs.BoolVar(&e2eArgs.profiler, "profiler", false, "run profiler on all requests")
@@ -918,7 +918,7 @@ func runE2E(ctx context.Context, args []string) error {
 
     myVideo.src = '%s';
     myVideo.autoplay = true;
-    myVideo.muted = true
+    myVideo.muted = true;
     myCaption.innerHTML = '<strong>' + '%s' + '</strong>';
 
     imgSection.appendChild(myFigure);
