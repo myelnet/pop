@@ -778,7 +778,7 @@ func runE2E(ctx context.Context, args []string) error {
 
 		for {
 			if i > 0 && len(attempted) == 0 {
-				// close(done)
+				close(done)
 				return
 			}
 			select {
