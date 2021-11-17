@@ -11,18 +11,21 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/chromedp/cdproto/cachestorage"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/profiler"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/serviceworker"
@@ -52,51 +55,56 @@ var staticFiles embed.FS
 // Routing matches provider records with content IDs
 type Routing struct {
 	mu      sync.Mutex
-	records map[string][]byte
+	records map[string][]node.RRecord
 }
 
 // NewRouting makes a new routing instanc
 func NewRouting() *Routing {
 	return &Routing{
-		records: make(map[string][]byte),
+		records: make(map[string][]node.RRecord),
 	}
 }
 
-// Set encodes and adds a new record
+// Set adds a new record. Does not prevent duplication
 func (r *Routing) Set(key string, rec node.RRecord) error {
-	rbuf := new(bytes.Buffer)
-	if err := rec.MarshalCBOR(rbuf); err != nil {
-		return err
-	}
-
-	n, err := qp.BuildList(basicnode.Prototype.Any, 1, func(la datamodel.ListAssembler) {
-		qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
-	})
-	if err != nil {
-		return err
-	}
-
-	lbuf := new(bytes.Buffer)
-	if err := dagcbor.Encode(n, lbuf); err != nil {
-		return err
-	}
-
 	r.mu.Lock()
-	r.records[key] = lbuf.Bytes()
+	r.records[key] = append(r.records[key], rec)
 	r.mu.Unlock()
 	return nil
 }
 
-// Get writes the bytes to a writer
+// Get writes the bytes to a writer. Selects a random provider from the list and serves it.
 func (r *Routing) Get(w http.ResponseWriter, req *http.Request) {
 	key := strings.TrimPrefix(req.URL.Path, "/routing/")
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	rec, ok := r.records[key]
+
+	recs, ok := r.records[key]
 	if !ok {
 		http.Error(w, "record not found", http.StatusNotFound)
 	}
-	w.Write(rec)
+
+	n, err := qp.BuildList(basicnode.Prototype.Any, int64(len(recs)), func(la datamodel.ListAssembler) {
+		for _, rec := range recs {
+			rbuf := new(bytes.Buffer)
+			if err := rec.MarshalCBOR(rbuf); err != nil {
+				continue
+			}
+			qp.ListEntry(la, qp.Bytes(rbuf.Bytes()))
+		}
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	lbuf := new(bytes.Buffer)
+	if err := dagcbor.Encode(n, lbuf); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(lbuf.Bytes())
 }
 
 // BrowserClient is a controller for a client node in a headless chrome browser
@@ -110,6 +118,7 @@ type BrowserClient struct {
 	cancelFunc context.CancelFunc
 }
 
+// Get triggers a retrieval by resolving a path while navigating straight to its url
 func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	sendErr := func(err error) {
 		c.send(node.Notify{
@@ -149,12 +158,84 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 		}
 	}
 
-	resp, err := chromedp.RunResponse(ctx, chromedp.Navigate(c.url+"/"+args.Cid))
+	var resp *network.Response
+	var tduration time.Duration
+	err = chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		lctx, lcancel := context.WithCancel(ctx)
+		defer lcancel()
+
+		var loadErr error
+		finished := false
+		hasInit := false
+		var reqStart time.Time
+		chromedp.ListenTarget(lctx, func(ev interface{}) {
+			switch ev := ev.(type) {
+			case *network.EventRequestWillBeSent:
+				reqStart = ev.Timestamp.Time()
+			case *network.EventLoadingFailed:
+				loadErr = fmt.Errorf("page load error %s", ev.ErrorText)
+				finished = true
+				lcancel()
+			case *network.EventResponseReceived:
+				resp = ev.Response
+			case *page.EventLifecycleEvent:
+				if ev.Name == "init" {
+					hasInit = true
+				}
+			case *network.EventLoadingFinished:
+				if hasInit {
+					tduration = ev.Timestamp.Time().Sub(reqStart)
+					finished = true
+					lcancel()
+				}
+			}
+		})
+		if err := chromedp.Run(ctx, chromedp.Navigate(c.url+"/"+args.Cid)); err != nil {
+			return err
+		}
+
+		// block until we have finished loading.
+		select {
+		case <-lctx.Done():
+			if loadErr != nil {
+				return loadErr
+			}
+			// If the ctx parameter was cancelled by the caller (or
+			// by a timeout etc) the select will race between
+			// lctx.Done and ctx.Done, since lctx is a sub-context
+			// of ctx. So we can't return nil here, as otherwise
+			// that race would mean that we would drop 50% of the
+			// parent context cancellation errors.
+			if !finished {
+				return ctx.Err()
+			}
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}))
 	if err != nil {
 		sendErr(err)
 		return
 	}
-	fmt.Println("Status", resp.Status)
+
+	// delete cache between requests
+	if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		caches, err := cachestorage.RequestCacheNames(c.url).Do(ctx)
+		if err != nil {
+			return err
+		}
+		for _, c := range caches {
+			err := cachestorage.DeleteCache(c.CacheID).Do(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})); err != nil {
+		sendErr(err)
+		return
+	}
 
 	tags := make(map[string]string)
 	tags["responder"] = args.Peer
@@ -162,17 +243,10 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	tags["content"] = args.Cid
 
 	fields := make(map[string]interface{})
-	fields["transfer-duration"] = resp.Timing.WorkerRespondWithSettled
+	fields["transfer-duration"] = tduration
+	fields["ttfb"] = resp.Timing.WorkerRespondWithSettled
 	fields["ppb"] = args.MaxPPB
 
-	if timing, ok := resp.Headers["Server-Timing"]; ok {
-		values := parseTimingHeader(timing.(string))
-		if dial, ok := values["dial"]; ok {
-			if dur, ok := dial["dur"]; ok {
-				fields["dial"], _ = strconv.ParseFloat(dur, 8)
-			}
-		}
-	}
 	fmt.Println(fields)
 
 	c.metrics.Record("retrieval", tags, fields)
@@ -647,6 +721,8 @@ var e2eArgs struct {
 	headless   bool
 	maxreqs    int64
 	profiler   bool
+	providers  int
+	clients    int
 }
 
 var e2eCmd = &ffcli.Command{
@@ -659,103 +735,68 @@ var e2eCmd = &ffcli.Command{
 		fs.BoolVar(&e2eArgs.headless, "headless", true, "run chrome as headless (without GUI)")
 		fs.Int64Var(&e2eArgs.maxreqs, "max-reqs", math.MaxInt64, "max number of requests")
 		fs.BoolVar(&e2eArgs.profiler, "profiler", false, "run profiler on all requests")
+		fs.IntVar(&e2eArgs.providers, "providers", 1, "number of providers storing the content")
+		fs.IntVar(&e2eArgs.clients, "clients", 1, "number of browser contexts running clients in parallel")
 		return fs
 	})(),
 }
 
-func runE2E(parent context.Context, args []string) error {
+func runE2E(ctx context.Context, args []string) error {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", e2eArgs.headless))
 
-	allocCtx, cancel := chromedp.NewExecAllocator(parent, opts...)
+	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancel()
 
-	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
-
-	content, err := runNode(ctx, cancel, e2eArgs.contentDir)
-	if err != nil {
-		return err
+	var offers []Content
+	for i := 0; i < e2eArgs.providers; i++ {
+		content, err := runNode(ctx, cancel, e2eArgs.contentDir)
+		if err != nil {
+			return err
+		}
+		offers = append(offers, content)
 	}
 
 	routing := NewRouting()
 
-	if err := routing.Set(content.Root, content.Offer); err != nil {
-		return err
+	for _, c := range offers {
+		if err := routing.Set(c.Root, c.Offer); err != nil {
+			return err
+		}
 	}
 
-	sl, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return err
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.FS(staticFiles)))
-
-	mux.HandleFunc("/routing/", routing.Get)
-
-	s := &http.Server{
-		Handler: mux,
-	}
-
-	go func() {
-		s.Serve(sl)
-	}()
-	defer s.Close()
-
-	ready := make(chan serviceworker.Version)
 	done := make(chan struct{})
 
-	success := make(chan *network.Response)
+	success := make(chan *network.EventLoadingFinished)
 	failure := make(chan *network.EventLoadingFailed)
 	request := make(chan *network.EventRequestWillBeSent)
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
-		switch ev := ev.(type) {
-		case *network.EventRequestWillBeSent:
-			request <- ev
-		case *network.EventResponseReceived:
-			if ev.Response != nil {
-				success <- ev.Response
-			}
-		case *network.EventLoadingFailed:
-			failure <- ev
-		case *runtime.EventConsoleAPICalled:
-			fmt.Printf("* console.%s call:\n", ev.Type)
-			for _, arg := range ev.Args {
-				fmt.Printf("%s - %s\n", arg.Type, arg.Value)
-			}
-		case *serviceworker.EventWorkerVersionUpdated:
-			if len(ev.Versions) > 0 {
-				v := ev.Versions[0]
-				if v.Status == "activated" {
-					ready <- *v
-				}
-			}
-		}
-	})
+	response := make(chan *network.Response)
 	go func() {
 		i := 0
 		total := 0.0
 
-		attempted := make(map[string]*network.Request)
+		attempted := make(map[string]*network.EventRequestWillBeSent)
 
 		for {
-			if int64(i) == e2eArgs.maxreqs || i > 0 && len(attempted) == 0 {
+			if i > 0 && len(attempted) == 0 {
 				close(done)
 				return
 			}
 			select {
 			case req := <-request:
 				fmt.Println("Request:", req.Request.URL, req.RequestID)
-				attempted[req.Request.URL] = req.Request
+				attempted[req.RequestID.String()] = req
 			case res := <-success:
+
+				req := attempted[res.RequestID.String()]
+				fmt.Println("Finished:", res.Timestamp.Time().Sub(req.Timestamp.Time()).Milliseconds())
+				delete(attempted, res.RequestID.String())
+
+			case res := <-response:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
 				fmt.Printf("settled in %fms\n", res.Timing.WorkerRespondWithSettled)
 				speed := res.EncodedDataLength / res.Timing.ReceiveHeadersEnd
 				total += speed
-
-				delete(attempted, res.URL)
-
 				if res.FromServiceWorker {
 					i++
 				}
@@ -769,36 +810,91 @@ func runE2E(parent context.Context, args []string) error {
 				}
 				// close(done)
 				return
+			case <-ctx.Done():
 			}
 		}
 	}()
 
-	addr := "http://" + sl.Addr().String()
+	for i := 0; i < e2eArgs.clients; i++ {
+		ctx, cancel := chromedp.NewContext(allocCtx)
+		defer cancel()
 
-	fmt.Println("test server running at", addr)
-
-	if err := chromedp.Run(ctx,
-		serviceworker.Enable(),
-		chromedp.Navigate(addr),
-	); err != nil {
-		return err
-	}
-
-	swv := <-ready
-
-	err = chromedp.Run(ctx,
-		serviceworker.InspectWorker(swv.VersionID),
-	)
-	if err != nil {
-		return err
-	}
-
-	var actions []chromedp.Action
-	for i, k := range content.Keys {
-		if int64(i) == e2eArgs.maxreqs {
-			break
+		sl, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return err
 		}
-		exp := fmt.Sprintf(`
+
+		mux := http.NewServeMux()
+		mux.Handle("/", http.FileServer(http.FS(staticFiles)))
+
+		mux.HandleFunc("/routing/", routing.Get)
+
+		s := &http.Server{
+			Handler: mux,
+		}
+
+		go func() {
+			s.Serve(sl)
+		}()
+		defer s.Close()
+
+		ready := make(chan serviceworker.Version)
+		chromedp.ListenTarget(ctx, func(ev interface{}) {
+			switch ev := ev.(type) {
+			case *network.EventRequestWillBeSent:
+				request <- ev
+			case *network.EventResponseReceived:
+				if ev.Response != nil {
+					response <- ev.Response
+				}
+			case *network.EventLoadingFailed:
+				failure <- ev
+			case *network.EventLoadingFinished:
+				success <- ev
+			case *runtime.EventConsoleAPICalled:
+				fmt.Printf("* console.%s call:\n", ev.Type)
+				for _, arg := range ev.Args {
+					fmt.Printf("%s - %s\n", arg.Type, arg.Value)
+				}
+			case *serviceworker.EventWorkerVersionUpdated:
+				if len(ev.Versions) > 0 {
+					v := ev.Versions[0]
+					if v.Status == "activated" {
+						ready <- *v
+					}
+				}
+			}
+		})
+		addr := "http://" + sl.Addr().String()
+
+		fmt.Println("test server running at", addr)
+
+		if err := chromedp.Run(ctx,
+			serviceworker.Enable(),
+			chromedp.Navigate(addr),
+		); err != nil {
+			return err
+		}
+
+		swv := <-ready
+
+		err = chromedp.Run(ctx,
+			serviceworker.InspectWorker(swv.VersionID),
+		)
+		if err != nil {
+			return err
+		}
+
+		var actions []chromedp.Action
+		for i, k := range offers[0].Keys {
+			if int64(i) == e2eArgs.maxreqs {
+				break
+			}
+			tp := mime.TypeByExtension(filepath.Ext(k))
+
+			switch true {
+			case strings.Contains(tp, "image"):
+				exp := fmt.Sprintf(`
     var imgSection = document.querySelector('section');
     var myImage = document.createElement('img');
     var myFigure = document.createElement('figure');
@@ -811,22 +907,41 @@ func runE2E(parent context.Context, args []string) error {
     imgSection.appendChild(myFigure);
     myFigure.appendChild(myImage);
     myFigure.appendChild(myCaption);
-`, "/"+content.Root+"/"+k, k, k)
-		actions = append(actions, chromedp.Evaluate(exp, nil))
-	}
+`, "/"+offers[0].Root+"/"+k, k, k)
+				actions = append(actions, chromedp.Evaluate(exp, nil))
+			case strings.Contains(tp, "video"):
+				exp := fmt.Sprintf(`
+    var imgSection = document.querySelector('section');
+    var myVideo = document.createElement('video');
+    var myFigure = document.createElement('figure');
+    var myCaption = document.createElement('caption');
 
-	if e2eArgs.profiler {
-		err := runProfiler(ctx, swv, done, actions...)
-		if err != nil {
-			return err
+    myVideo.src = '%s';
+    myVideo.autoplay = true;
+    myVideo.muted = true
+    myCaption.innerHTML = '<strong>' + '%s' + '</strong>';
+
+    imgSection.appendChild(myFigure);
+    myFigure.appendChild(myVideo);
+    myFigure.appendChild(myCaption);
+`, "/"+offers[0].Root+"/"+k, k)
+				actions = append(actions, chromedp.Evaluate(exp, nil))
+			}
 		}
-	} else {
-		err = chromedp.Run(ctx, actions...)
-		if err != nil {
-			return err
+
+		if e2eArgs.profiler {
+			err := runProfiler(ctx, swv, done, actions...)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = chromedp.Run(ctx, actions...)
+			if err != nil {
+				return err
+			}
 		}
-		<-done
 	}
+	<-done
 
 	return nil
 }
