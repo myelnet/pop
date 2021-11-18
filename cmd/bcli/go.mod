@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/chromedp/cdproto v0.0.0-20211025030258-2570df970243
 	github.com/chromedp/chromedp v0.7.4
+	github.com/docker/go-units v0.4.0
 	github.com/filecoin-project/go-address v0.0.5
 	github.com/ipfs/go-path v0.0.9
 	github.com/ipld/go-ipld-prime v0.12.3

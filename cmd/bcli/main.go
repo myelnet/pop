@@ -30,6 +30,7 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/serviceworker"
 	"github.com/chromedp/chromedp"
+	"github.com/docker/go-units"
 	"github.com/filecoin-project/go-address"
 	"github.com/ipfs/go-path"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
@@ -160,6 +161,7 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 
 	var resp *network.Response
 	var tduration time.Duration
+	var size int64
 	err = chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		lctx, lcancel := context.WithCancel(ctx)
 		defer lcancel()
@@ -178,6 +180,8 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 				lcancel()
 			case *network.EventResponseReceived:
 				resp = ev.Response
+			case *network.EventDataReceived:
+				size += ev.DataLength
 			case *page.EventLifecycleEvent:
 				if ev.Name == "init" {
 					hasInit = true
@@ -246,6 +250,7 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	fields["transfer-duration"] = tduration.Milliseconds()
 	fields["ttfb"] = resp.Timing.WorkerRespondWithSettled
 	fields["ppb"] = args.MaxPPB
+	fields["data-size"] = size
 
 	fmt.Println(fields)
 
@@ -769,34 +774,37 @@ func runE2E(ctx context.Context, args []string) error {
 	success := make(chan *network.EventLoadingFinished)
 	failure := make(chan *network.EventLoadingFailed)
 	request := make(chan *network.EventRequestWillBeSent)
+	datarec := make(chan *network.EventDataReceived)
 	response := make(chan *network.Response)
 	go func() {
 		i := 0
-		total := 0.0
 
 		attempted := make(map[string]*network.EventRequestWillBeSent)
+		sizes := make(map[string]int64)
 
 		for {
 			if i > 0 && len(attempted) == 0 {
-				close(done)
+				// close(done)
 				return
 			}
 			select {
 			case req := <-request:
 				fmt.Println("Request:", req.Request.URL, req.RequestID)
 				attempted[req.RequestID.String()] = req
+			case rec := <-datarec:
+				sizes[rec.RequestID.String()] = rec.DataLength
 			case res := <-success:
-
-				req := attempted[res.RequestID.String()]
-				fmt.Println("Finished:", res.Timestamp.Time().Sub(req.Timestamp.Time()).Milliseconds())
-				delete(attempted, res.RequestID.String())
+				reqid := res.RequestID.String()
+				req := attempted[reqid]
+				dur := res.Timestamp.Time().Sub(req.Timestamp.Time())
+				speed := float64(sizes[reqid]) / dur.Seconds()
+				fmt.Println("Finished:", dur.Milliseconds(), units.HumanSize(float64(sizes[reqid])), units.HumanSize(speed))
+				delete(attempted, reqid)
 
 			case res := <-response:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
 				fmt.Printf("settled in %fms\n", res.Timing.WorkerRespondWithSettled)
-				speed := res.EncodedDataLength / res.Timing.ReceiveHeadersEnd
-				total += speed
 				if res.FromServiceWorker {
 					i++
 				}
@@ -851,6 +859,8 @@ func runE2E(ctx context.Context, args []string) error {
 				failure <- ev
 			case *network.EventLoadingFinished:
 				success <- ev
+			case *network.EventDataReceived:
+				datarec <- ev
 			case *runtime.EventConsoleAPICalled:
 				fmt.Printf("* console.%s call:\n", ev.Type)
 				for _, arg := range ev.Args {
