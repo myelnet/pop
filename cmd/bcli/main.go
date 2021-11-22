@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/cachestorage"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/profiler"
@@ -167,31 +168,77 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 		defer lcancel()
 
 		var loadErr error
+		// loaderID lets us filter the requests from the currently
+		// loading navigation.
+		var loaderID cdp.LoaderID
+		// reqID is the request we're currently looking at.
+		var reqID network.RequestID
+		// url of the navigation request
+		var url string
+
 		finished := false
 		hasInit := false
 		var reqStart time.Time
-		chromedp.ListenTarget(lctx, func(ev interface{}) {
+
+		handleEvent := func(ev interface{}) {
 			switch ev := ev.(type) {
 			case *network.EventRequestWillBeSent:
-				reqStart = ev.Timestamp.Time()
+				if ev.LoaderID == loaderID && ev.Type == network.ResourceTypeDocument {
+					reqStart = ev.Timestamp.Time()
+					reqID = ev.RequestID
+					url = ev.Request.URL
+					return
+				}
+				// for some media the request is for some reason separated so we update the ID
+				if ev.LoaderID == loaderID && ev.Request.URL == url {
+					reqID = ev.RequestID
+				}
 			case *network.EventLoadingFailed:
-				loadErr = fmt.Errorf("page load error %s", ev.ErrorText)
-				finished = true
-				lcancel()
+				if ev.RequestID == reqID {
+					loadErr = fmt.Errorf("page load error %s", ev.ErrorText)
+					finished = true
+					lcancel()
+				}
 			case *network.EventResponseReceived:
-				resp = ev.Response
+				if ev.RequestID == reqID {
+					resp = ev.Response
+				}
 			case *network.EventDataReceived:
-				size += ev.DataLength
-			case *page.EventLifecycleEvent:
-				if ev.Name == "init" {
-					hasInit = true
+				if ev.RequestID == reqID {
+					size += ev.DataLength
 				}
 			case *network.EventLoadingFinished:
-				if hasInit {
+				if hasInit && ev.RequestID == reqID {
 					tduration = ev.Timestamp.Time().Sub(reqStart)
 					finished = true
 					lcancel()
 				}
+			}
+
+		}
+
+		// earlyEvents is a buffered list of events which happened
+		// before we knew what loaderID to look for.
+		var earlyEvents []interface{}
+
+		chromedp.ListenTarget(lctx, func(ev interface{}) {
+			if loaderID != "" {
+				handleEvent(ev)
+				return
+			}
+			earlyEvents = append(earlyEvents, ev)
+			switch ev := ev.(type) {
+			case *page.EventLifecycleEvent:
+				if ev.Name == "init" {
+					loaderID = ev.LoaderID
+					hasInit = true
+				}
+			}
+			if loaderID != "" {
+				for _, ev := range earlyEvents {
+					handleEvent(ev)
+				}
+				earlyEvents = nil
 			}
 		})
 		if err := chromedp.Run(ctx, chromedp.Navigate(c.url+"/"+args.Cid)); err != nil {
@@ -248,7 +295,9 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 
 	fields := make(map[string]interface{})
 	fields["transfer-duration"] = tduration.Milliseconds()
-	fields["ttfb"] = resp.Timing.WorkerRespondWithSettled
+	if resp.Timing != nil {
+		fields["ttfb"] = resp.Timing.WorkerRespondWithSettled
+	}
 	fields["ppb"] = args.MaxPPB
 	fields["data-size"] = size
 
@@ -784,7 +833,7 @@ func runE2E(ctx context.Context, args []string) error {
 
 		for {
 			if i > 0 && len(attempted) == 0 {
-				// close(done)
+				close(done)
 				return
 			}
 			select {
@@ -792,7 +841,7 @@ func runE2E(ctx context.Context, args []string) error {
 				fmt.Println("Request:", req.Request.URL, req.RequestID)
 				attempted[req.RequestID.String()] = req
 			case rec := <-datarec:
-				sizes[rec.RequestID.String()] = rec.DataLength
+				sizes[rec.RequestID.String()] += rec.DataLength
 			case res := <-success:
 				reqid := res.RequestID.String()
 				req := attempted[reqid]
@@ -804,7 +853,9 @@ func runE2E(ctx context.Context, args []string) error {
 			case res := <-response:
 				fmt.Println("Response:", res.URL, i)
 				fmt.Println("status", res.Status)
-				fmt.Printf("settled in %fms\n", res.Timing.WorkerRespondWithSettled)
+				if res.Timing != nil {
+					fmt.Printf("settled in %fms\n", res.Timing.WorkerRespondWithSettled)
+				}
 				if res.FromServiceWorker {
 					i++
 				}
