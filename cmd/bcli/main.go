@@ -296,7 +296,7 @@ func (c *BrowserClient) Get(ctx context.Context, args *node.GetArgs) {
 	fields := make(map[string]interface{})
 	fields["transfer-duration"] = tduration.Milliseconds()
 	if resp.Timing != nil {
-		fields["ttfb"] = resp.Timing.WorkerRespondWithSettled
+		fields["ttfb"] = int64(resp.Timing.WorkerRespondWithSettled)
 	}
 	fields["ppb"] = args.MaxPPB
 	fields["data-size"] = size
@@ -796,7 +796,10 @@ var e2eCmd = &ffcli.Command{
 }
 
 func runE2E(ctx context.Context, args []string) error {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", e2eArgs.headless))
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", e2eArgs.headless),
+		chromedp.Flag("enable-precise-memory-info", true),
+	)
 
 	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancel()
@@ -833,7 +836,7 @@ func runE2E(ctx context.Context, args []string) error {
 
 		for {
 			if i > 0 && len(attempted) == 0 {
-				close(done)
+				// close(done)
 				return
 			}
 			select {
@@ -845,9 +848,11 @@ func runE2E(ctx context.Context, args []string) error {
 			case res := <-success:
 				reqid := res.RequestID.String()
 				req := attempted[reqid]
-				dur := res.Timestamp.Time().Sub(req.Timestamp.Time())
-				speed := float64(sizes[reqid]) / dur.Seconds()
-				fmt.Println("Finished:", dur.Milliseconds(), units.HumanSize(float64(sizes[reqid])), units.HumanSize(speed))
+				if res != nil && res.Timestamp != nil && req != nil && req.Timestamp != nil {
+					dur := res.Timestamp.Time().Sub(req.Timestamp.Time())
+					speed := float64(sizes[reqid]) / dur.Seconds()
+					fmt.Println("Finished:", dur.Milliseconds(), units.HumanSize(float64(sizes[reqid])), units.HumanSize(speed))
+				}
 				delete(attempted, reqid)
 
 			case res := <-response:
