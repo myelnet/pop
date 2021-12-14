@@ -785,7 +785,6 @@ var e2eArgs struct {
 	providers  int
 	clients    int
 	clientType string
-	libp2p     bool
 }
 
 var e2eCmd = &ffcli.Command{
@@ -801,7 +800,6 @@ var e2eCmd = &ffcli.Command{
 		fs.IntVar(&e2eArgs.providers, "providers", 1, "number of providers storing the content")
 		fs.IntVar(&e2eArgs.clients, "clients", 1, "number of browser contexts running clients in parallel")
 		fs.StringVar(&e2eArgs.clientType, "client-type", "js", "client implementation, js or go")
-		fs.BoolVar(&e2eArgs.libp2p, "libp2p", false, "run a libp2p provider only")
 		return fs
 	})(),
 }
