@@ -461,15 +461,17 @@ type Content struct {
 	Keys  []string
 	Sizes []int64
 	Offer node.RRecord
+	node  *node.Pop
 }
 
-func runNode(ctx context.Context, cancel context.CancelFunc, contentDir string) (co Content, err error) {
+func runNode(ctx context.Context, cancel context.CancelFunc, contentDir string, addresses ...string) (co Content, err error) {
 	// create a temp repo
 	path, err := os.MkdirTemp("", ".pop")
 	if err != nil {
 		return co, err
 	}
 	nd, err := node.New(ctx, node.Options{
+		Addresses:      addresses,
 		RepoPath:       path,
 		BootstrapPeers: []string{},
 		FilEndpoint:    "https://infura.myel.cloud",
@@ -478,6 +480,11 @@ func runNode(ctx context.Context, cancel context.CancelFunc, contentDir string) 
 	})
 	if err != nil {
 		return co, err
+	}
+	co.node = nd
+
+	if contentDir == "" {
+		return co, nil
 	}
 
 	prs := make(chan node.PutResult, 16)
@@ -777,6 +784,7 @@ var e2eArgs struct {
 	profiler   bool
 	providers  int
 	clients    int
+	clientType string
 }
 
 var e2eCmd = &ffcli.Command{
@@ -791,6 +799,7 @@ var e2eCmd = &ffcli.Command{
 		fs.BoolVar(&e2eArgs.profiler, "profiler", false, "run profiler on all requests")
 		fs.IntVar(&e2eArgs.providers, "providers", 1, "number of providers storing the content")
 		fs.IntVar(&e2eArgs.clients, "clients", 1, "number of browser contexts running clients in parallel")
+		fs.StringVar(&e2eArgs.clientType, "client-type", "js", "client implementation, js or go")
 		return fs
 	})(),
 }
@@ -811,6 +820,51 @@ func runE2E(ctx context.Context, args []string) error {
 			return err
 		}
 		offers = append(offers, content)
+	}
+
+	if e2eArgs.clientType == "go" {
+		prov := offers[0]
+		addrs, err := peer.AddrInfoToP2pAddrs(host.InfoFromHost(prov.node.Host))
+		if err != nil {
+			return err
+		}
+		var peerAddr string
+		for _, maddr := range addrs {
+			str := maddr.String()
+			if !strings.Contains(str, "ws") && strings.Contains(str, "127.0.0.1") {
+				peerAddr = str
+				break
+			}
+		}
+
+		client, err := runNode(ctx, cancel, "", "/ip4/0.0.0.0/tcp/41508")
+		if err != nil {
+			return err
+		}
+
+		var wg sync.WaitGroup
+
+		for _, key := range prov.Keys {
+			wg.Add(1)
+			go func(k string) {
+				defer wg.Done()
+				start := time.Now()
+				results, err := client.node.Load(ctx, &node.GetArgs{
+					Cid:  prov.Root + "/" + k,
+					Peer: peerAddr,
+				})
+				if err != nil {
+					log.Error().Err(err).Str("key", k).Msg("failed to load content")
+				}
+				for range results {
+				}
+				end := time.Now()
+				fmt.Println("Completed in", end.Sub(start).Milliseconds())
+			}(key)
+		}
+		wg.Wait()
+
+		return nil
 	}
 
 	routing := NewRouting()
@@ -934,6 +988,23 @@ func runE2E(ctx context.Context, args []string) error {
 		addr := "http://" + sl.Addr().String()
 
 		fmt.Println("test server running at", addr)
+
+		// exp := fmt.Sprintf(`
+		//     const start = performance.now()
+		//     window.DcdnClient.create()
+		//     .then(node => node.fetch('%s'))
+		//     .then(resp => resp.blob())
+		//     .then(blob => {
+		//       const took = performance.now() - start
+		//       console.log('done in ', blob.size/(took/1000))
+		//     })
+		// `, offers[0].Root+"/ZERO-DAY.mp4")
+		// err = chromedp.Run(ctx, chromedp.Navigate(addr), chromedp.Sleep(2*time.Second), chromedp.Evaluate(exp, nil))
+		// if err != nil {
+		// 	return err
+		// }
+
+		// <-done
 
 		if err := chromedp.Run(ctx,
 			serviceworker.Enable(),
