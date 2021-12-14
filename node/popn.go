@@ -107,6 +107,8 @@ type Options struct {
 	RepoPath string
 	// SocketPath is the unix socket path to listen on
 	SocketPath string
+	// Addresses allows setting custom listening addresses for the node
+	Addresses []string
 	// BootstrapPeers is a peer address to connect to for discovering other peers
 	BootstrapPeers []string
 	// FilEndpoint is the websocket url for accessing a remote filecoin api
@@ -200,12 +202,18 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 		return nil, err
 	}
 
+	if len(opts.Addresses) == 0 {
+		opts.Addresses = append(opts.Addresses,
+			"/ip4/0.0.0.0/tcp/41504",
+			"/ip4/0.0.0.0/tcp/41505/ws",
+		)
+	}
+
 	nd.Host, err = libp2p.New(
 		ctx,
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings(
-			"/ip4/0.0.0.0/tcp/41504",
-			"/ip4/0.0.0.0/tcp/41505/ws",
+			opts.Addresses...,
 		),
 		// Explicitly declare transports
 		libp2p.Transport(tcp.NewTCPTransport),
