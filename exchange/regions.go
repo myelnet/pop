@@ -4,8 +4,6 @@ import (
 	"math"
 	"path"
 
-	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/go-state-types/big"
 )
 
 // Regions: This is very experimental and needs more iterations to be stable
@@ -39,9 +37,6 @@ type Region struct {
 	Name string
 	// Code is a compressed identifier for the region.
 	Code RegionCode
-	// PPB is the minimum price per byte in FIL defined for this region. This does not account for
-	// any dynamic pricing mechanisms.
-	PPB abi.TokenAmount
 	// Bootstrap is a list of peers that can be dialed to find other peers in that region
 	Bootstrap []string
 }
@@ -50,25 +45,21 @@ var (
 	asia = Region{
 		Name:      "Asia",
 		Code:      AsiaRegion,
-		PPB:       abi.NewTokenAmount(1),
 		Bootstrap: []string{},
 	}
 	africa = Region{
 		Name:      "Africa",
 		Code:      AfricaRegion,
-		PPB:       abi.NewTokenAmount(1),
 		Bootstrap: []string{},
 	}
 	southAmerica = Region{
 		Name:      "SouthAmerica",
 		Code:      SouthAmericaRegion,
-		PPB:       abi.NewTokenAmount(1),
 		Bootstrap: []string{},
 	}
 	northAmerica = Region{
 		Name: "NorthAmerica",
 		Code: NorthAmericaRegion,
-		PPB:  abi.NewTokenAmount(1),
 		Bootstrap: []string{
 			"/dns4/ohio.myel.zone/tcp/41504/p2p/12D3KooWStJfAywQmfaVFQDQYr9riDnEFG3VJ3qDGcTidvc4nQtc",
 		},
@@ -76,7 +67,6 @@ var (
 	europe = Region{
 		Name: "Europe",
 		Code: EuropeRegion,
-		PPB:  abi.NewTokenAmount(1),
 		Bootstrap: []string{
 			"/dns4/frankfurt.myel.zone/tcp/41504/p2p/12D3KooWLaJQ7L6Q3VWxNNxqE8Tcj2wAq1QAvdBieSteAxg9KTCr",
 		},
@@ -84,14 +74,15 @@ var (
 	oceania = Region{
 		Name:      "Oceania",
 		Code:      OceaniaRegion,
-		PPB:       abi.NewTokenAmount(1),
 		Bootstrap: []string{},
 	}
 	global = Region{
 		Name:      "Global",
 		Code:      GlobalRegion,
-		PPB:       big.Zero(),
-		Bootstrap: []string{},
+		Bootstrap: []string{
+			"/dns4/frankfurt.myel.zone/tcp/41504/p2p/12D3KooWLaJQ7L6Q3VWxNNxqE8Tcj2wAq1QAvdBieSteAxg9KTCr",
+			"/dns4/ohio.myel.zone/tcp/41504/p2p/12D3KooWStJfAywQmfaVFQDQYr9riDnEFG3VJ3qDGcTidvc4nQtc",
+		},
 	}
 )
 
@@ -131,7 +122,6 @@ func RegionFromTopic(topic string) Region {
 		return Region{
 			Name: name,
 			Code: CustomRegion,
-			PPB:  big.Zero(), // TODO: handle pricing for custom region
 		}
 	}
 	return r
