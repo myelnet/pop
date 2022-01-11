@@ -60,7 +60,7 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.filToken, "fil-token", "", "token to authorize filecoin api access")
 		fs.StringVar(&startArgs.filTokenType, "fil-token-type", "Bearer", "auth token type")
 		fs.StringVar(&startArgs.privKeyPath, "privkey", "", "path to private key to use by default")
-		fs.StringVar(&startArgs.regions, "regions", "", "provider regions separated by commas")
+		fs.StringVar(&startArgs.regions, "regions", "Global", "provider regions separated by commas")
 		fs.StringVar(&startArgs.capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
 		fs.StringVar(&startArgs.domains, "domains", "", "comma separated list of domain names this pop can support")

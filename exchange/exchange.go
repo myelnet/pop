@@ -71,7 +71,7 @@ func New(ctx context.Context, h host.Host, ds datastore.Batching, opts Options) 
 		idx:  idx,
 		rou:  NewGossipRouting(h, opts.PubSub, opts.GossipTracer, opts.Regions),
 		pay:  payments.New(ctx, opts.FilecoinAPI, opts.Wallet, ds, opts.Blockstore),
-		dmgr: deal.NewManager(opts.Regions[0].PPB),
+		dmgr: deal.NewManager(opts.PPB),
 	}
 
 	exch.rpl, err = NewReplication(h, idx, opts.DataTransfer, exch, opts)
@@ -132,7 +132,7 @@ func (e *Exchange) handleQuery(ctx context.Context, p peer.ID, r Region, q deal.
 		PayloadCID:                 q.PayloadCID,
 		Size:                       uint64(stats.Size),
 		PaymentAddress:             e.opts.Wallet.DefaultAddress(),
-		MinPricePerByte:            r.PPB, // TODO: dynamic pricing
+		MinPricePerByte:            e.opts.PPB, // TODO: dynamic pricing
 		MaxPaymentInterval:         deal.DefaultPaymentInterval,
 		MaxPaymentIntervalIncrease: deal.DefaultPaymentIntervalIncrease,
 	}

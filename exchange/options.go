@@ -11,6 +11,7 @@ import (
 	dtfimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-graphsync"
@@ -76,6 +77,8 @@ type Options struct {
 	WatchEvictionFunc func(DataRef)
 	// WatchAdditionFunc is an optional callback notifying when content is added to the index.
 	WatchAdditionFunc func(DataRef)
+	// PPB is the price per byte the exchange sets when offering a deal.
+	PPB big.Int
 }
 
 // Everything isn't thoroughly validated so we trust users who provide options know what they're doing
