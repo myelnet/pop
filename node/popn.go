@@ -313,7 +313,7 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 	fmt.Printf("==> Set default retrieval Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
 
 	// set Price Per Byte for delivery
-	fmt.Printf("==> Set default Price Per Byte (PPB) at %d attoFIL\n", nd.opts.PPB)
+	fmt.Printf("==> Set default provider Price Per Byte (PPB) at %d attoFIL\n", nd.opts.PPB)
 
 	nd.cancelFunc = opts.CancelFunc
 
