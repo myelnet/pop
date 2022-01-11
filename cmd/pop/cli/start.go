@@ -185,7 +185,7 @@ Manage your Myel point of presence from the command line.
 		FilToken:       filToken,
 		PrivKey:        privKey,
 		MaxPPB:         int64(startArgs.maxPPB),
-		ppb:            int64(startArgs.ppb),
+		PPB:            int64(startArgs.ppb),
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,
