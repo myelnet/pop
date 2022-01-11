@@ -309,8 +309,8 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 		fmt.Printf("==> Loaded default FIL address: %s\n", nd.exch.Wallet().DefaultAddress())
 	}
 
-	// set Max Price Per Byte for retrieval
-	fmt.Printf("==> Set default retrieval Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
+	// set Max Price Per Byte for client
+	fmt.Printf("==> Set default client Max Price Per Byte (MaxPPB) at %d attoFIL\n", nd.opts.MaxPPB)
 
 	// set Price Per Byte for delivery
 	fmt.Printf("==> Set default provider Price Per Byte (PPB) at %d attoFIL\n", nd.opts.PPB)
