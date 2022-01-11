@@ -31,6 +31,7 @@ type PopConfig struct {
 	bootstrap     string
 	capacity      string
 	maxPPB        int
+	ppb           int
 	filEndpoint   string
 	filToken      string
 	filTokenType  string
@@ -64,7 +65,8 @@ The 'pop start' command starts a pop daemon service.
 		fs.StringVar(&startArgs.capacity, "capacity", "100GB", "storage space allocated for the node")
 		fs.DurationVar(&startArgs.replInterval, "replinterval", 0, "at which interval to check for new content from peers. 0 means the feature is deactivated")
 		fs.StringVar(&startArgs.domains, "domains", "", "comma separated list of domain names this pop can support")
-		fs.IntVar(&startArgs.maxPPB, "maxppb", 5, "max price per byte")
+		fs.IntVar(&startArgs.maxPPB, "maxppb", 5, "max price per byte when fetching data")
+		fs.IntVar(&startArgs.ppb, "ppb", 0, "price per byte when serving data")
 		fs.StringVar(&startArgs.indexEndpoint, "index-endpoint", "", "endpoint of a hosted index service")
 		fs.StringVar(&startArgs.upgradeSecret, "upgrade-secret", "", "secret used to verify upgrade message signatures, if provided the server will listen for github webhook request and automatically upgrade the pop")
 		fs.BoolVar(&startArgs.certmagic, "certmagic", false, "run certmagic to get TLS certificates")
@@ -183,6 +185,7 @@ Manage your Myel point of presence from the command line.
 		FilToken:       filToken,
 		PrivKey:        privKey,
 		MaxPPB:         int64(startArgs.maxPPB),
+		ppb:            int64(startArgs.ppb),
 		Regions:        regions,
 		Capacity:       capacity,
 		ReplInterval:   startArgs.replInterval,

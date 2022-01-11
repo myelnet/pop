@@ -15,6 +15,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -117,8 +118,10 @@ type Options struct {
 	FilToken string
 	// PrivKey is a hex encoded private key to use for default address
 	PrivKey string
-	// MaxPPB is the maximum price per byte
+	// MaxPPB is the maximum price per byte when fetching data
 	MaxPPB int64
+	// PBB is the price per byte when serving data
+	PPB big.Int
 	// Regions is a list of regions a provider chooses to support.
 	// Nothing prevents providers from participating in regions outside of their geographic location however they may get less deals since the latency is likely to be higher
 	Regions []string
@@ -257,6 +260,7 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 		// every time new content is added/deleted we notify the remote routing service
 		WatchEvictionFunc: nd.onDeleteRef,
 		WatchAdditionFunc: nd.onSetRef,
+		PPB: opts.PPB,
 	}
 	if opts.FilToken != "" {
 		eopts.FilecoinRPCHeader = http.Header{

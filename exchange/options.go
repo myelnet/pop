@@ -140,6 +140,12 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 		opts.Capacity = 10737418240
 	}
 
+	if opts.PPB.Nil() {
+		// Default is 0 PPB
+		opts.PPB = big.NewInt(0)
+	}
+
+
 	return opts, nil
 }
 
