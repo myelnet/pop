@@ -31,29 +31,13 @@ This library is still experimental so feel free to open an issue if you have any
 
 As a CLI:
 
-#### Install dependencies:
-Since CGO is required, you will need GCC
-
-#### Mac
-```commandline
-$ brew install gcc make
-```
-
-#### Linux
-```commandline
-$ sudo apt install gcc make
-```
-
-Clone the repo.
-
-run:
-```commandline
-$ make all
+```console
+$ go install github.com/myel/pop/cmd/pop@latest
 ```
 
 As a library:
 
-```commandline
+```console
 $ go get github.com/myelnet/pop/exchange
 ```
 
@@ -61,7 +45,8 @@ $ go get github.com/myelnet/pop/exchange
 
 Run any command with `-h` flag for more details.
 
-```
+```console
+$ pop
 USAGE
   pop subcommand [flags]
 
@@ -99,9 +84,9 @@ export INFLUXDB_BUCKET=<INSERT BUCKET>
 
 ### Auto-updating
 
-`pop` supports auto-updating via Github webhooks.
+`pop` supports auto-updating via GitHub webhooks.
 
-To activate it pass the flag `-upgrade-secret` to `pop start` such that it matches the [Github webhook secret](https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks) set for your server. Make sure you run as sudo, or that your current user has authorization to modify your `pop` binary.
+To activate it pass the flag `-upgrade-secret` to `pop start` such that it matches the [GitHub webhook secret](https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks) set for your server. Make sure you run as sudo, or that your current user has authorization to modify your `pop` binary.
 
 Your `pop` will then automatically download and install new releases.
 
