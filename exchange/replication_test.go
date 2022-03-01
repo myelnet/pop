@@ -85,13 +85,13 @@ func TestReplication(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
+	cmgr, err := connmgr.NewConnManager(10, 11, connmgr.WithGracePeriod(time.Second))
+	require.NoError(t, err)
 
 	withSwarmT := func(tn *testutil.TestNode) {
-		netw := swarmt.GenSwarm(t, context.Background())
-		h := bhost.NewBlankHost(netw, bhost.WithConnectionManager(
-			connmgr.NewConnManager(10, 11, time.Second),
-		))
+		netw := swarmt.GenSwarm(t)
+		h := bhost.NewBlankHost(netw, bhost.WithConnectionManager(cmgr))
 		tn.Host = h
 	}
 	names := make(map[string]peer.ID)
@@ -176,10 +176,10 @@ func TestReplication(t *testing.T) {
 		}
 	}
 	// Must migrate dispatched content to global store afterwards
-	store, err := nD.Ms.Get(storeIDD)
+	store, err := nD.Ms.Get(ctx, storeIDD)
 	require.NoError(t, err)
 	require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, nD.Bs))
-	require.NoError(t, nD.Ms.Delete(storeIDD))
+	require.NoError(t, nD.Ms.Delete(ctx, storeIDD))
 
 	// 2) F write
 	fnameF := nF.CreateRandomFile(t, 256000)
@@ -202,10 +202,10 @@ func TestReplication(t *testing.T) {
 		}
 	}
 	// Must migrate dispatched content to global store afterwards
-	store, err = nF.Ms.Get(storeIDF)
+	store, err = nF.Ms.Get(ctx, storeIDF)
 	require.NoError(t, err)
 	require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, nF.Bs))
-	require.NoError(t, nF.Ms.Delete(storeIDF))
+	require.NoError(t, nF.Ms.Delete(ctx, storeIDF))
 
 	// New node G joins the network
 	nG, _, rtvG := setupNode("G")
@@ -332,7 +332,7 @@ func TestConcurrentReplication(t *testing.T) {
 			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 			defer cancel()
 
-			mn := mocknet.New(bgCtx)
+			mn := mocknet.New()
 
 			newNode := func() (*testutil.TestNode, *Replication, *mockRetriever) {
 				n := testutil.NewTestNode(mn, t)
@@ -389,10 +389,10 @@ func TestConcurrentReplication(t *testing.T) {
 					for range res {
 					}
 					// Must migrate dispatched content to global store afterwards
-					store, err := nodes[i].Ms.Get(storeID)
+					store, err := nodes[i].Ms.Get(ctx, storeID)
 					require.NoError(t, err)
 					require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, nodes[i].Bs))
-					require.NoError(t, nodes[i].Ms.Delete(storeID))
+					require.NoError(t, nodes[i].Ms.Delete(ctx, storeID))
 
 					content[rootCid] = bytes
 					routing[rootCid] = nodes[i].Host.ID()
@@ -445,7 +445,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(ctx, t)
@@ -507,7 +507,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 		require.NoError(t, err)
 	})
 	_, sid, _ := tnode.LoadFileToNewStore(ctx, t, fname)
-	store, err := tnode.Ms.Get(sid)
+	store, err := tnode.Ms.Get(ctx, sid)
 	require.NoError(t, err)
 	// migrate blocks over to global store
 	require.NoError(t, utils.MigrateBlocks(ctx, store.Bstore, tnode.Bs))
@@ -571,7 +571,7 @@ func TestMultiDispatchStreams(t *testing.T) {
 func TestSendDispatchNoPeers(t *testing.T) {
 	bgCtx := context.Background()
 
-	mn := mocknet.New(bgCtx)
+	mn := mocknet.New()
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
@@ -618,7 +618,7 @@ func TestSendDispatchDiffRegions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(bgCtx)
+	mn := mocknet.New()
 
 	n1 := testutil.NewTestNode(mn, t)
 	n1.SetupDataTransfer(bgCtx, t)
@@ -757,7 +757,7 @@ func TestPeerMgr(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 
 	regions := []Region{
 		{

@@ -208,7 +208,7 @@ func TestExchangeE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 			defer cancel()
 
-			mn := mocknet.New(bgCtx)
+			mn := mocknet.New()
 
 			var client *Exchange
 			var cnode *testutil.TestNode
@@ -243,7 +243,7 @@ func TestExchangeE2E(t *testing.T) {
 			fname := cnode.CreateRandomFile(t, 256000)
 			link, storeID, origBytes := cnode.LoadFileToNewStore(ctx, t, fname)
 			rootCid := link.(cidlink.Link).Cid
-			bss, err := cnode.Ms.Get(storeID)
+			bss, err := cnode.Ms.Get(ctx, storeID)
 			require.NoError(t, err)
 			err = utils.MigrateBlocks(ctx, bss.Bstore, client.Index().bstore)
 			require.NoError(t, err)
@@ -341,7 +341,7 @@ func TestExchangeJoiningNetwork(t *testing.T) {
 			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 			defer cancel()
 
-			mn := mocknet.New(bgCtx)
+			mn := mocknet.New()
 
 			newNode := func() (*Exchange, *testutil.TestNode) {
 				n := testutil.NewTestNode(mn, t)

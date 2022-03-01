@@ -90,7 +90,7 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 		opts.Blockstore = blockstore.NewGCBlockstore(opts.Blockstore, blockstore.NewGCLocker())
 	}
 	if opts.MultiStore == nil {
-		opts.MultiStore, err = multistore.NewMultiDstore(ds)
+		opts.MultiStore, err = multistore.NewMultiDstore(ctx, ds)
 		if err != nil {
 			return opts, err
 		}
@@ -145,24 +145,19 @@ func (opts Options) fillDefaults(ctx context.Context, h host.Host, ds datastore.
 		opts.PPB = big.NewInt(0)
 	}
 
-
 	return opts, nil
 }
 
 // NewDataTransfer packages together all the things needed for a new manager to work
 func NewDataTransfer(ctx context.Context, h host.Host, gs graphsync.GraphExchange, ds datastore.Batching, dsprefix string, dir string) (datatransfer.Manager, error) {
-	cidDir, err := mkCidListDir(dir)
-	if err != nil {
-		return nil, err
-	}
 	// Create a special key for persisting the datatransfer manager state
 	dtDs := namespace.Wrap(ds, datastore.NewKey(dsprefix+"-datatransfer"))
 	// Setup datatransfer network
 	dtNet := dtnet.NewFromLibp2pHost(h)
 	// Setup graphsync transport
-	tp := gstransport.NewTransport(h.ID(), gs, dtNet)
+	tp := gstransport.NewTransport(h.ID(), gs)
 	// Build the manager
-	dt, err := dtfimpl.NewDataTransfer(dtDs, cidDir, dtNet, tp)
+	dt, err := dtfimpl.NewDataTransfer(dtDs, dtNet, tp)
 	if err != nil {
 		return nil, err
 	}

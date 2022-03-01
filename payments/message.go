@@ -7,9 +7,9 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 
-	"github.com/filecoin-project/specs-actors/v5/actors/builtin"
-	init2 "github.com/filecoin-project/specs-actors/v5/actors/builtin/init"
-	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v7/actors/builtin"
+	init2 "github.com/filecoin-project/specs-actors/v7/actors/builtin/init"
+	"github.com/filecoin-project/specs-actors/v7/actors/builtin/paych"
 
 	fil "github.com/myelnet/pop/filecoin"
 	cbg "github.com/whyrusleeping/cbor-gen"

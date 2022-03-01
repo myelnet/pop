@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/specs-actors/v5/actors/builtin"
-	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
-	"github.com/filecoin-project/specs-actors/v5/support/mock"
-	tutils "github.com/filecoin-project/specs-actors/v5/support/testing"
+	"github.com/filecoin-project/specs-actors/v7/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v7/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v7/support/mock"
+	tutils "github.com/filecoin-project/specs-actors/v7/support/testing"
 	block "github.com/ipfs/go-block-format"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -35,7 +35,7 @@ type mockBlocks struct {
 	data map[cid.Cid]block.Block
 }
 
-func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
+func (mb *mockBlocks) Get(ctx context.Context, c cid.Cid) (block.Block, error) {
 	d, ok := mb.data[c]
 	if ok {
 		return d, nil
@@ -43,26 +43,26 @@ func (mb *mockBlocks) Get(c cid.Cid) (block.Block, error) {
 	return nil, fmt.Errorf("Not Found")
 }
 
-func (mb *mockBlocks) Put(b block.Block) error {
+func (mb *mockBlocks) Put(ctx context.Context, b block.Block) error {
 	mb.data[b.Cid()] = b
 	return nil
 }
 
-func (mb *mockBlocks) DeleteBlock(c cid.Cid) error {
+func (mb *mockBlocks) DeleteBlock(ctx context.Context, c cid.Cid) error {
 	delete(mb.data, c)
 	return nil
 }
 
-func (mb *mockBlocks) Has(c cid.Cid) (bool, error) {
+func (mb *mockBlocks) Has(ctx context.Context, c cid.Cid) (bool, error) {
 	_, ok := mb.data[c]
 	return ok, nil
 }
 
-func (mb *mockBlocks) GetSize(c cid.Cid) (int, error) {
+func (mb *mockBlocks) GetSize(ctx context.Context, c cid.Cid) (int, error) {
 	return 0, nil
 }
 
-func (mb *mockBlocks) PutMany([]blocks.Block) error {
+func (mb *mockBlocks) PutMany(context.Context, []blocks.Block) error {
 	return nil
 }
 

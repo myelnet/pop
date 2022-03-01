@@ -149,7 +149,7 @@ func (e *Exchange) Tx(ctx context.Context, opts ...TxOption) *Tx {
 	ctx, cancel := context.WithCancel(ctx)
 	ms := e.opts.MultiStore
 	storeID := ms.Next()
-	store, err := ms.Get(storeID)
+	store, err := ms.Get(ctx, storeID)
 	tx := &Tx{
 		ctx:        ctx,
 		cancelCtx:  cancel,

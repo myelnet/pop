@@ -8,7 +8,7 @@ import (
 	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
+	"github.com/filecoin-project/specs-actors/v7/actors/builtin/paych"
 	"github.com/google/uuid"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -20,6 +20,7 @@ import (
 
 	"github.com/myelnet/pop/filecoin"
 	fil "github.com/myelnet/pop/filecoin"
+	"github.com/myelnet/pop/internal/utils"
 )
 
 //go:generate cbor-gen-for VoucherInfo ChannelInfo MsgInfo
@@ -80,7 +81,7 @@ func (s *Store) SaveNewMessage(channelID string, mcid cid.Cid) error {
 		return err
 	}
 
-	return s.ds.Put(k, b)
+	return s.ds.Put(context.TODO(), k, b)
 }
 
 // putChannelInfo stores the channel info in the datastore
@@ -95,7 +96,7 @@ func (s *Store) putChannelInfo(ci *ChannelInfo) error {
 		return fmt.Errorf("marshalling: %w", err)
 	}
 
-	return s.ds.Put(k, b)
+	return s.ds.Put(context.TODO(), k, b)
 }
 
 // SaveMessageResult is called when the result of a message is received
@@ -116,7 +117,7 @@ func (s *Store) SaveMessageResult(mcid cid.Cid, msgErr error) error {
 		return err
 	}
 
-	return s.ds.Put(k, b)
+	return s.ds.Put(context.TODO(), k, b)
 }
 
 // ByMessageCid gets the channel associated with a message
@@ -140,7 +141,7 @@ func (s *Store) ByMessageCid(mcid cid.Cid) (*ChannelInfo, error) {
 func (s *Store) GetMessage(mcid cid.Cid) (*MsgInfo, error) {
 	k := dskeyForMsg(mcid)
 
-	val, err := s.ds.Get(k)
+	val, err := s.ds.Get(context.TODO(), k)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +158,7 @@ func (s *Store) GetMessage(mcid cid.Cid) (*MsgInfo, error) {
 func (s *Store) ByChannelID(channelID string) (*ChannelInfo, error) {
 	var stored ChannelInfo
 
-	res, err := s.ds.Get(dskeyForChannel(channelID))
+	res, err := s.ds.Get(context.TODO(), dskeyForChannel(channelID))
 	if err != nil {
 		if err == datastore.ErrNotFound {
 			return nil, ErrChannelNotTracked
@@ -217,7 +218,7 @@ func (s *Store) findChan(filter func(ci *ChannelInfo) bool) (*ChannelInfo, error
 // findChans loops over all channels, only including those that pass the filter.
 // max is the maximum number of channels to return. Set to zero to return unlimited channels.
 func (s *Store) findChans(filter func(*ChannelInfo) bool, max int) ([]ChannelInfo, error) {
-	res, err := s.ds.Query(dsq.Query{Prefix: dsKeyChannelInfo})
+	res, err := s.ds.Query(context.TODO(), dsq.Query{Prefix: dsKeyChannelInfo})
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +332,7 @@ func (s *Store) SetChannelSettlingAt(ci *ChannelInfo, ep abi.ChainEpoch) error {
 
 // RemoveChannel removes the channel with the given channel ID
 func (s *Store) RemoveChannel(channelID string) error {
-	return s.ds.Delete(dskeyForChannel(channelID))
+	return s.ds.Delete(context.TODO(), dskeyForChannel(channelID))
 }
 
 // The datastore key used to identify the channel info
@@ -515,14 +516,14 @@ type FilObjectStore struct {
 func NewFilObjectStore(api filecoin.API, bs blockstore.Blockstore) *FilObjectStore {
 	return &FilObjectStore{
 		api:    api,
-		cstore: cbor.NewCborStore(bs),
+		cstore: cbor.NewCborStore(utils.NewBlockstoreWrapper(bs)),
 	}
 }
 
 // Get fetches the object from filecoin API if absent then proxies the method to the underlying reads
 // and unmarshals the content at `c` into `out`.
 func (fos *FilObjectStore) Get(ctx context.Context, c cid.Cid, out interface{}) error {
-	bs, ok := fos.cstore.Blocks.(blockstore.Blockstore)
+	bs, ok := fos.cstore.Blocks.(*utils.BlockstoreWrapper)
 	if !ok {
 		return fmt.Errorf("not a blockstore interface")
 	}

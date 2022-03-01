@@ -42,7 +42,7 @@ func TestTx(t *testing.T) {
 	ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(bgCtx)
+	mn := mocknet.New()
 
 	var providers []*Exchange
 	var pnodes []*testutil.TestNode
@@ -112,10 +112,10 @@ loop:
 	require.NoError(t, err)
 
 	// Get will by default create a new store if it's been deleted
-	store, err := tx.ms.Get(tx.StoreID())
+	store, err := tx.ms.Get(ctx, tx.StoreID())
 	require.NoError(t, err)
 	// That new store should not have our blocks
-	has, err := store.Bstore.Has(root)
+	has, err := store.Bstore.Has(ctx, root)
 	require.NoError(t, err)
 	require.False(t, has)
 }
@@ -152,7 +152,7 @@ func TestTxPutGet(t *testing.T) {
 	for _, codec := range codecs {
 		t.Run(fmt.Sprintf("Codec %d", codec), func(t *testing.T) {
 			ctx := context.Background()
-			mn := mocknet.New(ctx)
+			mn := mocknet.New()
 
 			n := testutil.NewTestNode(mn, t)
 			opts := Options{
@@ -238,7 +238,7 @@ func TestTxPutGet(t *testing.T) {
 
 func BenchmarkAdd(b *testing.B) {
 	ctx := context.Background()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 	n := testutil.NewTestNode(mn, b)
 	opts := Options{
 		RepoPath: n.DTTmpDir,
@@ -266,7 +266,7 @@ func BenchmarkAdd(b *testing.B) {
 // Testing this with race flag to detect any weirdness
 func TestTxRace(t *testing.T) {
 	ctx := context.Background()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 	n := testutil.NewTestNode(mn, t)
 	opts := Options{
 		RepoPath: n.DTTmpDir,
@@ -301,7 +301,7 @@ func TestTxRace(t *testing.T) {
 // Test retrieving a specific value for a key in the IPLD map
 func TestMapFieldSelector(t *testing.T) {
 	ctx := context.Background()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 
 	n1 := testutil.NewTestNode(mn, t)
 	opts := Options{
@@ -370,7 +370,7 @@ loop:
 func TestMultiTx(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 
 	n1 := testutil.NewTestNode(mn, t)
 	opts := Options{
@@ -447,7 +447,7 @@ loop2:
 func TestTxGetEntries(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 
 	n1 := testutil.NewTestNode(mn, t)
 	opts := Options{

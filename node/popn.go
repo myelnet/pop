@@ -182,7 +182,7 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 		return nil, err
 	}
 
-	nd.ms, err = multistore.NewMultiDstore(nd.ds)
+	nd.ms, err = multistore.NewMultiDstore(ctx, nd.ds)
 	if err != nil {
 		return nil, err
 	}
@@ -211,9 +211,15 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 			"/ip4/0.0.0.0/tcp/41505/ws",
 		)
 	}
-
+	cmgr, err := connmgr.NewConnManager(
+		20, // Lowwater
+		60, // HighWater,
+		connmgr.WithGracePeriod(20*time.Second), // GracePeriod
+	)
+	if err != nil {
+		return nil, err
+	}
 	nd.Host, err = libp2p.New(
-		ctx,
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings(
 			opts.Addresses...,
@@ -221,11 +227,7 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 		// Explicitly declare transports
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Transport(websocket.New),
-		libp2p.ConnectionManager(connmgr.NewConnManager(
-			20,             // Lowwater
-			60,             // HighWater,
-			20*time.Second, // GracePeriod
-		)),
+		libp2p.ConnectionManager(cmgr),
 		libp2p.ConnectionGater(gater),
 		libp2p.DisableRelay(),
 		// Attempt to open ports using uPNP for NATed hosts.
@@ -260,7 +262,7 @@ func New(ctx context.Context, opts Options) (*Pop, error) {
 		// every time new content is added/deleted we notify the remote routing service
 		WatchEvictionFunc: nd.onDeleteRef,
 		WatchAdditionFunc: nd.onSetRef,
-		PPB: big.NewInt(opts.PPB),
+		PPB:               big.NewInt(opts.PPB),
 	}
 	if opts.FilToken != "" {
 		eopts.FilecoinRPCHeader = http.Header{
@@ -916,7 +918,6 @@ func (nd *Pop) Load(ctx context.Context, args *GetArgs) (chan GetResult, error) 
 					sendErr(res.Err)
 					return
 				}
-
 				ref := tx.Ref()
 				err = nd.exch.Index().SetRef(ref)
 				if err == exchange.ErrRefAlreadyExists {
@@ -1083,7 +1084,7 @@ func (nd *Pop) Import(ctx context.Context, args *ImportArgs) {
 		exchange.WithSize(info.Size()),
 	)
 
-	err = tx.Store().Bstore.PutMany(blks)
+	err = tx.Store().Bstore.PutMany(ctx, blks)
 	if err != nil {
 		sendErr(err)
 		return

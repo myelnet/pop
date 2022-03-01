@@ -86,7 +86,7 @@ func WalkDAG(
 				return nil, fmt.Errorf("incorrect Link Type")
 			}
 
-			block, err := bs.Get(c.Cid)
+			block, err := bs.Get(context.TODO(), c.Cid)
 			if err != nil {
 				if missingF != nil {
 					return nil, missingF(c.Cid, err)
@@ -280,11 +280,11 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 		return err
 	}
 	for k := range kchan {
-		blk, err := from.Get(k)
+		blk, err := from.Get(ctx, k)
 		if err != nil {
 			return err
 		}
-		err = to.Put(blk)
+		err = to.Put(ctx, blk)
 		if err != nil {
 			return err
 		}
@@ -295,7 +295,7 @@ func MigrateBlocks(ctx context.Context, from blockstore.Blockstore, to blockstor
 // MigrateSelectBlocks transfers blocks from a blockstore to another for a given block selection
 func MigrateSelectBlocks(from blockstore.Blockstore, to blockstore.Blockstore, root cid.Cid, sel ipld.Node) error {
 	return WalkDAG(root, from, sel, func(block blocks.Block) error {
-		return to.Put(block)
+		return to.Put(context.TODO(), block)
 	}, nil)
 }
 
