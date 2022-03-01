@@ -1,9 +1,11 @@
 package retrieval
 
 import (
+	"context"
+
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipld/go-ipld-prime"
-	peer "github.com/libp2p/go-libp2p-peer"
+	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/go-multistore"
 	"github.com/myelnet/pop/retrieval/deal"
 	"github.com/rs/zerolog/log"
@@ -57,7 +59,7 @@ func (dsg *dualStoreGetter) Get(pid peer.ID, did deal.ID) (*multistore.Store, er
 	var cstate deal.ClientState
 	err := dsg.c.stateMachines.Get(did).Get(&cstate)
 	if err == nil {
-		return dsg.c.multiStore.Get(*cstate.StoreID)
+		return dsg.c.multiStore.Get(context.TODO(), *cstate.StoreID)
 	}
 	return nil, err
 }

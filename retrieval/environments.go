@@ -11,7 +11,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	peer "github.com/libp2p/go-libp2p-peer"
+	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/myelnet/go-multistore"
 	cbg "github.com/whyrusleeping/cbor-gen"
 
@@ -47,7 +47,7 @@ func (pde *providerDealEnvironment) CloseDataTransfer(ctx context.Context, chid 
 }
 
 func (pde *providerDealEnvironment) DeleteStore(storeID multistore.StoreID) error {
-	return pde.p.multiStore.Delete(storeID)
+	return pde.p.multiStore.Delete(context.TODO(), storeID)
 }
 
 var _ client.DealEnvironment = new(clientDealEnvironment)
@@ -133,7 +133,7 @@ func (pve *providerValidationEnvironment) GetStoreID(c cid.Cid) (multistore.Stor
 // NextStoreID allocates a store for this deal TODO: do we still need this?
 func (pve *providerValidationEnvironment) NextStoreID() (multistore.StoreID, error) {
 	storeID := pve.p.multiStore.Next()
-	_, err := pve.p.multiStore.Get(storeID)
+	_, err := pve.p.multiStore.Get(context.TODO(), storeID)
 	return storeID, err
 }
 

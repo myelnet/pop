@@ -10,7 +10,6 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	bhost "github.com/libp2p/go-libp2p-blankhost"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/myelnet/pop/retrieval/deal"
 	sel "github.com/myelnet/pop/selectors"
 	"github.com/stretchr/testify/require"
+	bhost "github.com/tchardin/go-libp2p-blankhost"
 )
 
 type Topology func(*testing.T, mocknet.Mocknet, []*testutil.TestNode, []*testutil.TestNode)
@@ -60,7 +60,7 @@ func calcResponse(ctx context.Context, p peer.ID, r Region, q deal.Query) (deal.
 
 func TestGossipRouting(t *testing.T) {
 	withSwarmT := func(tn *testutil.TestNode) {
-		netw := swarmt.GenSwarm(t, context.Background())
+		netw := swarmt.GenSwarm(t)
 		h := bhost.NewBlankHost(netw)
 		tn.Host = h
 	}
@@ -113,7 +113,7 @@ func TestGossipRouting(t *testing.T) {
 			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Second)
 			defer cancel()
 
-			mn := mocknet.New(bgCtx)
+			mn := mocknet.New()
 
 			clients := make(map[peer.ID]*GossipRouting)
 			var cnodes []*testutil.TestNode
@@ -189,7 +189,7 @@ func TestGossipDuplicateRequests(t *testing.T) {
 	defer cancel()
 
 	// make a mock network
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 
 	// Generate a random file and keep reference to its location on disk
 	fileName := (&testutil.TestNode{}).CreateRandomFile(t, 256000)
@@ -283,7 +283,7 @@ func TestMessageForwarding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(bgCtx, 4*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(bgCtx)
+	mn := mocknet.New()
 
 	cnode := testutil.NewTestNode(mn, t)
 	// create a random block to mock the content
@@ -366,7 +366,7 @@ func BenchmarkNetworkForwarding(b *testing.B) {
 	ctx, cancel := context.WithCancel(bgCtx)
 	defer cancel()
 
-	mn := mocknet.New(bgCtx)
+	mn := mocknet.New()
 
 	cnode := testutil.NewTestNode(mn, b)
 	ps, err := pubsub.NewGossipSub(ctx, cnode.Host)

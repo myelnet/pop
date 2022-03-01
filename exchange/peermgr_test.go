@@ -16,7 +16,7 @@ func TestHeyEvtPeerMgr(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 	n1 := testutil.NewTestNode(mn, t)
 	n2 := testutil.NewTestNode(mn, t)
 
@@ -48,10 +48,7 @@ func TestHeyEvtPeerMgr(t *testing.T) {
 }
 
 func TestRecordLatency(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-
-	mn := mocknet.New(ctx)
+	mn := mocknet.New()
 	n1 := testutil.NewTestNode(mn, t)
 	n2 := testutil.NewTestNode(mn, t)
 	idx, err := NewIndex(n1.Ds, n1.Bs)

@@ -11,7 +11,7 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/network"
-	"github.com/filecoin-project/specs-actors/v5/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v7/actors/builtin"
 	"github.com/ipfs/go-cid"
 )
 

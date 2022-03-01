@@ -8,7 +8,7 @@ import (
 	"sort"
 
 	address "github.com/filecoin-project/go-address"
-	paych "github.com/filecoin-project/specs-actors/v5/actors/builtin/paych"
+	paych "github.com/filecoin-project/specs-actors/v7/actors/builtin/paych"
 	cid "github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"

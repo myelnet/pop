@@ -18,7 +18,7 @@ import (
 	dtimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
-	init2 "github.com/filecoin-project/specs-actors/v5/actors/builtin/init"
+	init2 "github.com/filecoin-project/specs-actors/v7/actors/builtin/init"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
@@ -44,7 +44,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/libp2p/go-libp2p-core/host"
-	peer "github.com/libp2p/go-libp2p-peer"
+	peer "github.com/libp2p/go-libp2p-core/peer"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	mh "github.com/multiformats/go-multihash"
@@ -88,7 +88,7 @@ func NewTestNode(mn mocknet.Mocknet, t testing.TB, opts ...func(tn *TestNode)) *
 	testNode.Ds = dss.MutexWrap(datastore.NewMapDatastore())
 	testNode.Bs = blockstore.NewGCBlockstore(blockstore.NewBlockstore(testNode.Ds), blockstore.NewGCLocker())
 	testNode.DAG = merkledag.NewDAGService(blockservice.New(testNode.Bs, offline.Exchange(testNode.Bs)))
-	testNode.Ms, err = multistore.NewMultiDstore(testNode.Ds)
+	testNode.Ms, err = multistore.NewMultiDstore(context.TODO(), testNode.Ds)
 	require.NoError(t, err)
 
 	testNode.LinkSys = storeutil.LinkSystemForBlockstore(testNode.Bs)
@@ -115,8 +115,8 @@ func (tn *TestNode) SetupDataTransfer(ctx context.Context, t testing.TB) {
 	tn.DTNet = dtnet.NewFromLibp2pHost(tn.Host)
 	tn.DTStore = namespace.Wrap(tn.Ds, datastore.NewKey("DataTransfer"))
 	tn.Gs = graphsyncimpl.New(ctx, network.NewFromLibp2pHost(tn.Host), tn.LinkSys)
-	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs, tn.DTNet)
-	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTTmpDir, tn.DTNet, dtTransport)
+	dtTransport := dtgstransport.NewTransport(tn.Host.ID(), tn.Gs)
+	tn.Dt, err = dtimpl.NewDataTransfer(tn.DTStore, tn.DTNet, dtTransport)
 	require.NoError(t, err)
 
 	ready := make(chan error, 1)
@@ -227,7 +227,7 @@ func (tn *TestNode) LoadFileToStore(ctx context.Context, t testing.TB, store *mu
 
 func (tn *TestNode) LoadFileToNewStore(ctx context.Context, t testing.TB, dirPath string) (ipld.Link, multistore.StoreID, []byte) {
 	storeID := tn.Ms.Next()
-	store, err := tn.Ms.Get(storeID)
+	store, err := tn.Ms.Get(ctx, storeID)
 	require.NoError(t, err)
 
 	link, b := tn.LoadFileToStore(ctx, t, store, dirPath)
@@ -258,7 +258,7 @@ func (tn *TestNode) NukeBlockstore(ctx context.Context, t testing.TB) {
 	require.NoError(t, err)
 
 	for i := 0; i < cap(cids); i++ {
-		err := tn.Bs.DeleteBlock(<-cids)
+		err := tn.Bs.DeleteBlock(ctx, <-cids)
 		require.NoError(t, err)
 	}
 }

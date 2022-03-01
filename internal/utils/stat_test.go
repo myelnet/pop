@@ -33,9 +33,9 @@ func TestStat(t *testing.T) {
 	ctx := context.Background()
 
 	ds := dss.MutexWrap(datastore.NewMapDatastore())
-	ms, err := multistore.NewMultiDstore(ds)
+	ms, err := multistore.NewMultiDstore(ctx, ds)
 	require.NoError(t, err)
-	store, err := ms.Get(ms.Next())
+	store, err := ms.Get(ctx, ms.Next())
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -127,7 +127,7 @@ func TestCompareStatWithGraphSync(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			defer cancel()
 
-			mn := mocknet.New(ctx)
+			mn := mocknet.New()
 			n1 := testutil.NewTestNode(mn, t)
 			n2 := testutil.NewTestNode(mn, t)
 
@@ -142,7 +142,7 @@ func TestCompareStatWithGraphSync(t *testing.T) {
 
 			fname := n1.CreateRandomFile(t, size)
 			link, sID, _ := n1.LoadFileToNewStore(ctx, t, fname)
-			store, _ := n1.Ms.Get(sID)
+			store, _ := n1.Ms.Get(ctx, sID)
 
 			n1.Dt.RegisterTransportConfigurer(&testutil.FakeDTType{}, func(chID datatransfer.ChannelID, voucher datatransfer.Voucher, tp datatransfer.Transport) {
 				tp.(StoreConfigurableTransport).UseStore(chID, store.LinkSystem)
@@ -171,16 +171,17 @@ func TestCompareStatWithGraphSync(t *testing.T) {
 }
 
 func TestMapLoadableKeys(t *testing.T) {
-	mn := mocknet.New(context.Background())
+	ctx := context.Background()
+	mn := mocknet.New()
 	tn := testutil.NewTestNode(mn, t)
 
 	file1 := tn.CreateRandomFile(t, 128000)
-	lnk1, storeID, _ := tn.LoadFileToNewStore(context.TODO(), t, file1)
-	store, err := tn.Ms.Get(storeID)
+	lnk1, storeID, _ := tn.LoadFileToNewStore(ctx, t, file1)
+	store, err := tn.Ms.Get(ctx, storeID)
 	require.NoError(t, err)
 
 	file2 := tn.CreateRandomFile(t, 128000)
-	lnk2, _ := tn.LoadFileToStore(context.TODO(), t, store, file2)
+	lnk2, _ := tn.LoadFileToStore(ctx, t, store, file2)
 
 	_, key1 := filepath.Split(file1)
 	cid1 := lnk1.(cidlink.Link).Cid
@@ -196,7 +197,7 @@ func TestMapLoadableKeys(t *testing.T) {
 		Size: 128000,
 		Cid:  cid2,
 	})
-	store.Bstore.Put(dir)
+	store.Bstore.Put(ctx, dir)
 
 	keys, err := MapLoadableKeys(dir.Cid(), store.LinkSystem)
 	require.NoError(t, err)

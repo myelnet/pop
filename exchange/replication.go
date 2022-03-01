@@ -225,7 +225,7 @@ func (r *Replication) pumpIndexes(ctx context.Context, sub event.Subscription) {
 			if res.err == nil {
 				go func(rt cid.Cid) {
 					store := r.GetStore(rt)
-					err := r.idx.LoadInterest(rt, cbor.NewCborStore(store.Bstore))
+					err := r.idx.LoadInterest(rt, cbor.NewCborStore(utils.NewBlockstoreWrapper(store.Bstore)))
 					if err != nil {
 						log.Error().Err(err).Msg("failed to load interest")
 						return
@@ -326,7 +326,7 @@ func (r *Replication) fetchIndex(ctx context.Context, hvt HeyEvt) error {
 
 // AddStore assigns a store for a given root cid and store ID
 func (r *Replication) AddStore(k cid.Cid, sid multistore.StoreID) error {
-	store, err := r.ms.Get(sid)
+	store, err := r.ms.Get(context.TODO(), sid)
 	if err != nil {
 		return err
 	}
@@ -456,7 +456,7 @@ func (r *Replication) handleRequest(s network.Stream) {
 					log.Error().Err(err).Msg("setting ref")
 				}
 
-				if err := r.ms.Delete(sid); err != nil {
+				if err := r.ms.Delete(context.TODO(), sid); err != nil {
 					log.Error().Err(err).Msg("deleting store")
 				}
 				return

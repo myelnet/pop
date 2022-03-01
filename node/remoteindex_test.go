@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"testing"
 
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -12,7 +11,7 @@ import (
 
 func TestRemoteIndex(t *testing.T) {
 
-	mn := mocknet.New(context.Background())
+	mn := mocknet.New()
 	tn := testutil.NewTestNode(mn, t)
 
 	ri, err := NewRemoteIndex("https://routing.myel.workers.dev", tn.Host, nil, []string{"ohio.myel.zone"})

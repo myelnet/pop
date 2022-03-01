@@ -138,7 +138,7 @@ func NewIndex(ds datastore.Batching, bstore blockstore.Blockstore, opts ...Index
 		o(idx)
 	}
 	// keep a reference of the blockstore for loading in graphsync
-	idx.store = cbor.NewCborStore(idx.bstore)
+	idx.store = cbor.NewCborStore(utils.NewBlockstoreWrapper(idx.bstore))
 	if err := idx.loadFromStore(); err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func NewIndex(ds datastore.Batching, bstore blockstore.Blockstore, opts ...Index
 
 func (idx *Index) loadFromStore() error {
 	// var err error
-	enc, err := idx.ds.Get(datastore.NewKey(KIndex))
+	enc, err := idx.ds.Get(context.TODO(), datastore.NewKey(KIndex))
 	if err != nil && errors.Is(err, datastore.ErrNotFound) {
 		nd, err := hamt.NewNode(idx.store, hamt.UseTreeBitWidth(5), utils.HAMTHashOption)
 		if err != nil {
@@ -248,7 +248,7 @@ func (idx *Index) Flush() error {
 		return err
 	}
 	idx.rootCID = r
-	return idx.ds.Put(datastore.NewKey(KIndex), r.Bytes())
+	return idx.ds.Put(context.TODO(), datastore.NewKey(KIndex), r.Bytes())
 }
 
 // DropRef removes all content linked to a root CID and associated Refs
@@ -513,11 +513,11 @@ func (idx *Index) GC() error {
 		return errors.New("blockstore is not a GCBlockstore")
 	}
 
-	unlock := gcbs.GCLock()
-	defer unlock.Unlock()
+	unlock := gcbs.GCLock(context.TODO())
+	defer unlock.Unlock(context.TODO())
 
 	err := idx.gcSet.ForEach(func(c cid.Cid) error {
-		return idx.bstore.DeleteBlock(c)
+		return idx.bstore.DeleteBlock(context.TODO(), c)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to run garbage collector: %v", err)
@@ -530,7 +530,7 @@ func (idx *Index) GC() error {
 	if !ok {
 		return errors.New("datastore is not a GCDatastore")
 	}
-	err = gcds.CollectGarbage()
+	err = gcds.CollectGarbage(context.TODO())
 	if err != nil {
 		return err
 	}
@@ -587,7 +587,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 		if cidSet.Has(k) {
 			continue
 		}
-		err = idx.Bstore().DeleteBlock(k)
+		err = idx.Bstore().DeleteBlock(ctx, k)
 		if err != nil {
 			return err
 		}
@@ -598,7 +598,7 @@ func (idx *Index) CleanBlockStore(ctx context.Context) error {
 	if !ok {
 		return errors.New("datastore is not a GCDatastore")
 	}
-	err = gcds.CollectGarbage()
+	err = gcds.CollectGarbage(ctx)
 	if err != nil {
 		return err
 	}

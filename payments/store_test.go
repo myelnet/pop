@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/filecoin-project/go-address"
-	tutils "github.com/filecoin-project/specs-actors/v5/support/testing"
+	tutils "github.com/filecoin-project/specs-actors/v7/support/testing"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/sync"
 	"github.com/stretchr/testify/require"

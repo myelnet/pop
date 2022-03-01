@@ -1019,8 +1019,8 @@ func (tx *Tx) dumpStore() error {
 			return errors.New("blockstore is not a GCBlockstore")
 		}
 
-		unlock := gcbs.GCLock()
-		defer unlock.Unlock()
+		unlock := gcbs.GCLock(tx.ctx)
+		defer unlock.Unlock(tx.ctx)
 
 		err := utils.MigrateBlocks(tx.ctx, tx.store.Bstore, tx.bs)
 		if err != nil {
@@ -1028,7 +1028,7 @@ func (tx *Tx) dumpStore() error {
 		}
 	}
 
-	return tx.ms.Delete(tx.storeID)
+	return tx.ms.Delete(tx.ctx, tx.storeID)
 }
 
 // ErrUserDeniedOffer is returned when a user denies an offer

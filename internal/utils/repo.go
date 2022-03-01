@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,6 +13,9 @@ import (
 	"strings"
 
 	"github.com/filecoin-project/go-hamt-ipld/v3"
+	blocks "github.com/ipfs/go-block-format"
+	cid "github.com/ipfs/go-cid"
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	keystore "github.com/ipfs/go-ipfs-keystore"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -151,4 +155,25 @@ func StringsToPeerIDs(strIDs []string) ([]peer.ID, error) {
 		peers = append(peers, pid)
 	}
 	return peers, nil
+}
+
+func NewBlockstoreWrapper(bs blockstore.Blockstore) *BlockstoreWrapper {
+	return &BlockstoreWrapper{bs}
+}
+
+// BlockstoreWrapper is a crutch until specs-actors upgrade to latest blockstore
+type BlockstoreWrapper struct {
+	bs blockstore.Blockstore
+}
+
+func (bw *BlockstoreWrapper) Get(key cid.Cid) (blocks.Block, error) {
+	return bw.bs.Get(context.TODO(), key)
+}
+
+func (bw *BlockstoreWrapper) Put(blk blocks.Block) error {
+	return bw.bs.Put(context.TODO(), blk)
+}
+
+func (bw *BlockstoreWrapper) Has(key cid.Cid) (bool, error) {
+	return bw.bs.Has(context.TODO(), key)
 }
